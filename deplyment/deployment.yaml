@@ -13,8 +13,8 @@ metadata:
   namespace: playlist
 type: Opaque
 stringData:
-  user_id: "xxx" # Your Jellyfin User ID
-  api_token: "xxx" # Your Jellyfin API Token
+  user_id: "0e45c44b3e2e4da7a2be11a72a1c8575" # Your Jellyfin User ID
+  api_token: "e0b8c325bc1b426c81922b90c0aa2ff1" # Your Jellyfin API Token
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -26,25 +26,13 @@ data:
   CELERY_BROKER_URL: "redis://redis-service.playlist:6379/0"
   CELERY_RESULT_BACKEND: "redis://redis-service.playlist:6379/0"
   TEMP_DIR: "/app/temp_audio"
-  DB_PATH: "/app/db.sqlite"
-  STATUS_DB_PATH: "/app/status_db.sqlite"
+  # --- UPDATED: DBs now point to /workspace ---
+  DB_PATH: "/workspace/db.sqlite"
+  STATUS_DB_PATH: "/workspace/status_db.sqlite"
   NUM_RECENT_ALBUMS: "1300"
   CLUSTER_ALGORITHM: "kmeans"
   PCA_ENABLED: "False"
   NUM_CLUSTERS: "10"
-  # Add other config values from config.py here if they are constant and not secrets
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: audiomuse-ai-pvc
-  namespace: playlist
-spec:
-  accessModes:
-    - ReadWriteOnce # Typical for a single writer (though SQLite could be accessed from multiple if read-only for others)
-  resources:
-    requests:
-      storage: 1Gi # Adjust storage size as needed
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -131,7 +119,7 @@ spec:
         env:
         - name: SERVICE_TYPE
           value: "flask" # Tells the container to run the Flask app
-        # --- Load all environment variables from the ConfigMap ---
+        # --- Load Jellyfin Credentials from Secret ---
         - name: JELLYFIN_USER_ID
           valueFrom:
             secretKeyRef:
@@ -142,6 +130,7 @@ spec:
             secretKeyRef:
               name: jellyfin-credentials
               key: api_token
+        # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:
             name: audiomuse-ai-config
@@ -151,25 +140,18 @@ spec:
             drop:
             - ALL
         volumeMounts:
-        - name: data-pvc-volume
-          mountPath: /app/db.sqlite
-          subPath: db.sqlite
-        - name: data-pvc-volume
-          mountPath: /app/status_db.sqlite
-          subPath: status_db.sqlite
+        # --- `temp_audio` uses emptyDir, but needs to be created if not mounted as volume
         - name: temp-audio-empty-dir
           mountPath: /app/temp_audio
+        # --- `/workspace` now handles database storage ---
         - name: workspace-hostpath
-          mountPath: /workspace # Mounts the host path for legacy/external access
+          mountPath: /workspace # Mounts the host path for legacy/external access including DBs
       volumes:
-      - name: data-pvc-volume
-        persistentVolumeClaim:
-          claimName: audiomuse-ai-pvc
       - name: temp-audio-empty-dir
         emptyDir: {} # Temporary storage for downloaded audio
       - name: workspace-hostpath
         hostPath:
-          path: /mnt/workspace # Your host path
+          path: /mnt/workspace # Your host path - Databases will live here
           type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -223,7 +205,7 @@ spec:
         env:
         - name: SERVICE_TYPE
           value: "celery" # Tells the container to run the Celery worker
-        # --- Load all environment variables from the ConfigMap ---
+        # --- Load Jellyfin Credentials from Secret ---
         - name: JELLYFIN_USER_ID
           valueFrom:
             secretKeyRef:
@@ -234,6 +216,7 @@ spec:
             secretKeyRef:
               name: jellyfin-credentials
               key: api_token
+        # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:
             name: audiomuse-ai-config
@@ -243,23 +226,16 @@ spec:
             drop:
             - ALL
         volumeMounts:
-        - name: data-pvc-volume
-          mountPath: /app/db.sqlite
-          subPath: db.sqlite
-        - name: data-pvc-volume
-          mountPath: /app/status_db.sqlite
-          subPath: status_db.sqlite
+        # --- `temp_audio` uses emptyDir, but needs to be created if not mounted as volume
         - name: temp-audio-empty-dir
           mountPath: /app/temp_audio
+        # --- `/workspace` now handles database storage ---
         - name: workspace-hostpath
-          mountPath: /workspace # Mounts the host path for legacy/external access
+          mountPath: /workspace # Mounts the host path for legacy/external access including DBs
       volumes:
-      - name: data-pvc-volume
-        persistentVolumeClaim:
-          claimName: audiomuse-ai-pvc
       - name: temp-audio-empty-dir
         emptyDir: {}
       - name: workspace-hostpath
         hostPath:
-          path: /mnt/workspace # Your host path
+          path: "/mnt/workspace" # Your host path - Databases will live here
           type: DirectoryOrCreate
