@@ -11,7 +11,7 @@ from celery.exceptions import Terminated # Import Terminated exception for cance
 from contextlib import closing
 import json
 import time
-import tensorflow as tf # Import tensorflow for session management
+# REMOVED: import tensorflow as tf # This line is absolutely removed now!
 
 # Import your existing analysis functions from essentia
 from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
@@ -33,42 +33,26 @@ celery.conf.update(app.config)
 celery.conf.update(task_track_started=True) # Ensure task state updates are tracked
 
 # --- Global model instances for each worker process ---
-# These will be initialized to None initially, then populated by the Celery signal handler
-# *after* each worker process has forked, ensuring process-safe TensorFlow model loading.
+# We will NOT be pre-loading them globally anymore. Instead, they will be
+# instantiated on demand within the `predict_moods` function.
+# This makes the _embedding_model_instance and _prediction_model_instance
+# global variables redundant, as they won't be used for persistent model loading.
+# They are being kept as 'None' for now to avoid breaking existing references,
+# but their actual usage will be removed.
 _embedding_model_instance = None
 _prediction_model_instance = None
 
-# --- Celery Signal Handler for TensorFlow Model Loading (Crucial for prefork) ---
-# This function runs once per worker process *after* it has been forked.
-@signals.worker_process_init.connect
-def init_tf_models_in_worker(**kwargs):
-    global _embedding_model_instance, _prediction_model_instance
-    print(f"DEBUG: Celery worker process {os.getpid()} initialized. Loading TensorFlow models...")
 
-    # IMPORTANT: Clear any default TensorFlow graph/session that might have been
-    # implicitly inherited or created by the parent process before forking.
-    # This provides a clean TensorFlow environment for the new child process.
-    tf.keras.backend.clear_session()         # Clears Keras/TF session
-    tf.compat.v1.reset_default_graph()       # Clears the default graph (TF 1.x specific)
+# --- Celery Signal Handler for TensorFlow Model Loading (NO LONGER NEEDED FOR TF CLEANUP) ---
+# Since we are instantiating models per-call, there's no shared TF graph/session
+# to clear from the parent process. This signal handler can be removed.
+# @signals.worker_process_init.connect
+# def init_tf_models_in_worker(**kwargs):
+#     # This function is now entirely redundant since TensorFlow models are
+#     # instantiated on demand within `predict_moods` and Essentia handles
+#     # the underlying TF C++ library.
+#     pass # No action needed here
 
-    try:
-        # Load the models into the global variables of THIS worker process.
-        # Each worker will have its own independent, process-safe copy.
-        _embedding_model_instance = TensorflowPredictMusiCNN(
-            graphFilename=EMBEDDING_MODEL_PATH, output="model/dense/BiasAdd"
-        )
-        _prediction_model_instance = TensorflowPredict2D(
-            graphFilename=PREDICTION_MODEL_PATH,
-            input="serving_default_model_Placeholder",
-            output="PartitionedCall"
-        )
-        print(f"DEBUG: TensorFlow models successfully loaded for worker process {os.getpid()}.")
-    except Exception as e:
-        print(f"ERROR: Worker process {os.getpid()} failed to load TensorFlow models: {e}")
-        # If models cannot be loaded, this worker is non-functional for analysis tasks.
-        # Raising an exception here will cause the worker to exit,
-        # allowing Celery to potentially replace it with a healthy one.
-        raise RuntimeError(f"Could not load TF models in worker process {os.getpid()}: {e}")
 
 # --- Status DB Setup ---
 def init_status_db():
@@ -183,32 +167,34 @@ def download_track(jellyfin_url, headers, temp_dir, item_id, item_name, jellyfin
         print(f"ERROR: download_track {item_name} (ID: {item_id}): {e}")
         return None
 
-# --- Modified predict_moods to use global model instances ---
-def predict_moods(file_path, mood_labels, top_n_moods):
-    global _embedding_model_instance, _prediction_model_instance
-
-    # This check is a fallback; in a properly configured prefork worker,
-    # the models should already be loaded by `init_tf_models_in_worker`.
-    if _embedding_model_instance is None or _prediction_model_instance is None:
-        print("WARNING: Models not yet loaded for this worker. Attempting to load now (this should be rare).")
-        init_tf_models_in_worker() # This will load them for the current process
-
-    print(f"DEBUG: predict_moods: Starting prediction for {os.path.basename(file_path)} using pre-loaded models.")
+# --- Reverted predict_moods to instantiate models per-call ---
+def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels, top_n_moods):
+    print(f"DEBUG: predict_moods: Starting prediction for {os.path.basename(file_path)} by loading models.")
     audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
-    
-    embeddings = _embedding_model_instance(audio)
-    predictions = _prediction_model_instance(embeddings)[0]
+
+    # Instantiate models here, on demand for each call
+    embedding_model = TensorflowPredictMusiCNN(
+        graphFilename=embedding_model_path, output="model/dense/BiasAdd"
+    )
+    embeddings = embedding_model(audio)
+
+    prediction_model = TensorflowPredict2D(
+        graphFilename=prediction_model_path,
+        input="serving_default_model_Placeholder",
+        output="PartitionedCall"
+    )
+    predictions = prediction_model(embeddings)[0]
 
     results = dict(zip(mood_labels, predictions))
     return {label: float(score) for label, score in sorted(results.items(), key=lambda x: -x[1])[:top_n_moods]}
 
-# --- Modified analyze_track to remove model path args (it calls predict_moods) ---
+# --- Modified analyze_track to pass model paths ---
 def analyze_track(file_path, mood_labels, top_n_moods):
     audio = MonoLoader(filename=file_path)()
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    # Pass only mood_labels and top_n_moods as predict_moods now gets models globally
-    moods = predict_moods(file_path, mood_labels, top_n_moods)
+    # Pass the model paths to predict_moods
+    moods = predict_moods(file_path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, mood_labels, top_n_moods)
     return tempo, key, scale, moods
 
 def track_exists(db_path, item_id):
@@ -421,7 +407,8 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 # Analyze track
                 analysis_start_time = time.time()
                 log_and_update(f"     🔬 Analyzing '{track_name_full}' with Essentia/TF...", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
-                tempo, key, scale, moods = analyze_track(path, MOOD_LABELS, top_n_moods) # Call analyze_track with correct args
+                # Call analyze_track with correct args (passing model paths implicitly from config)
+                tempo, key, scale, moods = analyze_track(path, MOOD_LABELS, top_n_moods) 
                 analysis_duration = time.time() - analysis_start_time
                 save_track_analysis(DB_PATH, item_id, item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
                 log_and_update(f"     ✅ Analyzed '{track_name_full}' in {analysis_duration:.2f}s. Moods: {', '.join(f'{k}:{v:.2f}' for k,v in moods.items())}", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
@@ -771,20 +758,26 @@ def run_clustering():
         named_playlists = defaultdict(list)
         playlist_centroids = {}
         for label, songs in filtered_clusters.items():
-            if songs: # Only create playlists for non-empty clusters
+            if songs:
                 center = cluster_centers[label]
-                name, top_scores = name_cluster(center, pca_model, pca_enabled_request, MOOD_LABELS) # Use pca_enabled_request
+                name, top_scores = name_cluster(center, pca_model, PCA_ENABLED, MOOD_LABELS)
                 named_playlists[name].extend(songs)
                 playlist_centroids[name] = top_scores
         
+        print("Updating internal playlist database...")
         update_playlist_table(DB_PATH, named_playlists)
+
+        print("Creating/Updating playlists on Jellyfin...")
         create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, named_playlists, playlist_centroids, pca_model, MOOD_LABELS)
-        
-        return jsonify({"status": "success", "message": "Playlists generated and updated on Jellyfin!"}), 200
+
+        print("Clustering and playlist generation complete!")
+        return jsonify({"status": "SUCCESS", "message": "Clustering and playlist generation complete!"})
+
     except Exception as e:
         import traceback
         print(f"Error during clustering: {e}\n{traceback.format_exc()}")
         return jsonify({"status": "error", "message": f"Clustering failed: {e}"}), 500
+
 
 @app.route('/api/playlists', methods=['GET'])
 def get_playlists():
