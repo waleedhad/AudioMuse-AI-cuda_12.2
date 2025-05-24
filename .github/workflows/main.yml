@@ -1,0 +1,68 @@
+name: Build and Push AudioMuse AI Docker Image
+
+on:
+  push:
+    branches:
+      - main  # Trigger on pushes to the main branch for 'latest' tag
+    tags:
+      - 'v*.*.*' # Trigger on new Git tags like v1.0.0, v1.1.2 for versioned tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write # Needed for ghcr.io
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Use a newer action version
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3 # Use a newer action version
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3 # Use a newer action version
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ────────────────────────────────────────────────────────────────────
+      # Define tags for the Docker image
+      - name: Determine Docker image tags
+        id: docker_tags
+        run: |
+          # Default tag (always built for 'main' branch pushes)
+          # We'll prepend ghcr.io/${{ github.repository }} to ensure full image name
+          MAIN_TAG="ghcr.io/${{ github.repository }}:latest"
+          ALL_TAGS="$MAIN_TAG"
+
+          # Check if the push was a Git tag
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Extract version from Git tag (e.g., v1.0.0 -> 1.0.0)
+            VERSION_TAG=$(echo "${{ github.ref }}" | sed -e 's|refs/tags/v||g')
+            VERSIONED_TAG="ghcr.io/${{ github.repository }}:${VERSION_TAG}"
+            ALL_TAGS="$ALL_TAGS,$VERSIONED_TAG"
+            echo "Building versioned tag: $VERSIONED_TAG"
+          else
+            echo "Building latest tag: $MAIN_TAG"
+          fi
+
+          echo "docker_image_name=ghcr.io/${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
+          echo "Building with context: ." >> "$GITHUB_OUTPUT"
+
+      # ────────────────────────────────────────────────────────────────────
+      # Build & push the AudioMuse AI image
+      - name: Build and Push AudioMuse AI Image
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Current directory as build context
+          file: ./Dockerfile # Path to your Dockerfile
+          push: true
+          tags: ${{ steps.docker_tags.outputs.docker_tags }} # Use the determined tags
+          # Set build arguments if you had any (e.g., for versions from env)
+          # build-args: |
+          #   APP_VERSION=${{ steps.docker_tags.outputs.version_tag }}
