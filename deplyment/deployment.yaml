@@ -205,6 +205,8 @@ spec:
         env:
         - name: SERVICE_TYPE
           value: "celery" # Tells the container to run the Celery worker
+        - name: C_FORCE_ROOT
+          value: "true"
         # --- Load Jellyfin Credentials from Secret ---
         - name: JELLYFIN_USER_ID
           valueFrom:
