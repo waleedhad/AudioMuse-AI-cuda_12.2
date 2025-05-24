@@ -1,8 +1,11 @@
 # Use the specified base image
 FROM ubuntu:22.04
 
+# These environment variables are part of a multi-line definition.
+# Comments must be on their own line or before the backslash.
 ENV LANG=C.UTF-8 \
-    PYTHONUNBUFFERED=1 # Ensures Python output is unbuffered
+    PYTHONUNBUFFERED=1
+# Ensures Python output is unbuffered
 
 # 1) Create a directory for your application code
 WORKDIR /app
