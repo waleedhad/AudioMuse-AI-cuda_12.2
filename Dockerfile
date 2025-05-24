@@ -1,6 +1,4 @@
-# Use the specified base image
-# FROM ubuntu:22.04
-FROM python:3.10-slim-bookworm # Or python:3.11-slim-bookworm if you prefer 3.11
+FROM python:3.10-slim-bookworm
 
 # These environment variables are part of a multi-line definition.
 # Comments must be on their own line or before the backslash.
