@@ -176,41 +176,23 @@ def download_track(item):
         print(f"ERROR: Download failed for {item['Name']}: {e}")
         return None
 
-
 def predict_moods(file_path):
-    # Added granular timing and logging for performance diagnosis
-    start_time = time.time()
-    print(f"DEBUG: predict_moods: Starting for {os.path.basename(file_path)}")
-
-    audio_load_start = time.time()
+    print(f"DEBUG: predict_moods: Prediction started")
     audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
-    print(f"DEBUG: predict_moods: MonoLoader for resampling complete ({time.time() - audio_load_start:.2f}s). Audio length: {len(audio)/16000:.2f}s")
-
-    embedding_model_load_start = time.time()
     embedding_model = TensorflowPredictMusiCNN(
         graphFilename=EMBEDDING_MODEL_PATH, output="model/dense/BiasAdd"
     )
-    print(f"DEBUG: predict_moods: MusiCNN embedding model loaded ({time.time() - embedding_model_load_start:.2f}s).")
-
-    embeddings_gen_start = time.time()
     embeddings = embedding_model(audio)
-    print(f"DEBUG: predict_moods: MusiCNN embeddings generated ({time.time() - embeddings_gen_start:.2f}s). Shape: {embeddings.shape}")
-
-    prediction_model_load_start = time.time()
     model = TensorflowPredict2D(
         graphFilename=PREDICTION_MODEL_PATH,
         input="serving_default_model_Placeholder",
         output="PartitionedCall"
     )
-    print(f"DEBUG: predict_moods: Prediction model loaded ({time.time() - prediction_model_load_start:.2f}s).")
-
-    predictions_gen_start = time.time()
     predictions = model(embeddings)[0]
-    print(f"DEBUG: predict_moods: Predictions generated ({time.time() - predictions_gen_start:.2f}s).")
-    
     results = dict(zip(MOOD_LABELS, predictions))
-    print(f"DEBUG: predict_moods: Total time for {os.path.basename(file_path)}: {time.time() - start_time:.2f}s")
+    print(f"DEBUG: predict_moods: Prediction finished")
     return {label: float(score) for label, score in sorted(results.items(), key=lambda x: -x[1])[:TOP_N_MOODS]}
+
 
 
 def analyze_track(file_path):
