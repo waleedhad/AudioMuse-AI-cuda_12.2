@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 # These environment variables are part of a multi-line definition.
 # Comments must be on their own line or before the backslash.
