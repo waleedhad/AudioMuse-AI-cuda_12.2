@@ -43,4 +43,4 @@ EXPOSE 8000
 
 WORKDIR /workspace
 
-CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A celery_worker worker --loglevel=debug; else python3 /app/app.py; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=solo --loglevel=debug; else python3 /app/app.py; fi"]
