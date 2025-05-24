@@ -27,8 +27,10 @@ RUN apt-get update && apt-get install -y \
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
 # Install other core dependencies first, then essentia-tensorflow
+# ADDED Flask-Cors here
 RUN pip3 install --no-cache-dir \
     Flask \
+    Flask-Cors \
     celery \
     redis \
     requests \
