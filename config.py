@@ -8,9 +8,9 @@ JELLYFIN_TOKEN = os.getenv("JELLYFIN_TOKEN", "e0b8c325bc1b426c81922b90c0aa2ff1")
 
 # Other variables come from the audiomuse-ai-config ConfigMap
 JELLYFIN_URL = os.getenv("JELLYFIN_URL", "http://jellyfin.192.168.3.131.nip.io:8087")
-TEMP_DIR = os.getenv("TEMP_DIR", "/app/temp_audio") # Now explicitly using /app/temp_audio as default for emptyDir
-DB_PATH = os.getenv("DB_PATH", "/app/db.sqlite") # Default to /app if env var not found (local dev fallback)
-STATUS_DB_PATH = os.getenv("STATUS_DB_PATH", "/app/status_db.sqlite") # Ensure status DB path is also from env var
+TEMP_DIR = os.getenv("TEMP_DIR", "temp_audio") # Now explicitly using /app/temp_audio as default for emptyDir
+DB_PATH = os.getenv("DB_PATH", "db.sqlite") # Default to /app if env var not found (local dev fallback)
+STATUS_DB_PATH = os.getenv("STATUS_DB_PATH", "status_db.sqlite") # Ensure status DB path is also from env var
 
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
