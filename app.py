@@ -24,11 +24,13 @@ from config import *
 # --- Flask App Setup ---
 app = Flask(__name__)
 # Flask app config for Celery broker/backend
-app.config['CELERY_BROKER_URL'] = CELERY_BROKER_URL
-app.config['CELERY_RESULT_BACKEND'] = CELERY_RESULT_BACKEND
+# FIX: Renamed old Celery config keys to new format
+app.config['broker_url'] = CELERY_BROKER_URL
+app.config['result_backend'] = CELERY_RESULT_BACKEND
 
 # --- Celery App Setup ---
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+# FIX: Ensure Celery app also uses the new broker_url key for initialization
+celery = Celery(app.name, broker=app.config['broker_url'])
 celery.conf.update(app.config)
 celery.conf.update(task_track_started=True) # Ensure task state updates are tracked
 
@@ -48,10 +50,10 @@ _prediction_model_instance = None
 # to clear from the parent process. This signal handler can be removed.
 # @signals.worker_process_init.connect
 # def init_tf_models_in_worker(**kwargs):
-#     # This function is now entirely redundant since TensorFlow models are
-#     # instantiated on demand within `predict_moods` and Essentia handles
-#     # the underlying TF C++ library.
-#     pass # No action needed here
+#       # This function is now entirely redundant since TensorFlow models are
+#       # instantiated on demand within `predict_moods` and Essentia handles
+#       # the underlying TF C++ library.
+#       pass # No action needed here
 
 
 # --- Status DB Setup ---
@@ -356,7 +358,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 if tracks:
                     all_tracks_to_process.extend([ (track, album['Name'], idx, total_albums) for track in tracks])
                 else:
-                    log_and_update(f"   ⚠️ No tracks found for album: {album['Name']}", 5 + (idx / total_albums) * 5, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
+                    log_and_update(f"    ⚠️ No tracks found for album: {album['Name']}", 5 + (idx / total_albums) * 5, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
         
         total_tracks_overall = len(all_tracks_to_process)
         if total_tracks_overall == 0 and not get_all_tracks(DB_PATH): # Check if DB is empty and no new tracks
@@ -375,9 +377,9 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             # Calculate progress more precisely
             current_overall_progress = analysis_start_progress + int((analysis_end_progress - analysis_start_progress) * (processed_count / max(1, total_tracks_overall)))
             
-            log_and_update(f"   🎶 Analyzing track: {track_name_full}", current_overall_progress, 
-                           current_album=album_name, current_album_idx=album_idx, total_albums=total_albums,
-                           current_track=item['Name'], current_track_idx=i, total_tracks_in_album=total_tracks_overall) # total_tracks_overall here
+            log_and_update(f"    🎶 Analyzing track: {track_name_full}", current_overall_progress, 
+                            current_album=album_name, current_album_idx=album_idx, total_albums=total_albums,
+                            current_track=item['Name'], current_track_idx=i, total_tracks_in_album=total_tracks_overall) # total_tracks_overall here
             
             # Check for revocation before processing each track
             if self.is_revoked():
@@ -385,19 +387,19 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
 
             try:
                 if track_exists(DB_PATH, item_id):
-                    log_and_update(f"     ⏭️ Skipping '{track_name_full}' (already analyzed)", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                    log_and_update(f"      ⏭️ Skipping '{track_name_full}' (already analyzed)", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                     processed_count += 1 # Still count it for progress
                     continue
 
                 # Download track
                 download_start_time = time.time()
-                log_and_update(f"     ⬇️ Downloading '{track_name_full}'...", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                log_and_update(f"      ⬇️ Downloading '{track_name_full}'...", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                 path = download_track(jellyfin_url, headers, TEMP_DIR, item_id, item['Name'], jellyfin_user_id) # Pass correct args
                 if not path:
-                    log_and_update(f"     ❌ Failed to download '{track_name_full}'. Skipping.", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                    log_and_update(f"      ❌ Failed to download '{track_name_full}'. Skipping.", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                     processed_count += 1
                     continue
-                log_and_update(f"     Downloaded '{track_name_full}' in {time.time() - download_start_time:.2f}s.", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                log_and_update(f"      Downloaded '{track_name_full}' in {time.time() - download_start_time:.2f}s.", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                 
                 # Check for revocation after download
                 if self.is_revoked():
@@ -406,12 +408,12 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
 
                 # Analyze track
                 analysis_start_time = time.time()
-                log_and_update(f"     🔬 Analyzing '{track_name_full}' with Essentia/TF...", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                log_and_update(f"      🔬 Analyzing '{track_name_full}' with Essentia/TF...", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                 # Call analyze_track with correct args (passing model paths implicitly from config)
                 tempo, key, scale, moods = analyze_track(path, MOOD_LABELS, top_n_moods) 
                 analysis_duration = time.time() - analysis_start_time
                 save_track_analysis(DB_PATH, item_id, item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
-                log_and_update(f"     ✅ Analyzed '{track_name_full}' in {analysis_duration:.2f}s. Moods: {', '.join(f'{k}:{v:.2f}' for k,v in moods.items())}", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                log_and_update(f"      ✅ Analyzed '{track_name_full}' in {analysis_duration:.2f}s. Moods: {', '.join(f'{k}:{v:.2f}' for k,v in moods.items())}", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                 
                 # Check for revocation after analysis
                 if self.is_revoked():
@@ -428,7 +430,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 print(f"ERROR: Error processing track {track_name_full} (ID: {item_id}): {e}")
                 import traceback
                 print(traceback.format_exc()) # Print full traceback for track-specific errors
-                log_and_update(f"     ❌ Error processing '{track_name_full}': {e}", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
+                log_and_update(f"      ❌ Error processing '{track_name_full}': {e}", current_overall_progress, current_album=album_name, current_album_idx=album_idx, total_albums=total_albums)
                 processed_count += 1 # Still count for progress, even if failed
             finally:
                 # Ensure temporary file is cleaned up regardless of success or failure
@@ -642,155 +644,16 @@ def get_config():
         "mood_labels": MOOD_LABELS,
         "temp_dir": TEMP_DIR, # Expose temp_dir for debugging
         "db_path": DB_PATH, # Expose db_path for debugging
-        "status_db_path": STATUS_DB_PATH, # Expose status_db_path for debugging
+        "status_db_path": STATUS_DB
     })
 
-@app.route('/api/clustering', methods=['POST'])
-def run_clustering():
-    data = request.json
-    clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
-    num_clusters = int(data.get('num_clusters', NUM_CLUSTERS))
-    dbscan_eps = float(data.get('dbscan_eps', DBSCAN_EPS))
-    dbscan_min_samples = int(data.get('dbscan_min_samples', DBSCAN_MIN_SAMPLES))
-    # Note: If PCA_ENABLED is read from config, `pca_components` from request might be redundant
-    # or you'd need a specific `PCA_COMPONENTS` config variable.
-    pca_enabled_request = data.get('pca_enabled', PCA_ENABLED) # Use PCA_ENABLED from config as default
-    pca_components = int(data.get('pca_components', 0)) # If 0, it means auto or off
+---
+## Final `if __name__ == '__main__':` Block
 
-    try:
-        rows = get_all_tracks(DB_PATH)
-        if len(rows) < 2:
-            return jsonify({"status": "error", "message": "Not enough analyzed tracks for clustering (need at least 2)."}, 400)
-        
-        # Original vectors (tempo + mood scores)
-        X_original = [score_vector(row, MOOD_LABELS) for row in rows]
-        
-        data_for_clustering = np.array(X_original)
-        pca_model = None
-
-        # Apply PCA if enabled
-        if pca_enabled_request and pca_components > 0:
-            # Ensure n_components is valid: <= number of features and < number of samples
-            n_features_for_pca = data_for_clustering.shape[1]
-            pca_components_actual = min(pca_components, n_features_for_pca, data_for_clustering.shape[0] -1)
-            if pca_components_actual <= 0:
-                print("WARNING: PCA enabled but not enough components/samples for PCA. Skipping PCA.")
-                pca_enabled_request = False # Effectively disable PCA if invalid
-            else:
-                pca_model = PCA(n_components=pca_components_actual)
-                data_for_clustering = pca_model.fit_transform(data_for_clustering)
-                print(f"DEBUG: PCA applied with {pca_components_actual} components.")
-
-        # Clustering
-        if clustering_method == "kmeans":
-            # Ensure k is valid: >= 1 and <= number of samples
-            k = num_clusters if num_clusters > 0 else max(1, len(rows) // MAX_SONGS_PER_CLUSTER)
-            k_actual = min(k, data_for_clustering.shape[0])
-            if k_actual < 1:
-                return jsonify({"status": "error", "message": "Not enough data for KMeans clustering with 1 or more clusters."}), 400
-            
-            kmeans = KMeans(n_clusters=k_actual, random_state=42, n_init='auto')
-            labels = kmeans.fit_predict(data_for_clustering)
-            cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(k_actual)}
-            centers_for_points = kmeans.cluster_centers_[labels]
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-            print(f"DEBUG: KMeans clustering applied with {k_actual} clusters.")
-
-        elif clustering_method == "dbscan":
-            dbscan = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples)
-            labels = dbscan.fit_predict(data_for_clustering)
-            cluster_centers = {}
-            raw_distances = np.zeros(len(data_for_clustering)) # Initialize for all points
-            
-            # Calculate centroids for DBSCAN clusters (excluding noise -1)
-            for cluster_id in set(labels):
-                if cluster_id == -1: # Noise points
-                    continue
-                indices = np.where(labels == cluster_id)[0]
-                cluster_points = data_for_clustering[indices]
-                if len(cluster_points) > 0:
-                    center = cluster_points.mean(axis=0)
-                    for i in indices:
-                        raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
-                    cluster_centers[cluster_id] = center
-            print(f"DEBUG: DBSCAN clustering applied (eps={dbscan_eps}, min_samples={dbscan_min_samples}).")
-
-        else:
-            return jsonify({"status": "error", "message": f"Unsupported clustering algorithm: {clustering_method}"}), 400
-        
-        max_dist = raw_distances.max()
-        normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-
-        track_info = []
-        for i, row in enumerate(rows):
-            label = labels[i]
-            vec = data_for_clustering[i]
-            dist = normalized_distances[i]
-            if label == -1: # Exclude noise points from clusters
-                continue
-            track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
-
-        filtered_clusters = defaultdict(list)
-        for cluster_id in set(labels):
-            if cluster_id == -1: # Exclude noise points
-                continue
-            # Filter tracks by MAX_DISTANCE and then sort by distance
-            cluster_tracks_filtered_by_dist = [t for t in track_info if t["label"] == cluster_id and t["distance"] <= MAX_DISTANCE]
-            if not cluster_tracks_filtered_by_dist:
-                continue
-            cluster_tracks_filtered_by_dist.sort(key=lambda x: x["distance"]) # Sort by distance to centroid
-
-            # Apply MAX_SONGS_PER_ARTIST and MAX_SONGS_PER_CLUSTER
-            count_per_artist = defaultdict(int)
-            selected_tracks_for_playlist = []
-            for t in cluster_tracks_filtered_by_dist:
-                author = t["row"][2] # Author is at index 2 in the `score` table row
-                if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
-                    selected_tracks_for_playlist.append(t)
-                    count_per_artist[author] += 1
-                if len(selected_tracks_for_playlist) >= MAX_SONGS_PER_CLUSTER:
-                    break
-            
-            for t in selected_tracks_for_playlist:
-                item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
-                filtered_clusters[cluster_id].append((item_id, title, author))
-
-        named_playlists = defaultdict(list)
-        playlist_centroids = {}
-        for label, songs in filtered_clusters.items():
-            if songs:
-                center = cluster_centers[label]
-                name, top_scores = name_cluster(center, pca_model, PCA_ENABLED, MOOD_LABELS)
-                named_playlists[name].extend(songs)
-                playlist_centroids[name] = top_scores
-        
-        print("Updating internal playlist database...")
-        update_playlist_table(DB_PATH, named_playlists)
-
-        print("Creating/Updating playlists on Jellyfin...")
-        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, named_playlists, playlist_centroids, pca_model, MOOD_LABELS)
-
-        print("Clustering and playlist generation complete!")
-        return jsonify({"status": "SUCCESS", "message": "Clustering and playlist generation complete!"})
-
-    except Exception as e:
-        import traceback
-        print(f"Error during clustering: {e}\n{traceback.format_exc()}")
-        return jsonify({"status": "error", "message": f"Clustering failed: {e}"}), 500
-
-
-@app.route('/api/playlists', methods=['GET'])
-def get_playlists():
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT playlist, item_id, title, author FROM playlist ORDER BY playlist, title")
-        rows = cur.fetchall()
-    playlists = defaultdict(list)
-    for playlist, item_id, title, author in rows:
-        playlists[playlist].append({"item_id": item_id, "title": title, "author": author})
-    return jsonify(dict(playlists)), 200
-
+```python
 if __name__ == '__main__':
+    # Initialize the database and temporary directory when the script is run directly
     init_db(DB_PATH)
     os.makedirs(TEMP_DIR, exist_ok=True)
+    # Run the Flask application in debug mode, accessible from any IP on port 8000
     app.run(debug=True, host='0.0.0.0', port=8000)
