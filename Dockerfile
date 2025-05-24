@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Order matters: numpy first, then essentia-tensorflow, then others.
 # Strictly pinning numpy to a version known to be 1.x and compatible with Essentia.
 # Trying 1.26.4, one of the last 1.x versions before 2.x broke compatibility.
-RUN pip install --no-cache-dir numpy==1.26.4 # Use 'pip' instead of 'pip3' on Python base images
+RUN pip install --no-cache-dir numpy==1.26.4
 
 # Install other core dependencies first, then essentia-tensorflow
 RUN pip install --no-cache-dir \
