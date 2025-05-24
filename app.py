@@ -647,9 +647,6 @@ def get_config():
         "status_db_path": STATUS_DB
     })
 
----
-## Final `if __name__ == '__main__':` Block
-
 ```python
 if __name__ == '__main__':
     # Initialize the database and temporary directory when the script is run directly
