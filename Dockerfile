@@ -1,5 +1,6 @@
 # Use the specified base image
-FROM ubuntu:22.04
+# FROM ubuntu:22.04
+FROM python:3.10-slim-bookworm # Or python:3.11-slim-bookworm if you prefer 3.11
 
 # These environment variables are part of a multi-line definition.
 # Comments must be on their own line or before the backslash.
@@ -10,10 +11,8 @@ ENV LANG=C.UTF-8 \
 # 1) Create a directory for your application code
 WORKDIR /app
 
-# 2) Install Python, pip, and required system libraries
-# Include `redis-tools` for optional Redis CLI for debugging, and `curl` for potential health checks or debugging.
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-dev \
+# 2) Install required system libraries (Python and pip are already there)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
@@ -24,11 +23,10 @@ RUN apt-get update && apt-get install -y \
 # Order matters: numpy first, then essentia-tensorflow, then others.
 # Strictly pinning numpy to a version known to be 1.x and compatible with Essentia.
 # Trying 1.26.4, one of the last 1.x versions before 2.x broke compatibility.
-RUN pip3 install --no-cache-dir numpy==1.26.4
+RUN pip install --no-cache-dir numpy==1.26.4 # Use 'pip' instead of 'pip3' on Python base images
 
 # Install other core dependencies first, then essentia-tensorflow
-# ADDED Flask-Cors here
-RUN pip3 install --no-cache-dir \
+RUN pip install --no-cache-dir \
     Flask \
     Flask-Cors \
     celery \
@@ -39,21 +37,16 @@ RUN pip3 install --no-cache-dir \
     six
 
 # Install Essentia with tensorflow support *after* core dependencies and pinned numpy.
-# If essentia-tensorflow still tries to upgrade numpy, we might need a more specific pip command.
-RUN pip3 install --no-cache-dir essentia-tensorflow
+RUN pip install --no-cache-dir essentia-tensorflow
 
 # 4) Copy your application code into the container
-# This assumes your Dockerfile is in the root of your project
-# IMPORTANT: This will copy the 'models' directory and its contents too,
-# assuming they are present in your local git repo before building the image.
 COPY . /app
 
 # 5) Essentia environment variables
-# These are less critical when models are directly specified by path in config.py,
-# but good practice to keep for Essentia's internal mechanisms if it relies on them.
 ENV ESSENTIA_MODELS_DIR=/app/models
-# PYTHONPATH might not be strictly necessary if all dependencies are installed globally via pip3
-ENV PYTHONPATH=/usr/local/lib/python3/dist-packages
+# PYTHONPATH is usually not needed when using python:slim images as pip installs into the correct path.
+# You can often remove this line.
+# ENV PYTHONPATH=/usr/local/lib/python3/dist-packages
 
 # Create necessary directories for runtime if they don't exist
 RUN mkdir -p /app/temp_audio
@@ -62,7 +55,4 @@ RUN mkdir -p /app/temp_audio
 EXPOSE 8000
 
 # 6) Define the command to run the application
-# This CMD allows the same image to be used for different services (Flask or Celery worker).
-# In Kubernetes, you'll specify the `command` for each container in your Deployment.
-# `sh -c` is used to allow conditional logic.
 CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --loglevel=info; else python3 app.py; fi"]
