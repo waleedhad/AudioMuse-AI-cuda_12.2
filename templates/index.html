@@ -115,7 +115,7 @@
 </head>
 <body class="p-8">
     <div class="container mx-auto">
-        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">AudioMuse AI - Music Analyzer & Playlist Generator</h1>
+        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">Essentia Music Analyzer & Playlist Generator</h1>
 
         <div class="card p-6 mb-8">
             <h2 class="text-2xl font-semibold mb-4 text-white">Start Music Analysis</h2>
@@ -214,7 +214,10 @@
     </div>
 
     <script>
-        const API_BASE_URL = '/api'; // Using relative path for API calls
+        // --- KEY CHANGE HERE ---
+        // By using a relative path, the browser will automatically use the same host and port
+        // from which it loaded this index.html file (which will be your K3S LoadBalancer IP:8000).
+        const API_BASE_URL = '/api';
 
         const analysisForm = document.getElementById('analysisForm');
         const startAnalysisBtn = document.getElementById('startAnalysisBtn');
@@ -262,7 +265,7 @@
 
             // Update album name and progress
             currentAlbumName.textContent = data.current_album || 'N/A';
-            currentAlbumProgress.textContent = `<span class="math-inline">\{data\.current\_album\_idx \|\| 0\}/</span>{data.total_albums || 0}`;
+            currentAlbumProgress.textContent = `${data.current_album_idx || 0}/${data.total_albums || 0}`;
 
             // Update log output
             if (Array.isArray(data.log_output)) {
@@ -292,7 +295,7 @@
             showProgressContainer(true); // Ensure progress container is visible when polling starts
             pollingInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`<span class="math-inline">\{API\_BASE\_URL\}/analysis/status/</span>{taskId}`);
+                    const response = await fetch(`${API_BASE_URL}/analysis/status/${taskId}`);
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
@@ -436,7 +439,7 @@
             }
 
             try {
-                const response = await fetch(`<span class="math-inline">\{API\_BASE\_URL\}/analysis/cancel/</span>{currentTaskId}`, {
+                const response = await fetch(`${API_BASE_URL}/analysis/cancel/${currentTaskId}`, {
                     method: 'POST'
                 });
                 if (!response.ok) {
@@ -492,5 +495,75 @@
                 // After successful generation, fetch the updated playlists
                 fetchPlaylists();
             } catch (error) {
-                    console.error("Error generating playlists:", error);
-                    alert(`Failed to generate playlists: ${error.message || error}`);
+                console.error("Error generating playlists:", error);
+                alert(`Failed to generate playlists: ${error.message || error}`);
+            } finally {
+                generatePlaylistsBtn.disabled = false;
+                fetchPlaylistsBtn.disabled = false;
+            }
+        });
+
+        clusteringMethodSelect.addEventListener('change', toggleClusteringOptions);
+
+        async function fetchPlaylists() {
+            playlistsDisplay.classList.add('hidden');
+            playlistList.innerHTML = ''; // Clear existing list
+            try {
+                const response = await fetch(`${API_BASE_URL}/playlists`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const playlists = await response.json();
+                if (Object.keys(playlists).length === 0) {
+                    playlistList.innerHTML = '<li class="text-center text-gray-400">No playlists found. Run analysis and generate playlists first.</li>';
+                } else {
+                    for (const playlistName in playlists) {
+                        const li = document.createElement('li');
+                        const toggleBtn = document.createElement('button');
+                        toggleBtn.className = 'playlist-toggle';
+                        toggleBtn.textContent = 'Show Tracks';
+                        toggleBtn.onclick = function() {
+                            const tracksDiv = this.nextElementSibling;
+                            if (tracksDiv.classList.contains('hidden')) {
+                                tracksDiv.classList.remove('hidden');
+                                this.textContent = 'Hide Tracks';
+                            } else {
+                                tracksDiv.classList.add('hidden');
+                                this.textContent = 'Show Tracks';
+                            }
+                        };
+
+                        const h3 = document.createElement('h3');
+                        h3.innerHTML = `${playlistName} (${playlists[playlistName].length} tracks) `;
+                        h3.appendChild(toggleBtn);
+                        li.appendChild(h3);
+
+                        const tracksDiv = document.createElement('div');
+                        tracksDiv.className = 'playlist-tracks hidden'; // Hidden by default
+                        playlists[playlistName].forEach(track => {
+                            const p = document.createElement('p');
+                            p.textContent = `${track.title} by ${track.author}`;
+                            tracksDiv.appendChild(p);
+                        });
+                        li.appendChild(tracksDiv);
+                        playlistList.appendChild(li);
+                    }
+                }
+                playlistsDisplay.classList.remove('hidden');
+            } catch (error) {
+                console.error("Error fetching playlists:", error);
+                playlistList.innerHTML = `<li class="text-center text-red-400">Failed to load playlists: ${error.message}</li>`;
+                playlistsDisplay.classList.remove('hidden');
+            }
+        }
+
+        fetchPlaylistsBtn.addEventListener('click', fetchPlaylists);
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            await populateConfig();
+            await fetchLastAnalysisStatus(); // Check for ongoing or last task
+        });
+    </script>
+</body>
+</html>
