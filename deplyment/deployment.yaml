@@ -1,0 +1,285 @@
+# audiomuse-ai-deployment.yaml
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: playlist
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jellyfin-credentials
+  namespace: playlist
+type: Opaque
+stringData:
+  user_id: "YOUR_JELLYFIN_USER_ID_HERE" # <--- REPLACE THIS
+  api_token: "YOUR_JELLYFIN_API_TOKEN_HERE" # <--- REPLACE THIS
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: audiomuse-ai-pvc
+  namespace: playlist
+spec:
+  accessModes:
+    - ReadWriteOnce # Typical for a single writer (though SQLite could be accessed from multiple if read-only for others)
+  resources:
+    requests:
+      storage: 1Gi # Adjust storage size as needed
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-master
+  namespace: playlist
+  labels:
+    app: redis
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: redis
+        tier: backend
+    spec:
+      containers:
+      - name: master
+        image: redis:7-alpine # Lightweight Redis image
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        ports:
+        - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: playlist
+  labels:
+    app: redis
+    tier: backend
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis
+    tier: backend
+  type: ClusterIP # Internal service only
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audiomuse-ai-flask
+  namespace: playlist
+  labels:
+    app: audiomuse-ai
+    component: flask
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: audiomuse-ai
+      component: flask
+  template:
+    metadata:
+      labels:
+        app: audiomuse-ai
+        component: flask
+    spec:
+      nodeSelector: # Keep your node selector if needed
+        kubernetes.io/hostname: ubuntu3
+      securityContext:
+        runAsUser: 0 # Or a non-root user if your image supports it
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: flask-app
+        image: ghcr.io/neptunehub/audiomuse-ai:latest # Your image from GHCR
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000 # Flask app listens on 8000
+        env:
+        - name: SERVICE_TYPE
+          value: "flask" # Tells the container to run the Flask app
+        # --- Jellyfin Credentials from Secret ---
+        - name: JELLYFIN_USER_ID
+          valueFrom:
+            secretKeyRef:
+              name: jellyfin-credentials
+              key: user_id
+        - name: JELLYFIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jellyfin-credentials
+              key: api_token
+        # --- Celery Redis Connection ---
+        - name: CELERY_BROKER_URL
+          value: "redis://redis-service.playlist:6379/0" # Use FQDN for cross-namespace if needed, but here it's in the same namespace 'playlist'
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://redis-service.playlist:6379/0"
+        # --- Other config values, override defaults from config.py via ENV ---
+        - name: JELLYFIN_URL
+          value: "http://jellyfin.192.168.3.131.nip.io:8087" # Your Jellyfin URL
+        - name: TEMP_DIR
+          value: "/app/temp_audio" # Matches Dockerfile WORKDIR strategy
+        - name: DB_PATH
+          value: "/app/db.sqlite"   # Matches Dockerfile WORKDIR strategy
+        - name: STATUS_DB_PATH
+          value: "/app/status_db.sqlite" # Matches Dockerfile WORKDIR strategy
+        - name: NUM_RECENT_ALBUMS
+          value: "1300"
+        - name: CLUSTER_ALGORITHM
+          value: "kmeans"
+        - name: PCA_ENABLED
+          value: "False"
+        - name: NUM_CLUSTERS
+          value: "10"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: data-pvc-volume
+          mountPath: /app/db.sqlite
+          subPath: db.sqlite
+        - name: data-pvc-volume
+          mountPath: /app/status_db.sqlite
+          subPath: status_db.sqlite
+        - name: temp-audio-empty-dir
+          mountPath: /app/temp_audio
+        - name: workspace-hostpath
+          mountPath: /workspace # Mounts the host path for legacy/external access
+      volumes:
+      - name: data-pvc-volume
+        persistentVolumeClaim:
+          claimName: audiomuse-ai-pvc
+      - name: temp-audio-empty-dir
+        emptyDir: {} # Temporary storage for downloaded audio
+      - name: workspace-hostpath
+        hostPath:
+          path: /mnt/workspace # Your host path
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audiomuse-ai-flask-service
+  namespace: playlist
+  labels:
+    app: audiomuse-ai
+    component: flask
+spec:
+  selector:
+    app: audiomuse-ai
+    component: flask
+  ports:
+  - protocol: TCP
+    port: 8000 # Service port (what you connect to)
+    targetPort: 8000 # Container port (what the app listens on)
+  type: LoadBalancer # Or NodePort/ClusterIP depending on your K3S setup
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audiomuse-ai-celery
+  namespace: playlist
+  labels:
+    app: audiomuse-ai
+    component: celery
+spec:
+  replicas: 1 # Scale as needed for parallel processing
+  selector:
+    matchLabels:
+      app: audiomuse-ai
+      component: celery
+  template:
+    metadata:
+      labels:
+        app: audiomuse-ai
+        component: celery
+    spec:
+      nodeSelector: # Keep your node selector if needed
+        kubernetes.io/hostname: ubuntu3
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: celery-worker
+        image: ghcr.io/neptunehub/audiomuse-ai:latest # Your image from GHCR
+        imagePullPolicy: Always
+        env:
+        - name: SERVICE_TYPE
+          value: "celery" # Tells the container to run the Celery worker
+        # --- Jellyfin Credentials from Secret ---
+        - name: JELLYFIN_USER_ID
+          valueFrom:
+            secretKeyRef:
+              name: jellyfin-credentials
+              key: user_id
+        - name: JELLYFIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: jellyfin-credentials
+              key: api_token
+        # --- Celery Redis Connection ---
+        - name: CELERY_BROKER_URL
+          value: "redis://redis-service.playlist:6379/0"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://redis-service.playlist:6379/0"
+        # --- Other config values, override defaults from config.py via ENV ---
+        - name: JELLYFIN_URL
+          value: "http://jellyfin.192.168.3.131.nip.io:8087" # Your Jellyfin URL
+        - name: TEMP_DIR
+          value: "/app/temp_audio"
+        - name: DB_PATH
+          value: "/app/db.sqlite"
+        - name: STATUS_DB_PATH
+          value: "/app/status_db.sqlite"
+        - name: NUM_RECENT_ALBUMS
+          value: "1300"
+        - name: CLUSTER_ALGORITHM
+          value: "kmeans"
+        - name: PCA_ENABLED
+          value: "False"
+        - name: NUM_CLUSTERS
+          value: "10"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: data-pvc-volume
+          mountPath: /app/db.sqlite
+          subPath: db.sqlite
+        - name: data-pvc-volume
+          mountPath: /app/status_db.sqlite
+          subPath: status_db.sqlite
+        - name: temp-audio-empty-dir
+          mountPath: /app/temp_audio
+        - name: workspace-hostpath
+          mountPath: /workspace # Mounts the host path for legacy/external access
+      volumes:
+      - name: data-pvc-volume
+        persistentVolumeClaim:
+          claimName: audiomuse-ai-pvc
+      - name: temp-audio-empty-dir
+        emptyDir: {}
+      - name: workspace-hostpath
+        hostPath:
+          path: /mnt/workspace # Your host path
+          type: DirectoryOrCreate
