@@ -22,17 +22,12 @@ RUN apt-get update && apt-get install -y \
 
 # 3) Install Python packages with compatible numpy for essentia-tensorflow
 # Order matters: numpy first, then essentia-tensorflow, then others.
-# Using a specific numpy version as per your original Dockerfile.
-RUN pip3 install --no-cache-dir \
-    numpy==1.21.6
+# Strictly pinning numpy to a version known to be 1.x and compatible with Essentia.
+# Trying 1.26.4, one of the last 1.x versions before 2.x broke compatibility.
+RUN pip3 install --no-cache-dir numpy==1.26.4
 
-# Install Essentia with tensorflow support.
-# If essentia-tensorflow is not found on PyPI, you might need to install via pip wheel or directly from source.
-# Assuming 'essentia-tensorflow' is the correct package name.
-# If it's `essentia_extractor`, use that.
-# pip3 install --no-cache-dir essentia_extractor[tensorflow] # modern way if essentia_extractor is on PyPI
+# Install other core dependencies first, then essentia-tensorflow
 RUN pip3 install --no-cache-dir \
-    essentia-tensorflow \
     Flask \
     celery \
     redis \
@@ -40,6 +35,10 @@ RUN pip3 install --no-cache-dir \
     scikit-learn \
     pyyaml \
     six
+
+# Install Essentia with tensorflow support *after* core dependencies and pinned numpy.
+# If essentia-tensorflow still tries to upgrade numpy, we might need a more specific pip command.
+RUN pip3 install --no-cache-dir essentia-tensorflow
 
 # 4) Copy your application code into the container
 # This assumes your Dockerfile is in the root of your project
