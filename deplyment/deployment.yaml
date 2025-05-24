@@ -13,8 +13,26 @@ metadata:
   namespace: playlist
 type: Opaque
 stringData:
-  user_id: "YOUR_JELLYFIN_USER_ID_HERE" # <--- REPLACE THIS
-  api_token: "YOUR_JELLYFIN_API_TOKEN_HERE" # <--- REPLACE THIS
+  user_id: "xxx" # Your Jellyfin User ID
+  api_token: "xxx" # Your Jellyfin API Token
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: audiomuse-ai-config
+  namespace: playlist
+data:
+  JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087"
+  CELERY_BROKER_URL: "redis://redis-service.playlist:6379/0"
+  CELERY_RESULT_BACKEND: "redis://redis-service.playlist:6379/0"
+  TEMP_DIR: "/app/temp_audio"
+  DB_PATH: "/app/db.sqlite"
+  STATUS_DB_PATH: "/app/status_db.sqlite"
+  NUM_RECENT_ALBUMS: "1300"
+  CLUSTER_ALGORITHM: "kmeans"
+  PCA_ENABLED: "False"
+  NUM_CLUSTERS: "10"
+  # Add other config values from config.py here if they are constant and not secrets
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -113,7 +131,7 @@ spec:
         env:
         - name: SERVICE_TYPE
           value: "flask" # Tells the container to run the Flask app
-        # --- Jellyfin Credentials from Secret ---
+        # --- Load all environment variables from the ConfigMap ---
         - name: JELLYFIN_USER_ID
           valueFrom:
             secretKeyRef:
@@ -124,28 +142,9 @@ spec:
             secretKeyRef:
               name: jellyfin-credentials
               key: api_token
-        # --- Celery Redis Connection ---
-        - name: CELERY_BROKER_URL
-          value: "redis://redis-service.playlist:6379/0" # Use FQDN for cross-namespace if needed, but here it's in the same namespace 'playlist'
-        - name: CELERY_RESULT_BACKEND
-          value: "redis://redis-service.playlist:6379/0"
-        # --- Other config values, override defaults from config.py via ENV ---
-        - name: JELLYFIN_URL
-          value: "http://jellyfin.192.168.3.131.nip.io:8087" # Your Jellyfin URL
-        - name: TEMP_DIR
-          value: "/app/temp_audio" # Matches Dockerfile WORKDIR strategy
-        - name: DB_PATH
-          value: "/app/db.sqlite"   # Matches Dockerfile WORKDIR strategy
-        - name: STATUS_DB_PATH
-          value: "/app/status_db.sqlite" # Matches Dockerfile WORKDIR strategy
-        - name: NUM_RECENT_ALBUMS
-          value: "1300"
-        - name: CLUSTER_ALGORITHM
-          value: "kmeans"
-        - name: PCA_ENABLED
-          value: "False"
-        - name: NUM_CLUSTERS
-          value: "10"
+        envFrom:
+        - configMapRef:
+            name: audiomuse-ai-config
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -224,7 +223,7 @@ spec:
         env:
         - name: SERVICE_TYPE
           value: "celery" # Tells the container to run the Celery worker
-        # --- Jellyfin Credentials from Secret ---
+        # --- Load all environment variables from the ConfigMap ---
         - name: JELLYFIN_USER_ID
           valueFrom:
             secretKeyRef:
@@ -235,28 +234,9 @@ spec:
             secretKeyRef:
               name: jellyfin-credentials
               key: api_token
-        # --- Celery Redis Connection ---
-        - name: CELERY_BROKER_URL
-          value: "redis://redis-service.playlist:6379/0"
-        - name: CELERY_RESULT_BACKEND
-          value: "redis://redis-service.playlist:6379/0"
-        # --- Other config values, override defaults from config.py via ENV ---
-        - name: JELLYFIN_URL
-          value: "http://jellyfin.192.168.3.131.nip.io:8087" # Your Jellyfin URL
-        - name: TEMP_DIR
-          value: "/app/temp_audio"
-        - name: DB_PATH
-          value: "/app/db.sqlite"
-        - name: STATUS_DB_PATH
-          value: "/app/status_db.sqlite"
-        - name: NUM_RECENT_ALBUMS
-          value: "1300"
-        - name: CLUSTER_ALGORITHM
-          value: "kmeans"
-        - name: PCA_ENABLED
-          value: "False"
-        - name: NUM_CLUSTERS
-          value: "10"
+        envFrom:
+        - configMapRef:
+            name: audiomuse-ai-config
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
