@@ -32,12 +32,15 @@ jobs:
       # ────────────────────────────────────────────────────────────────────
       # Define tags for the Docker image
       - name: Determine Docker image tags
-        id: docker_tags
+        id: docker_tags # This ID is used to reference outputs from this step
         run: |
           # Default tag (always built for 'main' branch pushes)
           # We'll prepend ghcr.io/${{ github.repository }} to ensure full image name
           MAIN_TAG="ghcr.io/${{ github.repository }}:latest"
           ALL_TAGS="$MAIN_TAG"
+
+          # Print informational message to standard output
+          echo "Building latest tag: $MAIN_TAG"
 
           # Check if the push was a Git tag
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
@@ -45,14 +48,13 @@ jobs:
             VERSION_TAG=$(echo "${{ github.ref }}" | sed -e 's|refs/tags/v||g')
             VERSIONED_TAG="ghcr.io/${{ github.repository }}:${VERSION_TAG}"
             ALL_TAGS="$ALL_TAGS,$VERSIONED_TAG"
+            # Print informational message to standard output
             echo "Building versioned tag: $VERSIONED_TAG"
-          else
-            echo "Building latest tag: $MAIN_TAG"
           fi
 
-          echo "docker_image_name=ghcr.io/${{ github.repository }}" >> "$GITHUB_OUTPUT"
+          # Set outputs for subsequent steps (MUST be in the format 'name=value')
+          # This line correctly sets the 'docker_tags' output.
           echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
-          echo "Building with context: ." >> "$GITHUB_OUTPUT"
 
       # ────────────────────────────────────────────────────────────────────
       # Build & push the AudioMuse AI image
