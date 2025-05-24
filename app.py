@@ -395,7 +395,7 @@ def analysis_status(task_id):
 def cancel_analysis(task_id):
     task = AsyncResult(task_id, app=celery)
     if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
-        task.revoke(terminate=True)
+        task.revoke(terminate=True, signal='SIGKILL')
         save_analysis_task_id(task_id, "REVOKED")
         return jsonify({"message": "Analysis task cancelled.", "task_id": task_id}), 200
     else:
