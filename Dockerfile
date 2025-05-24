@@ -42,5 +42,5 @@ ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
 EXPOSE 8000
 
 WORKDIR /workspace
-
-CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=solo --loglevel=debug; else python3 /app/app.py; fi"]
+#CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=solo --loglevel=debug; else python3 /app/app.py; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=threads --loglevel=debug; else python3 /app/app.py; fi"]
