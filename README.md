@@ -110,3 +110,4 @@ This MVP lays the groundwork for further development:
 
 ## 🤝 Contributing
 Contributions, issues, and feature requests are welcome!
+This is an ALPHA early release, so expect bug or function that are still not implemented.
