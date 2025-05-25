@@ -50,3 +50,28 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `PCA_ENABLED`           | Enable PCA (True/False)                     | `False`                             |
 | `DBSCAN_EPS`            | DBSCAN epsilon param                        | `0.5`                               |
 | `DBSCAN_MIN_SAMPLES`    | DBSCAN min samples param                    | `5`                                 |
+
+## ☸️ Kubernetes Deployment (K3S Example)
+An example K8s deployment is provided in **deployments/deployment.yaml** start from it as a template.
+
+**Persistence Note:** SQLite databases are stored in /workspace and mounted to a persistent volume:
+
+```
+volumeMounts:
+  - name: workspace-hostpath
+    mountPath: /workspace
+volumes:
+  - name: workspace-hostpath
+    hostPath:
+      path: /mnt/workspace
+```
+
+**Before Deploying:**
+* update the **mandatory** requirements like jellyfin-credentials Secret with real Jellyfin user_id and api_token. Set JELLYFIN_URL in the audiomuse-ai-config ConfigMap.
+* Remember to configure the storage: Adjust /mnt/workspace to a persistent path or switch to a PVC.
+
+then you can easy deploy it with:
+```
+kubectl apply -f deployments/deployment.yaml
+Access the Flask service through the port exposed by your LoadBalancer or service type.
+```
