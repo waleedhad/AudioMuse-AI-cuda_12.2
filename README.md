@@ -107,3 +107,6 @@ This MVP lays the groundwork for further development:
 * 💡 **Integration into Music Clients:** Directly used in Music Player that interact with Jellyfin media server, for playlist creation OR istant mix;
 * 🖥️ **Jellyfing Plugin:** Integration as a Jellyfin plugin to have only one and easy-to-use front-end
 * 🔁 **Cross-Platform Sync** Export playlists to .m3u or sync to external platforms
+
+## 🤝 Contributing
+Contributions, issues, and feature requests are welcome!
