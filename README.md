@@ -100,3 +100,10 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * **MusiCNN embedding model** – Developed as part of the [AcousticBrainz project](https://acousticbrainz.org/), based on a convolutional neural network trained for music tagging and embedding.
 * **Mood prediction model** – A TensorFlow-based model trained to map MusiCNN embeddings to mood probabilities (you must provide or train your own compatible model).
 * **Docker / OCI-compatible Containers** – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
+
+## 🚀 Future Possibilities
+This MVP lays the groundwork for further development:
+
+* 💡 **Integration into Music Clients:** Directly used in Music Player that interact with Jellyfin media server, for playlist creation OR istant mix;
+* 🖥️ **Jellyfing Plugin:** Integration as a Jellyfin plugin to have only one and easy-to-use front-end
+* 🔁 **Cross-Platform Sync** Export playlists to .m3u or sync to external platforms
