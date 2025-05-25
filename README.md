@@ -79,6 +79,8 @@ then you can easy deploy it with:
 kubectl apply -f deployments/deployment.yaml
 Access the Flask service through the port exposed by your LoadBalancer or service type.
 ```
+For having a more stable use I suggest to edit the deployment container image to use the **alpha** tags, for example **ghcr.io/neptunehub/audiomuse-ai:0.1.1-alpha**. The **latest** tag is used for development purpose
+
 ## 🛠️ Key Technologies
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
