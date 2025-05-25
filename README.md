@@ -1,7 +1,23 @@
 # AudioMuse-AI
 AutomAudioMuse AI: Leverages Essentia for deep audio analysis and AI-powered clustering to create smart, genre-based playlists within Jellyfinatic APlaylist creation container for Jellyfin
 
-# Configuration parameter
+
+## 🔄 Workflow Overview
+
+This is the main workflow on how this algorithm work. To have an easy way to use it you will have a front-end reachable to **yourip:8000** with the button to start/cancel the analysis (it can take hours depending from the number of songs in hour jellyfin library) and a button to create the playlist.
+
+* Initiate from Frontend: Start an analysis via the Flask web UI.
+* Job Queued on Redis: Task is sent to Redis.
+* Celery Worker Processes:
+  * Fetch metadata and download audio from Jellyfin
+  * Analyze tracks using Essentia and TensorFlow
+  * Store results in db.sqlite
+* Flexible Clustering: Re-cluster tracks anytime using stored analysis data.
+* Jellyfin Playlist Creation: Create playlists based on clustering results directly in Jellyfin.
+
+**Persistence:** SQLite databases (db.sqlite, status_db.sqlite) are stored in mounted volumes to retain data between restarts.
+
+## Configuration parameter
 
 This are the parameter accepted for thi script, you can pass them as env value using as an example **/depoyment/deployment.yaml** in this repository.
 
