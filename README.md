@@ -15,11 +15,15 @@ The **mandatory** parameter that you need to change from the example are this:
 | `CELERY_RESULT_BACKEND` | Celery result backend (your redit endpoint) | `redis://redis-service.playlist:6379/0`|
 
 This are parameter that you can leave as it is, the important things is that you mount **/workspace** container folder in a PVC or in an hostPath. This because the db with all the song analysis will be saved there.
+| Parameter               | Description                                 | Default Value                       |
+| ----------------------- | ------------------------------------------- | ----------------------------------- |
 | `TEMP_DIR`              | Temp directory for audio files              | `/workspace/temp_audio`                   |
 | `DB_PATH`               | SQLite DB path for analysis data            | `/workspace/db.sqlite`              |
 | `STATUS_DB_PATH`        | SQLite DB path for task status              | `/workspace/status_db.sqlite`       |
 
 This are the default parameters on wich the analysis or clustering task will be lunched. You will be able to change them to another value directly in the front-end
+| Parameter               | Description                                 | Default Value                       |
+| ----------------------- | ------------------------------------------- | ----------------------------------- |
 | `NUM_RECENT_ALBUMS`     | Albums to fetch from Jellyfin               | `500`                               |
 | `TOP_N_MOODS`           | Number of top moods for naming playlists    | `3`                                 |
 | `NUM_CLUSTERS`          | KMeans: Number of clusters                  | `10`                                |
