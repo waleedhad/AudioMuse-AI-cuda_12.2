@@ -81,6 +81,18 @@ Access the Flask service through the port exposed by your LoadBalancer or servic
 ```
 For having a more stable use I suggest to edit the deployment container image to use the **alpha** tags, for example **ghcr.io/neptunehub/audiomuse-ai:0.1.1-alpha**. The **latest** tag is used for development purpose
 
+## Screenshots
+
+Here are a few glimpses of AudioMuse AI in action:
+
+#### Analysis Progress
+
+![Screenshot of AudioMuse AI's web interface showing the progress of music analysis tasks.](screenshot/Analysis.png "Audio analysis and task status.")
+
+#### Generated Playlists
+
+![Screenshot of AudioMuse AI's web interface displaying generated mood-based playlists.](screenshot/Playlist.png "View of the created mood-based playlists.")
+
 ## 🛠️ Key Technologies
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
