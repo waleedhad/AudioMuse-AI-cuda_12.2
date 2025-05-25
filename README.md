@@ -34,4 +34,3 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `PCA_ENABLED`           | Enable PCA (True/False)                     | `False`                             |
 | `DBSCAN_EPS`            | DBSCAN epsilon param                        | `0.5`                               |
 | `DBSCAN_MIN_SAMPLES`    | DBSCAN min samples param                    | `5`                                 |
-| `MOOD_LABELS`           | Mood labels to predict                      | `"energetic,calm,happy,sad,...etc"` |
