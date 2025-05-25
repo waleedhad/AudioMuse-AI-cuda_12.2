@@ -75,3 +75,21 @@ then you can easy deploy it with:
 kubectl apply -f deployments/deployment.yaml
 Access the Flask service through the port exposed by your LoadBalancer or service type.
 ```
+## 🛠️ Key Technologies
+AudioMuse AI is built upon a robust stack of open-source technologies:
+
+* **Flask:** Provides the lightweight web interface for user interaction and API endpoints.
+* **Celery:** A distributed task queue that handles the computationally intensive audio analysis and playlist generation in the background, ensuring the web UI remains responsive. It uses Redis as its broker and result backend.
+* **Essentia-tensorflow:** An open-source library for audio analysis, feature extraction, and music information retrieval. It's used here for:
+  * MonoLoader: Loading and resampling audio files.
+  * RhythmExtractor2013: Extracting tempo information.
+  * KeyExtractor: Determining the musical key and scale.
+  * TensorflowPredictMusiCNN & TensorflowPredict2D: Leveraging pre-trained TensorFlow models (like MusiCNN) for generating rich audio embeddings and predicting mood tags.
+* **Scikit-learn:** Utilized for machine learning algorithms:
+  * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).
+  * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.
+* **SQLite:** A lightweight, file-based database used for persisting:
+  * Analyzed track metadata (tempo, key, mood vectors).
+  * Generated playlist structures.
+  * Task status for the web interface.
+* **Jellyfin API:** Integrates directly with your Jellyfin server to fetch media, download audio, and create/manage playlists.
