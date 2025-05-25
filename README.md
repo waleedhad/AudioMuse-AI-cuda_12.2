@@ -1,5 +1,9 @@
+**IMPORTANT:** This is an ALPHA open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purpose, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
+
 # AudioMuse-AI
-AutomAudioMuse AI: Leverages Essentia for deep audio analysis and AI-powered clustering to create smart, genre-based playlists within Jellyfinatic APlaylist creation container for Jellyfin
+AutomAudioMuse-AI is a Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using deep audio analysis via [Essentia](https://essentia.upf.edu/) with TensorFlow. All you need is in a container that you can deploy locally or on your kubernetes cluster (tested on K3S). In this repo you also have a /deployment/deployment.yaml example that you need to configure followuing the configuration parameter chapter.
+
+The main scope of this applicatio is testing the clustering algorithm. A front-end is provided for an eaxy to use. You can also found the stand-alone python script in [`Jellyfin-Essentia-Playlist`](https://github.com/NeptuneHub/Jellyfin-Essentia-Playlist) repo.
 
 
 ## 🔄 Workflow Overview
