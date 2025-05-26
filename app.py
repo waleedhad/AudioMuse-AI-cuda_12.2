@@ -232,7 +232,7 @@ def get_all_tracks(db_path):
 def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
     """
     Generates a human-readable name for a cluster based on its centroid's
-    tempo and predominant moods.
+    tempo and predominant moods. Also returns top mood scores for diversity calculation.
     """
     if pca_enabled and pca_model is not None:
         # Inverse transform to get back to the original feature space
@@ -398,6 +398,7 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
     """
     Celery task to run the clustering and playlist generation process.
     Updates task state with progress and log messages.
+    Includes weighted diversity score calculation.
     """
     log_messages = []
     def log_and_update(message, progress):
@@ -420,7 +421,7 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
         X_original = [score_vector(row, MOOD_LABELS) for row in rows]
         X_scaled = np.array(X_original)
 
-        best_diversity_score = -1
+        best_diversity_score = -1.0 # Initialize with a float for comparison
         best_clustering_results = None
 
         for run_idx in range(num_clustering_runs):
@@ -501,23 +502,39 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
 
             current_named_playlists = defaultdict(list)
             current_playlist_centroids = {}
-            predominant_moods_found = set()
+            
+            # --- START NEW DIVERSITY SCORE LOGIC ---
+            unique_predominant_mood_scores = {} # Dictionary to store the max score for each unique mood found
+            # --- END NEW DIVERSITY SCORE LOGIC ---
 
             for label, songs in filtered_clusters.items():
                 if songs:
                     center = cluster_centers[label]
                     name, top_scores = name_cluster(center, pca_model, pca_enabled, MOOD_LABELS)
                     
+                    # --- START NEW DIVERSITY SCORE LOGIC ---
                     if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
+                        # Find the actual mood label with the highest score from top_scores
+                        # This is the "primary predominant mood" for this specific cluster
                         predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
                         if predominant_mood_key in MOOD_LABELS:
-                             predominant_moods_found.add(predominant_mood_key)
+                            current_mood_score = top_scores.get(predominant_mood_key, 0.0)
+                            # Store the highest score encountered for this specific mood label across all clusters in this run
+                            unique_predominant_mood_scores[predominant_mood_key] = max(
+                                unique_predominant_mood_scores.get(predominant_mood_key, 0.0),
+                                current_mood_score
+                            )
+                    # --- END NEW DIVERSITY SCORE LOGIC ---
 
                     current_named_playlists[name].extend(songs)
                     current_playlist_centroids[name] = top_scores
 
-            diversity_score = len(predominant_moods_found)
-            log_and_update(f"  Run {run_idx + 1}: Found {diversity_score} unique predominant moods.", progress_base + 8)
+            # --- START NEW DIVERSITY SCORE LOGIC ---
+            # Calculate the diversity score as the sum of the highest scores for each unique predominant mood
+            diversity_score = sum(unique_predominant_mood_scores.values())
+            # --- END NEW DIVERSITY SCORE LOGIC ---
+
+            log_and_update(f"  Run {run_idx + 1}: Weighted Diversity Score: {diversity_score:.2f}.", progress_base + 8)
 
             if diversity_score > best_diversity_score:
                 best_diversity_score = diversity_score
@@ -532,7 +549,7 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
             self.update_state(state='FAILURE', meta={'progress': 100, 'status': 'No valid clusters found', 'log_output': log_messages})
             return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
 
-        log_and_update(f"Applying best clustering results (Diversity Score: {best_diversity_score})...", 90)
+        log_and_update(f"Applying best clustering results (Weighted Diversity Score: {best_diversity_score:.2f})...", 90)
         final_named_playlists = best_clustering_results["named_playlists"]
         final_playlist_centroids = best_clustering_results["playlist_centroids"]
         final_pca_model = best_clustering_results["pca_model"] # Retrieve the PCA model
@@ -541,12 +558,10 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
         update_playlist_table(DB_PATH, final_named_playlists)
         
         log_and_update("Creating/Updating playlists on Jellyfin...", 98)
-        # Pass the pca_model to create_or_update_playlists_on_jellyfin if it's needed there for naming
-        # (though name_cluster is called within this task, not in create_or_update_playlists_on_jellyfin)
         create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS)
         
-        log_and_update(f"Playlists generated and updated on Jellyfin! Best run had {best_diversity_score} unique predominant moods.", 100)
-        return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had {best_diversity_score} unique predominant moods."}
+        log_and_update(f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}.", 100)
+        return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}."}
 
     except Exception as e:
         import traceback
