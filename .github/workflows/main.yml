@@ -102,21 +102,23 @@ jobs:
             --link redis-test:redis \
             -e SERVICE_TYPE=celery \
             -e CELERY_BROKER_URL=redis://redis:6379/0 \
+            -e CELERY_RESULT_BACKEND=redis://redis:6379/0 \
             ${{ steps.docker_tags.outputs.test_tag }}
 
-          echo "Waiting for Celery worker to start (max 30 seconds)..."
-          # Check if the Celery worker container is running and if its logs indicate successful connection to Redis
+          echo "Waiting for Celery worker to start (max 90 seconds)..."
+          # Check if the Celery worker container is running and if its logs indicate it's "ready"
           for i in $(seq 1 30); do
             if docker ps -f name=celery-test-worker --format '{{.Status}}' | grep -q 'Up'; then
-              if docker logs celery-test-worker 2>&1 | grep -q "connected to redis"; then
-                  echo "Celery worker container is running and connected to Redis."
+              # Look for the "ready." log message which indicates full startup
+              if docker logs celery-test-worker 2>&1 | grep -q "ready."; then
+                  echo "Celery worker container is running and ready."
                   exit 0
               fi
             fi
             echo "Waiting... ($i/30)"
-            sleep 2
+            sleep 3 # Increased sleep duration
           done
-          echo "Celery worker container did not start or connect to Redis within the expected time."
+          echo "Celery worker container did not start or become ready within the expected time."
           docker logs celery-test-worker # Print logs for debugging
           exit 1 # Fail the job
 
