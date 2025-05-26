@@ -5,7 +5,7 @@ import requests
 from collections import defaultdict
 import numpy as np
 from flask import Flask, jsonify, request, render_template, g
-from celery import Celery
+from celery import Celery, current_task # Import current_task
 from celery.result import AsyncResult
 from contextlib import closing
 import json
@@ -305,7 +305,8 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
 
     def log_and_update(message, progress, current_album=None, current_album_idx=0, total_albums=0):
         log_messages.append(message)
-        self.update_state(state='PROGRESS', meta={
+        # Use current_task.update_state instead of self.update_state for robustness
+        current_task.update_state(state='PROGRESS', meta={
             'progress': progress,
             'status': message,
             'log_output': log_messages,
@@ -326,9 +327,9 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             analysis_start_progress = 5
             analysis_end_progress = 85
             for idx, album in enumerate(albums, 1):
-                # Check for revocation at each album
-                if self.request.is_revoked():
-                    log_and_update(f"Task {self.request.id} revoked during album processing. Exiting.", 100)
+                # FIXED: Use current_task.request.is_revoked()
+                if current_task.request.is_revoked():
+                    log_and_update(f"Task {current_task.request.id} revoked during album processing. Exiting.", 100)
                     return {"status": "REVOKED", "message": "Analysis task was revoked."}
 
                 album_progress_base = analysis_start_progress + int((analysis_end_progress - analysis_start_progress) * ((idx - 1) / total_albums))
@@ -339,9 +340,9 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                     continue
                 total_tracks_in_album = len(tracks)
                 for track_idx, item in enumerate(tracks, 1):
-                    # Check for revocation at each track
-                    if self.request.is_revoked():
-                        log_and_update(f"Task {self.request.id} revoked during track processing. Exiting.", 100)
+                    # FIXED: Use current_task.request.is_revoked()
+                    if current_task.request.is_revoked():
+                        log_and_update(f"Task {current_task.request.id} revoked during track processing. Exiting.", 100)
                         return {"status": "REVOKED", "message": "Analysis task was revoked."}
 
                     track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
@@ -377,7 +378,8 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
         error_traceback = traceback.format_exc()
         print(f"FATAL ERROR: Analysis failed: {e}\n{error_traceback}")
         log_and_update(f"❌ Analysis failed: {e}", 100)
-        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Analysis failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'analysis'})
+        # Use current_task.update_state for final state update
+        current_task.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Analysis failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'analysis'})
         return {"status": "FAILURE", "message": f"Analysis failed: {e}", 'task_type': 'analysis'}
 
 @celery.task(bind=True)
@@ -391,7 +393,8 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
 
     def log_and_update(message, progress):
         log_messages.append(message)
-        self.update_state(state='PROGRESS', meta={
+        # Use current_task.update_state instead of self.update_state for robustness
+        current_task.update_state(state='PROGRESS', meta={
             'progress': progress,
             'status': message,
             'log_output': log_messages,
@@ -416,9 +419,9 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
         log_and_update(f"📊 Running {num_clustering_runs} clustering iterations...", 10)
 
         for run_idx in range(num_clustering_runs):
-            # Check for revocation at each run iteration
-            if self.request.is_revoked():
-                log_and_update(f"Task {self.request.id} revoked during clustering iterations. Exiting.", 100)
+            # FIXED: Use current_task.request.is_revoked()
+            if current_task.request.is_revoked():
+                log_and_update(f"Task {current_task.request.id} revoked during clustering iterations. Exiting.", 100)
                 return {"status": "REVOKED", "message": "Clustering task was revoked.", 'task_type': 'clustering'}
 
             current_run_progress = 10 + int(80 * ((run_idx + 1) / num_clustering_runs)) # 10% for initial, 80% for runs
@@ -539,7 +542,8 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
         error_traceback = traceback.format_exc()
         print(f"FATAL ERROR: Clustering failed: {e}\n{error_traceback}")
         log_and_update(f"❌ Clustering failed: {e}", 100)
-        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'clustering'})
+        # Use current_task.update_state for final state update
+        current_task.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'clustering'})
         return {"status": "FAILURE", "message": f"Clustering failed: {e}", 'task_type': 'clustering'}
 
 # --- API Endpoints ---
