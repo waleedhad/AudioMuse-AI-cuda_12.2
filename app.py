@@ -200,7 +200,16 @@ def get_all_tracks(db_path):
 
 def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
     if pca_enabled and pca_model is not None:
-        scaled_vector = pca_model.inverse_transform(centroid_scaled_vector)
+        # Inverse transform to get back to the original feature space
+        # Make sure the input centroid_scaled_vector has the correct shape for inverse_transform
+        # It should be 2D: (1, n_components) if pca_model was fitted on 2D data
+        try:
+            scaled_vector = pca_model.inverse_transform(centroid_scaled_vector.reshape(1, -1))[0]
+        except ValueError:
+            # Handle cases where inverse_transform might fail due to shape mismatch
+            # or if pca_model is None or not fitted correctly
+            print("Warning: PCA inverse_transform failed. Using original scaled vector.")
+            scaled_vector = centroid_scaled_vector
     else:
         scaled_vector = centroid_scaled_vector
 
@@ -213,12 +222,20 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
         tempo_label = "Medium"
     else:
         tempo_label = "Fast"
-    top_indices = np.argsort(mood_values)[::-1][:3]
-    mood_names = [mood_labels[i] for i in top_indices]
-    mood_part = "_".join(mood_names).title()
+    
+    # Ensure mood_values is not empty or all zeros
+    if len(mood_values) == 0 or np.sum(mood_values) == 0:
+        top_indices = []
+    else:
+        top_indices = np.argsort(mood_values)[::-1][:3] # Get top 3 moods
+
+    mood_names = [mood_labels[i] for i in top_indices if i < len(mood_labels)] # Ensure index is valid
+    mood_part = "_".join(mood_names).title() if mood_names else "Mixed" # Handle case with no strong moods
     full_name = f"{mood_part}_{tempo_label}"
-    top_mood_scores = {mood_labels[i]: mood_values[i] for i in top_indices}
+    
+    top_mood_scores = {mood_labels[i]: mood_values[i] for i in top_indices if i < len(mood_labels)}
     extra_info = {"tempo": round(tempo_norm, 2)}
+    
     return full_name, {**top_mood_scores, **extra_info}
 
 def update_playlist_table(db_path, playlists):
@@ -258,7 +275,7 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, heade
             try:
                 r = requests.post(f"{jellyfin_url}/Playlists", headers=headers, json=body, timeout=30)
                 if r.ok:
-                    centroid_info = cluster_centers[base_name]
+                    centroid_info = cluster_centers.get(base_name, {}) # Use .get to prevent KeyError
                     top_moods = {k: v for k, v in centroid_info.items() if k in mood_labels}
                     extra_info = {k: v for k, v in centroid_info.items() if k not in mood_labels}
                     centroid_str = ", ".join(f"{k}:{v:.2f}" for k, v in top_moods.items())
@@ -425,6 +442,7 @@ def get_config():
         "num_clusters": NUM_CLUSTERS,
         "top_n_moods": TOP_N_MOODS,
         "mood_labels": MOOD_LABELS,
+        "clustering_runs": CLUSTERING_RUNS, # New config parameter
     })
 
 @app.route('/api/clustering', methods=['POST'])
@@ -436,83 +454,142 @@ def run_clustering():
     dbscan_min_samples = int(data.get('dbscan_min_samples', DBSCAN_MIN_SAMPLES))
     pca_components = int(data.get('pca_components', 0))
     pca_enabled = (pca_components > 0)
+    num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS)) # New parameter
+
     try:
         rows = get_all_tracks(DB_PATH)
         if len(rows) < 2:
             return jsonify({"status": "error", "message": "Not enough analyzed tracks for clustering."}), 400
+        
         X_original = [score_vector(row, MOOD_LABELS) for row in rows]
-        X_scaled = X_original
-        pca_model = None
-        if pca_enabled:
-            pca_model = PCA(n_components=pca_components)
-            X_pca = pca_model.fit_transform(X_scaled)
-            data_for_clustering = X_pca
-        else:
+        X_scaled = np.array(X_original) # Convert to numpy array for PCA/clustering
+
+        best_diversity_score = -1
+        best_clustering_results = None
+
+        for run_idx in range(num_clustering_runs):
+            print(f"Clustering Run {run_idx + 1}/{num_clustering_runs}")
+            pca_model = None
             data_for_clustering = X_scaled
-        if clustering_method == "kmeans":
-            k = num_clusters if num_clusters > 0 else max(1, len(rows) // MAX_SONGS_PER_CLUSTER)
-            kmeans = KMeans(n_clusters=min(k, len(rows)), random_state=42, n_init='auto')
-            labels = kmeans.fit_predict(data_for_clustering)
-            cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(min(k, len(rows)))}
-            centers_for_points = kmeans.cluster_centers_[labels]
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-        elif clustering_method == "dbscan":
-            dbscan = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples)
-            labels = dbscan.fit_predict(data_for_clustering)
+
+            if pca_enabled:
+                pca_model = PCA(n_components=pca_components)
+                X_pca = pca_model.fit_transform(X_scaled)
+                data_for_clustering = X_pca
+
+            labels = None
             cluster_centers = {}
             raw_distances = np.zeros(len(data_for_clustering))
-            for cluster_id in set(labels):
-                if cluster_id == -1:
+
+            if clustering_method == "kmeans":
+                k = num_clusters if num_clusters > 0 else max(1, len(rows) // MAX_SONGS_PER_CLUSTER)
+                kmeans = KMeans(n_clusters=min(k, len(rows)), random_state=None, n_init='auto') # Set random_state=None for true randomness across runs
+                labels = kmeans.fit_predict(data_for_clustering)
+                cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(min(k, len(rows)))}
+                centers_for_points = kmeans.cluster_centers_[labels]
+                raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            elif clustering_method == "dbscan":
+                dbscan = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples)
+                labels = dbscan.fit_predict(data_for_clustering)
+                
+                # DBSCAN does not have explicit centroids, so calculate them for existing clusters
+                for cluster_id in set(labels):
+                    if cluster_id == -1: # Noise points
+                        continue
+                    indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
+                    cluster_points = np.array([data_for_clustering[i] for i in indices])
+                    if len(cluster_points) > 0:
+                        center = cluster_points.mean(axis=0)
+                        for i in indices:
+                            raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
+                        cluster_centers[cluster_id] = center
+            else:
+                return jsonify({"status": "error", "message": f"Unsupported clustering algorithm: {clustering_method}"}), 400
+
+            max_dist = raw_distances.max()
+            normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
+            
+            # Prepare track_info for current run
+            track_info = []
+            for row, label, vec, dist in zip(rows, labels, data_for_clustering, normalized_distances):
+                if label == -1: # Skip noise points for now
                     continue
-                indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
-                cluster_points = np.array([data_for_clustering[i] for i in indices])
-                if len(cluster_points) > 0:
-                    center = cluster_points.mean(axis=0)
-                    for i in indices:
-                        raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
-                    cluster_centers[cluster_id] = center
-        else:
-            return jsonify({"status": "error", "message": f"Unsupported clustering algorithm: {clustering_method}"}), 400
-        max_dist = raw_distances.max()
-        normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-        track_info = []
-        for row, label, vec, dist in zip(rows, labels, data_for_clustering, normalized_distances):
-            if label == -1:
-                continue
-            track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
-        filtered_clusters = defaultdict(list)
-        for cluster_id in set(labels):
-            if cluster_id == -1:
-                continue
-            cluster_tracks = [t for t in track_info if t["label"] == cluster_id and t["distance"] <= MAX_DISTANCE]
-            if not cluster_tracks:
-                continue
-            cluster_tracks.sort(key=lambda x: x["distance"])
-            count_per_artist = defaultdict(int)
-            selected = []
-            for t in cluster_tracks:
-                author = t["row"][2]
-                if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
-                    selected.append(t)
-                    count_per_artist[author] += 1
-                if len(selected) >= MAX_SONGS_PER_CLUSTER:
-                    break
-            for t in selected:
-                item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
-                filtered_clusters[cluster_id].append((item_id, title, author))
-        named_playlists = defaultdict(list)
-        playlist_centroids = {}
-        for label, songs in filtered_clusters.items():
-            if songs:
-                center = cluster_centers[label]
-                name, top_scores = name_cluster(center, pca_model, pca_enabled, MOOD_LABELS)
-                named_playlists[name].extend(songs)
-                playlist_centroids[name] = top_scores
-        update_playlist_table(DB_PATH, named_playlists)
-        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, named_playlists, playlist_centroids, pca_model, MOOD_LABELS)
-        return jsonify({"status": "success", "message": "Playlists generated and updated on Jellyfin!"}), 200
+                track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
+
+            # Filter clusters based on MAX_DISTANCE and MAX_SONGS_PER_ARTIST/CLUSTER
+            filtered_clusters = defaultdict(list)
+            for cluster_id in set(labels):
+                if cluster_id == -1: # Skip noise points
+                    continue
+                cluster_tracks = [t for t in track_info if t["label"] == cluster_id and t["distance"] <= MAX_DISTANCE]
+                if not cluster_tracks:
+                    continue
+                cluster_tracks.sort(key=lambda x: x["distance"]) # Sort by distance for selection
+                
+                count_per_artist = defaultdict(int)
+                selected = []
+                for t in cluster_tracks:
+                    author = t["row"][2]
+                    if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
+                        selected.append(t)
+                        count_per_artist[author] += 1
+                    if len(selected) >= MAX_SONGS_PER_CLUSTER:
+                        break
+                for t in selected:
+                    item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
+                    filtered_clusters[cluster_id].append((item_id, title, author))
+
+            # Name playlists and calculate diversity score
+            current_named_playlists = defaultdict(list)
+            current_playlist_centroids = {}
+            predominant_moods_found = set()
+
+            for label, songs in filtered_clusters.items():
+                if songs:
+                    center = cluster_centers[label]
+                    name, top_scores = name_cluster(center, pca_model, pca_enabled, MOOD_LABELS)
+                    
+                    # Extract predominant mood for diversity calculation
+                    # The name_cluster function returns 'top_mood_scores' as part of 'top_scores'
+                    # which contains the top 3 moods. We can take the very first one as the predominant.
+                    if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
+                        # Find the actual mood label with the highest score from top_scores
+                        predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
+                        if predominant_mood_key in MOOD_LABELS:
+                             predominant_moods_found.add(predominant_mood_key)
+
+
+                    current_named_playlists[name].extend(songs)
+                    current_playlist_centroids[name] = top_scores # Store the centroid info including tempo
+
+            diversity_score = len(predominant_moods_found)
+            print(f"Run {run_idx + 1}: Found {diversity_score} unique predominant moods.")
+
+            if diversity_score > best_diversity_score:
+                best_diversity_score = diversity_score
+                best_clustering_results = {
+                    "named_playlists": current_named_playlists,
+                    "playlist_centroids": current_playlist_centroids,
+                    "pca_model": pca_model
+                }
+
+        if not best_clustering_results:
+            return jsonify({"status": "error", "message": "No valid clusters found after multiple runs."}), 500
+
+        # Apply the best clustering results
+        final_named_playlists = best_clustering_results["named_playlists"]
+        final_playlist_centroids = best_clustering_results["playlist_centroids"]
+        final_pca_model = best_clustering_results["pca_model"]
+
+        update_playlist_table(DB_PATH, final_named_playlists)
+        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, final_pca_model, MOOD_LABELS)
+        
+        return jsonify({"status": "success", "message": f"Playlists generated and updated on Jellyfin! Best run had {best_diversity_score} unique predominant moods."}), 200
+
     except Exception as e:
         print(f"Error during clustering: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"status": "error", "message": f"Clustering failed: {e}"}), 500
 
 @app.route('/api/playlists', methods=['GET'])
