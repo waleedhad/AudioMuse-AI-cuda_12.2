@@ -115,7 +115,7 @@
 </head>
 <body class="p-8">
     <div class="container mx-auto">
-        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">Essentia Music Analyzer & Playlist Generator</h1>
+        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">AudioMuse-AI - Music Analyzer & Playlist Generator</h1>
 
         <div class="card p-6 mb-8">
             <h2 class="text-2xl font-semibold mb-4 text-white">Start Music Analysis</h2>
@@ -372,7 +372,7 @@
                     }
                 } catch (error) {
                     console.error(`Error polling ${taskType} status:`, error);
-                    setStatus(taskType, `Error polling: ${error.message || error}`, 'FAILURE');
+                    setStatus(taskType, `Error polling: ${error.message || error}`, 'FAILURE'); // Changed 'type' to 'taskType'
                     clearInterval(pollingInterval);
                     pollingInterval = null;
                     
@@ -753,21 +753,10 @@
                         const toggleBtn = document.createElement('button');
                         toggleBtn.className = 'playlist-toggle';
                         toggleBtn.textContent = 'Show Tracks';
-                        toggleBtn.onclick = function() {
-                            const tracksDiv = this.nextElementSibling;
-                            if (tracksDiv.classList.contains('hidden')) {
-                                tracksDiv.classList.remove('hidden');
-                                this.textContent = 'Hide Tracks';
-                            } else {
-                                tracksDiv.classList.add('hidden');
-                                this.textContent = 'Show Tracks';
-                            }
-                        };
-
+                        
                         const h3 = document.createElement('h3');
                         h3.innerHTML = `${playlistName} (${playlists[playlistName].length} tracks) `;
-                        h3.appendChild(toggleBtn);
-                        li.appendChild(h3);
+                        h3.appendChild(toggleBtn); // Append button to h3
 
                         const tracksDiv = document.createElement('div');
                         tracksDiv.className = 'playlist-tracks hidden'; // Hidden by default
@@ -776,7 +765,35 @@
                             p.textContent = `${track.title} by ${track.author}`;
                             tracksDiv.appendChild(p);
                         });
-                        li.appendChild(tracksDiv);
+                        
+                        li.appendChild(h3); // Append h3 (which contains the button) to li
+                        li.appendChild(tracksDiv); // Append tracksDiv to li
+
+                        // Corrected onclick function to reference tracksDiv via its parent (li)
+                        toggleBtn.onclick = function() {
+                            // 'this' refers to the toggleBtn
+                            // 'this.closest("li")' finds the nearest parent <li> element
+                            // 'tracksDiv' is the second child of the <li> (after the h3)
+                            const parentLi = this.closest("li");
+                            if (parentLi) {
+                                const tracksDiv = parentLi.querySelector('.playlist-tracks'); // Find tracksDiv within this specific li
+                                if (tracksDiv) {
+                                    if (tracksDiv.classList.contains('hidden')) {
+                                        tracksDiv.classList.remove('hidden');
+                                        this.textContent = 'Hide Tracks';
+                                    } else {
+                                        tracksDiv.classList.add('hidden');
+                                        this.textContent = 'Show Tracks';
+                                    }
+                                } else {
+                                    console.error("Could not find tracksDiv for playlist toggle button in parent li:", parentLi);
+                                }
+                            } else {
+                                console.error("Could not find parent li for playlist toggle button:", this);
+                            }
+                        };
+
+
                         playlistList.appendChild(li);
                     }
                 }
