@@ -115,7 +115,7 @@
 </head>
 <body class="p-8">
     <div class="container mx-auto">
-        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">Essentia Music Analyzer & Playlist Generator</h1>
+        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">AudioMuse-AI - Music Analyzer & Playlist Generator</h1>
 
         <div class="card p-6 mb-8">
             <h2 class="text-2xl font-semibold mb-4 text-white">Start Music Analysis</h2>
@@ -149,16 +149,16 @@
             </form>
         </div>
 
-        <div id="progressContainer" class="card p-6 mb-8 hidden">
+        <div id="analysisProgressContainer" class="card p-6 mb-8 hidden">
             <h2 class="text-2xl font-semibold mb-4 text-white">Analysis Status</h2>
-            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="taskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
+            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="analysisTaskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
             <p class="text-lg mb-4 status-box" id="analysisStatus">Status: Idle</p>
             <div class="w-full bg-gray-600 rounded-full h-4 mb-4">
-                <div id="progressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
+                <div id="analysisProgressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
             </div>
             <p class="text-gray-400 text-sm mb-2">Current Album: <span id="currentAlbumName">N/A</span> (<span id="currentAlbumProgress">0/0</span>)</p>
             <h3 class="text-xl font-semibold mb-2 text-white">Analysis Log:</h3>
-            <pre id="logOutput" class="log-output"></pre>
+            <pre id="analysisLogOutput" class="log-output"></pre>
             <div class="mt-4 text-center">
                    <button id="cancelAnalysisBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                     Cancel Analysis
@@ -209,6 +209,23 @@
             </form>
         </div>
 
+        <div id="clusteringProgressContainer" class="card p-6 mb-8 hidden">
+            <h2 class="text-2xl font-semibold mb-4 text-white">Clustering Status</h2>
+            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="clusteringTaskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
+            <p class="text-lg mb-4 status-box" id="clusteringStatus">Status: Idle</p>
+            <div class="w-full bg-gray-600 rounded-full h-4 mb-4">
+                <div id="clusteringProgressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
+            </div>
+            <h3 class="text-xl font-semibold mb-2 text-white">Clustering Log:</h3>
+            <pre id="clusteringLogOutput" class="log-output"></pre>
+            <div class="mt-4 text-center">
+                   <button id="cancelClusteringBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                    Cancel Clustering
+                </button>
+            </div>
+        </div>
+
+
         <div id="playlistsDisplay" class="card p-6 hidden">
             <h2 class="text-2xl font-semibold mb-4 text-white">Generated Playlists</h2>
             <ul id="playlistList" class="playlist-list">
@@ -217,22 +234,21 @@
     </div>
 
     <script>
-        // --- KEY CHANGE HERE ---
-        // By using a relative path, the browser will automatically use the same host and port
-        // from which it loaded this index.html file (which will be your K3S LoadBalancer IP:8000).
         const API_BASE_URL = '/api';
 
+        // Analysis elements
         const analysisForm = document.getElementById('analysisForm');
         const startAnalysisBtn = document.getElementById('startAnalysisBtn');
-        const progressContainer = document.getElementById('progressContainer');
-        const taskIdDisplay = document.getElementById('taskIdDisplay');
+        const analysisProgressContainer = document.getElementById('analysisProgressContainer');
+        const analysisTaskIdDisplay = document.getElementById('analysisTaskIdDisplay');
         const analysisStatus = document.getElementById('analysisStatus');
-        const progressBar = document.getElementById('progressBar');
+        const analysisProgressBar = document.getElementById('analysisProgressBar');
         const currentAlbumName = document.getElementById('currentAlbumName');
         const currentAlbumProgress = document.getElementById('currentAlbumProgress');
-        const logOutput = document.getElementById('logOutput');
+        const analysisLogOutput = document.getElementById('analysisLogOutput');
         const cancelAnalysisBtn = document.getElementById('cancelAnalysisBtn');
 
+        // Playlist/Clustering elements
         const playlistForm = document.getElementById('playlistForm');
         const clusteringMethodSelect = document.getElementById('clustering_method');
         const kmeansOptions = document.getElementById('kmeans_options');
@@ -240,84 +256,137 @@
         const playlistsDisplay = document.getElementById('playlistsDisplay');
         const playlistList = document.getElementById('playlistList');
         const fetchPlaylistsBtn = document.getElementById('fetchPlaylistsBtn');
+        const generatePlaylistsBtn = document.getElementById('generatePlaylistsBtn'); // Added for disabling
 
-        // NEW FIELD ELEMENT
-        const clusteringRunsInput = document.getElementById('clustering_runs');
+        // Clustering Progress elements
+        const clusteringProgressContainer = document.getElementById('clusteringProgressContainer');
+        const clusteringTaskIdDisplay = document.getElementById('clusteringTaskIdDisplay');
+        const clusteringStatus = document.getElementById('clusteringStatus');
+        const clusteringProgressBar = document.getElementById('clusteringProgressBar');
+        const clusteringLogOutput = document.getElementById('clusteringLogOutput');
+        const cancelClusteringBtn = document.getElementById('cancelClusteringBtn');
+
 
         let pollingInterval = null;
-        let currentTaskId = null; // Removed localStorage.getItem here, will fetch from DB first
+        let currentTaskId = null;
+        let currentTaskType = null; // To store 'analysis' or 'clustering'
 
         // --- Utility Functions ---
 
-        function showProgressContainer(show = true) {
-            progressContainer.classList.toggle('hidden', !show);
-        }
-
-        function setAnalysisStatus(statusText, stateClass) {
-            analysisStatus.textContent = `Status: ${statusText}`;
-            analysisStatus.className = 'text-lg mb-4 status-box'; // Reset classes
-            if (stateClass) {
-                analysisStatus.classList.add(`status-${stateClass}`); // Add state-specific class
+        function showProgressContainer(type, show = true) {
+            if (type === 'analysis') {
+                analysisProgressContainer.classList.toggle('hidden', !show);
+            } else if (type === 'clustering') {
+                clusteringProgressContainer.classList.toggle('hidden', !show);
             }
         }
 
-        function updateProgress(data) {
-            // Update status text and color
-            setAnalysisStatus(data.status, data.state);
+        function setStatus(type, statusText, stateClass) {
+            let statusElement;
+            if (type === 'analysis') {
+                statusElement = analysisStatus;
+            } else if (type === 'clustering') {
+                statusElement = clusteringStatus;
+            }
+            if (statusElement) {
+                statusElement.textContent = `Status: ${statusText}`;
+                statusElement.className = 'text-lg mb-4 status-box'; // Reset classes
+                if (stateClass) {
+                    statusElement.classList.add(`status-${stateClass}`); // Add state-specific class
+                }
+            }
+        }
 
-            // Update progress bar
-            const percentage = data.progress || 0; // Use 'progress' from meta
-            progressBar.style.width = `${percentage}%`;
-
-            // Update album name and progress
+        function updateAnalysisProgress(data) {
+            setStatus('analysis', data.status, data.state);
+            analysisProgressBar.style.width = `${data.progress || 0}%`;
             currentAlbumName.textContent = data.current_album || 'N/A';
             currentAlbumProgress.textContent = `${data.current_album_idx || 0}/${data.total_albums || 0}`;
-
-            // Update log output
             if (Array.isArray(data.log_output)) {
-                logOutput.textContent = data.log_output.join('\n');
+                analysisLogOutput.textContent = data.log_output.join('\n');
             } else {
-                logOutput.textContent = String(data.log_output || '');
+                analysisLogOutput.textContent = String(data.log_output || '');
             }
-            logOutput.scrollTop = logOutput.scrollHeight; // Auto-scroll to bottom
-
-            // Handle task completion/failure/revocation
-            if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state)) {
-                clearInterval(pollingInterval);
-                pollingInterval = null;
-                startAnalysisBtn.disabled = false; // Re-enable start button
-                cancelAnalysisBtn.disabled = true; // Disable cancel button
-                currentTaskId = null; // Clear the task ID
-            } else {
-                 startAnalysisBtn.disabled = true; // Keep disabled if in progress
-                 cancelAnalysisBtn.disabled = false;
-            }
+            analysisLogOutput.scrollTop = analysisLogOutput.scrollHeight;
         }
 
-        async function pollStatus(taskId) {
-            if (pollingInterval) {
-                clearInterval(pollingInterval); // Clear any existing interval
+        function updateClusteringProgress(data) {
+            setStatus('clustering', data.status, data.state);
+            clusteringProgressBar.style.width = `${data.progress || 0}%`;
+            if (Array.isArray(data.log_output)) {
+                clusteringLogOutput.textContent = data.log_output.join('\n');
+            } else {
+                clusteringLogOutput.textContent = String(data.log_output || '');
             }
-            showProgressContainer(true); // Ensure progress container is visible when polling starts
+            clusteringLogOutput.scrollTop = clusteringLogOutput.scrollHeight;
+        }
+
+        async function pollStatus(taskId, taskType) {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            showProgressContainer(taskType, true); // Ensure correct container is visible
+
             pollingInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/analysis/status/${taskId}`);
+                    const response = await fetch(`${API_BASE_URL}/status/${taskId}`);
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
                     const data = await response.json();
-                    taskIdDisplay.textContent = data.task_id;
-                    updateProgress(data);
+
+                    if (taskType === 'analysis') {
+                        analysisTaskIdDisplay.textContent = data.task_id;
+                        updateAnalysisProgress(data);
+                    } else if (taskType === 'clustering') {
+                        clusteringTaskIdDisplay.textContent = data.task_id;
+                        updateClusteringProgress(data);
+                    }
+
+                    if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state)) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                        
+                        // Re-enable all relevant buttons
+                        startAnalysisBtn.disabled = false;
+                        cancelAnalysisBtn.disabled = true;
+                        generatePlaylistsBtn.disabled = false; 
+                        cancelClusteringBtn.disabled = true;
+                        fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+
+                        currentTaskId = null;
+                        currentTaskType = null;
+
+                        // If clustering was successful, fetch and display playlists
+                        if (taskType === 'clustering' && data.state === 'SUCCESS') {
+                            fetchPlaylists();
+                        }
+
+                    } else {
+                        // Keep relevant buttons disabled if task is still in progress
+                        startAnalysisBtn.disabled = true;
+                        cancelAnalysisBtn.disabled = (taskType === 'analysis' ? false : true); // Only enable if it's the active task type
+                        generatePlaylistsBtn.disabled = true;
+                        cancelClusteringBtn.disabled = (taskType === 'clustering' ? false : true); // Only enable if it's the active task type
+                        fetchPlaylistsBtn.disabled = true; // Disable fetch button during any active task
+                    }
                 } catch (error) {
-                    console.error("Error polling analysis status:", error);
-                    setAnalysisStatus(`Error polling: ${error.message || error}`, 'FAILURE');
+                    console.error(`Error polling ${taskType} status:`, error);
+                    setStatus(taskType, `Error polling: ${error.message || error}`, 'FAILURE'); // Changed 'type' to 'taskType'
                     clearInterval(pollingInterval);
                     pollingInterval = null;
+                    
+                    // Re-enable all relevant buttons on polling error
                     startAnalysisBtn.disabled = false;
                     cancelAnalysisBtn.disabled = true;
+                    generatePlaylistsBtn.disabled = false;
+                    cancelClusteringBtn.disabled = true;
+                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+
                     currentTaskId = null;
+                    currentTaskType = null;
                 }
-            }, 3000); // Poll every 3 seconds
+            }, 3000);
         }
 
         async function populateConfig() {
@@ -338,15 +407,15 @@
                 document.getElementById('num_clusters').value = config.num_clusters !== undefined ? config.num_clusters : 40;
                 document.getElementById('dbscan_eps').value = config.dbscan_eps !== undefined ? config.dbscan_eps : 0.15;
                 document.getElementById('dbscan_min_samples').value = config.dbscan_min_samples !== undefined ? config.dbscan_min_samples : 10;
-                document.getElementById('pca_components').value = config.pca_enabled ? 3 : 0; // Set to 3 if enabled, 0 if disabled
-                // --- NEW JS CHANGES HERE ---
-                clusteringRunsInput.value = config.clustering_runs !== undefined ? config.clustering_runs : 10; // Populate new field
-                // --- END NEW JS CHANGES ---
+                document.getElementById('pca_components').value = config.pca_enabled ? 3 : 0;
+                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 10;
 
-                toggleClusteringOptions(); // Adjust visibility based on loaded config
+                toggleClusteringOptions();
             } catch (error) {
                 console.error("Failed to fetch initial configuration:", error);
-                alert("Could not load initial configuration. Please check the backend API.");
+                // Using a custom modal/dialog instead of alert for better UX
+                const errorMessage = `Could not load initial configuration. Please check the backend API. Error: ${error.message}`;
+                displayMessageModal(errorMessage, 'Error');
             }
         }
 
@@ -362,138 +431,146 @@
 
         async function fetchLastAnalysisStatus() {
             try {
-                const response = await fetch(`${API_BASE_URL}/analysis/last_task`);
+                const response = await fetch(`${API_BASE_URL}/last_task`);
                 const data = await response.json();
                 if (data.task_id && ['PENDING', 'PROGRESS', 'STARTED'].includes(data.status)) {
                     currentTaskId = data.task_id;
-                    taskIdDisplay.textContent = currentTaskId;
-                    showProgressContainer(true);
-                    setAnalysisStatus(data.status, data.status); // Initial status from DB
-                    pollStatus(currentTaskId); // Resume polling
+                    currentTaskType = data.task_type;
+
+                    // Hide both containers initially, then show the relevant one
+                    showProgressContainer('analysis', false);
+                    showProgressContainer('clustering', false);
+
+                    if (currentTaskType === 'analysis') {
+                        analysisTaskIdDisplay.textContent = currentTaskId;
+                        setStatus('analysis', data.status, data.status);
+                        pollStatus(currentTaskId, currentTaskType);
+                    } else if (currentTaskType === 'clustering') {
+                        clusteringTaskIdDisplay.textContent = currentTaskId;
+                        setStatus('clustering', data.status, data.status);
+                        pollStatus(currentTaskId, currentTaskType);
+                    }
                 } else if (data.task_id) {
                     // If a task existed but finished, show its final status without polling
                     currentTaskId = data.task_id;
-                    taskIdDisplay.textContent = currentTaskId;
-                    showProgressContainer(true);
-                    setAnalysisStatus(data.status, data.status);
-                    progressBar.style.width = '100%';
-                    logOutput.textContent = `Previous task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
+                    currentTaskType = data.task_type;
+
+                    showProgressContainer('analysis', false);
+                    showProgressContainer('clustering', false);
+
+                    if (currentTaskType === 'analysis') {
+                        analysisTaskIdDisplay.textContent = currentTaskId;
+                        setStatus('analysis', data.status, data.status);
+                        analysisProgressBar.style.width = '100%';
+                        analysisLogOutput.textContent = `Previous analysis task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
+                    } else if (currentTaskType === 'clustering') {
+                        clusteringTaskIdDisplay.textContent = currentTaskId;
+                        setStatus('clustering', data.status, data.status);
+                        clusteringProgressBar.style.width = '100%';
+                        clusteringLogOutput.textContent = `Previous clustering task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
+                        if (data.status === 'SUCCESS') { // If clustering was successful, display playlists
+                            fetchPlaylists();
+                        }
+                    }
                     startAnalysisBtn.disabled = false;
                     cancelAnalysisBtn.disabled = true;
+                    generatePlaylistsBtn.disabled = false;
+                    cancelClusteringBtn.disabled = true;
+                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
                 } else {
-                    showProgressContainer(false); // No previous task, hide progress
+                    // No previous task, hide both progress containers
+                    showProgressContainer('analysis', false);
+                    showProgressContainer('clustering', false);
                     startAnalysisBtn.disabled = false;
                     cancelAnalysisBtn.disabled = true;
+                    generatePlaylistsBtn.disabled = false;
+                    cancelClusteringBtn.disabled = true;
+                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
                 }
             } catch (error) {
-                console.error("Error fetching last analysis status:", error);
-                showProgressContainer(false); // Hide in case of error
+                console.error("Error fetching last task status:", error);
+                showProgressContainer('analysis', false);
+                showProgressContainer('clustering', false);
                 startAnalysisBtn.disabled = false;
                 cancelAnalysisBtn.disabled = true;
+                generatePlaylistsBtn.disabled = false;
+                cancelClusteringBtn.disabled = true;
+                fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
             }
         }
+
+        // Custom modal for messages (replaces alert/confirm)
+        function displayMessageModal(message, type = 'Info', onConfirm = null) {
+            const modalId = 'customMessageModal';
+            let modal = document.getElementById(modalId);
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50';
+                modal.innerHTML = `
+                    <div class="bg-gray-800 p-6 rounded-lg shadow-xl max-w-sm w-full text-white">
+                        <h3 class="text-xl font-bold mb-4" id="modalTitle"></h3>
+                        <p class="mb-6" id="modalMessage"></p>
+                        <div class="flex justify-end space-x-4">
+                            <button id="modalCancelBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                            <button id="modalConfirmBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">OK</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+
+            document.getElementById('modalTitle').textContent = type;
+            document.getElementById('modalMessage').textContent = message;
+
+            const confirmBtn = document.getElementById('modalConfirmBtn');
+            const cancelBtn = document.getElementById('modalCancelBtn');
+
+            confirmBtn.onclick = () => {
+                modal.classList.add('hidden');
+                if (onConfirm) onConfirm(true);
+            };
+
+            if (onConfirm) { // If onConfirm is provided, it's a confirmation dialog
+                cancelBtn.classList.remove('hidden');
+                cancelBtn.onclick = () => {
+                    modal.classList.add('hidden');
+                    onConfirm(false);
+                };
+            } else { // Otherwise, it's just an info/error message
+                cancelBtn.classList.add('hidden');
+            }
+
+            modal.classList.remove('hidden');
+        }
+
 
         // --- Event Listeners ---
 
         analysisForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             startAnalysisBtn.disabled = true;
+            generatePlaylistsBtn.disabled = true; // Disable clustering button too
+            fetchPlaylistsBtn.disabled = true; // Disable fetch button
             cancelAnalysisBtn.disabled = false;
-            logOutput.textContent = ''; // Clear previous logs
-            progressBar.style.width = '0%';
+            cancelClusteringBtn.disabled = true; // Ensure clustering cancel is disabled
+
+            analysisLogOutput.textContent = '';
+            analysisProgressBar.style.width = '0%';
             currentAlbumName.textContent = 'N/A';
             currentAlbumProgress.textContent = '0/0';
-            setAnalysisStatus('Initiating...', 'PENDING');
-            showProgressContainer(true);
+            setStatus('analysis', 'Initiating...', 'PENDING');
+            showProgressContainer('analysis', true);
+            showProgressContainer('clustering', false); // Hide clustering progress
 
             const formData = new FormData(analysisForm);
             const data = Object.fromEntries(formData.entries());
 
-            // Convert numbers to actual numbers
             data.num_recent_albums = parseInt(data.num_recent_albums, 10);
             data.top_n_moods = parseInt(data.top_n_moods, 10);
 
-
             try {
                 const response = await fetch(`${API_BASE_URL}/analysis/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                currentTaskId = result.task_id;
-                taskIdDisplay.textContent = currentTaskId;
-                pollStatus(currentTaskId);
-                alert("Analysis started successfully!");
-            } catch (error) {
-                console.error("Error starting analysis:", error);
-                alert(`Failed to start analysis: ${error.message || error}`);
-                setAnalysisStatus('Failed to start', 'FAILURE');
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                showProgressContainer(false); // Hide if start failed
-            }
-        });
-
-        cancelAnalysisBtn.addEventListener('click', async () => {
-            if (!currentTaskId) {
-                alert("No active analysis to cancel.");
-                return;
-            }
-            if (!confirm(`Are you sure you want to cancel analysis task ${currentTaskId}?`)) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/analysis/cancel/${currentTaskId}`, {
-                    method: 'POST'
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                alert(result.message);
-                if (pollingInterval) {
-                    clearInterval(pollingInterval);
-                    pollingInterval = null;
-                }
-                setAnalysisStatus('Cancelled', 'REVOKED');
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                currentTaskId = null; // Clear task ID on successful cancel
-            } catch (error) {
-                console.error("Error cancelling analysis:", error);
-                alert(`Failed to cancel analysis: ${error.message || error}`);
-            }
-        });
-
-
-        playlistForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            generatePlaylistsBtn.disabled = true;
-            fetchPlaylistsBtn.disabled = true;
-            try {
-                const formData = new FormData(playlistForm);
-                const data = Object.fromEntries(formData.entries());
-
-                // Convert numbers and booleans
-                data.num_clusters = parseInt(data.num_clusters, 10);
-                data.dbscan_eps = parseFloat(data.dbscan_eps);
-                data.dbscan_min_samples = parseInt(data.dbscan_min_samples, 10);
-                const pca_components = parseInt(data.pca_components, 10);
-                data.pca_enabled = pca_components > 0; // Send boolean based on input
-                // Remove PCA components if 0, as it's not used in the backend for disabled PCA
-                if (!data.pca_enabled) {
-                    delete data.pca_components;
-                }
-                // --- NEW JS CHANGES HERE ---
-                data.clustering_runs = parseInt(data.clustering_runs, 10);
-                // --- END NEW JS CHANGES ---
-
-                const response = await fetch(`${API_BASE_URL}/clustering`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
@@ -503,17 +580,159 @@
                     throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
                 }
                 const result = await response.json();
-                alert(result.message);
-                // After successful generation, fetch the updated playlists
-                fetchPlaylists();
+                currentTaskId = result.task_id;
+                currentTaskType = result.task_type;
+                analysisTaskIdDisplay.textContent = currentTaskId;
+                pollStatus(currentTaskId, currentTaskType);
+                displayMessageModal("Analysis started successfully!", "Success");
             } catch (error) {
-                console.error("Error generating playlists:", error);
-                alert(`Failed to generate playlists: ${error.message || error}`);
-            } finally {
+                console.error("Error starting analysis:", error);
+                displayMessageModal(`Failed to start analysis: ${error.message || error}`, "Error");
+                setStatus('analysis', 'Failed to start', 'FAILURE');
+                startAnalysisBtn.disabled = false;
                 generatePlaylistsBtn.disabled = false;
-                fetchPlaylistsBtn.disabled = false;
+                fetchPlaylistsBtn.disabled = false; // Re-enable fetch button
+                cancelAnalysisBtn.disabled = true;
+                showProgressContainer('analysis', false);
             }
         });
+
+        cancelAnalysisBtn.addEventListener('click', () => {
+            if (!currentTaskId || currentTaskType !== 'analysis') {
+                displayMessageModal("No active analysis to cancel.", "Info");
+                return;
+            }
+
+            displayMessageModal(`Are you sure you want to cancel analysis task ${currentTaskId}?`, 'Confirm', async (confirmed) => {
+                if (!confirmed) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/cancel/${currentTaskId}`, {
+                        method: 'POST'
+                    });
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    displayMessageModal(result.message, "Success");
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                    setStatus('analysis', 'Cancelled', 'REVOKED');
+                    startAnalysisBtn.disabled = false;
+                    cancelAnalysisBtn.disabled = true;
+                    generatePlaylistsBtn.disabled = false;
+                    cancelClusteringBtn.disabled = true;
+                    fetchPlaylistsBtn.disabled = false; // Re-enable fetch button
+                    currentTaskId = null;
+                    currentTaskType = null;
+                } catch (error) {
+                    console.error("Error cancelling analysis:", error);
+                    displayMessageModal(`Failed to cancel analysis: ${error.message || error}`, "Error");
+                }
+            });
+        });
+
+
+        playlistForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            generatePlaylistsBtn.disabled = true;
+            fetchPlaylistsBtn.disabled = true;
+            startAnalysisBtn.disabled = true; // Disable analysis button too
+            cancelClusteringBtn.disabled = false;
+            cancelAnalysisBtn.disabled = true; // Ensure analysis cancel is disabled
+
+            clusteringLogOutput.textContent = ''; // Clear previous logs
+            clusteringProgressBar.style.width = '0%';
+            setStatus('clustering', 'Initiating...', 'PENDING');
+            showProgressContainer('clustering', true);
+            showProgressContainer('analysis', false); // Hide analysis progress
+
+
+            const formData = new FormData(playlistForm);
+            const data = Object.fromEntries(formData.entries());
+
+            data.num_clusters = parseInt(data.num_clusters, 10);
+            data.dbscan_eps = parseFloat(data.dbscan_eps);
+            data.dbscan_min_samples = parseInt(data.dbscan_min_samples, 10);
+            const pca_components = parseInt(data.pca_components, 10);
+            data.pca_enabled = pca_components > 0;
+            if (!data.pca_enabled) {
+                delete data.pca_components;
+            }
+            data.clustering_runs = parseInt(data.clustering_runs, 10);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/clustering/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                currentTaskId = result.task_id;
+                currentTaskType = result.task_type;
+                clusteringTaskIdDisplay.textContent = currentTaskId;
+                pollStatus(currentTaskId, currentTaskType);
+                displayMessageModal("Clustering started successfully!", "Success");
+            } catch (error) {
+                console.error("Error generating playlists:", error);
+                displayMessageModal(`Failed to generate playlists: ${error.message || error}`, "Error");
+                setStatus('clustering', 'Failed to start', 'FAILURE');
+                generatePlaylistsBtn.disabled = false;
+                fetchPlaylistsBtn.disabled = false;
+                startAnalysisBtn.disabled = false;
+                cancelClusteringBtn.disabled = true;
+                showProgressContainer('clustering', false);
+            }
+        });
+
+        cancelClusteringBtn.addEventListener('click', () => {
+            if (!currentTaskId || currentTaskType !== 'clustering') {
+                displayMessageModal("No active clustering to cancel.", "Info");
+                return;
+            }
+
+            displayMessageModal(`Are you sure you want to cancel clustering task ${currentTaskId}?`, 'Confirm', async (confirmed) => {
+                if (!confirmed) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/cancel/${currentTaskId}`, {
+                        method: 'POST'
+                    });
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                    }
+                    const result = await response.json();
+                    displayMessageModal(result.message, "Success");
+                    if (pollingInterval) {
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                    setStatus('clustering', 'Cancelled', 'REVOKED');
+                    generatePlaylistsBtn.disabled = false;
+                    fetchPlaylistsBtn.disabled = false;
+                    startAnalysisBtn.disabled = false;
+                    cancelClusteringBtn.disabled = true;
+                    currentTaskId = null;
+                    currentTaskType = null;
+                } catch (error) {
+                    console.error("Error cancelling clustering:", error);
+                    displayMessageModal(`Failed to cancel clustering: ${error.message || error}`, "Error");
+                }
+            });
+        });
+
 
         clusteringMethodSelect.addEventListener('change', toggleClusteringOptions);
 
@@ -534,21 +753,10 @@
                         const toggleBtn = document.createElement('button');
                         toggleBtn.className = 'playlist-toggle';
                         toggleBtn.textContent = 'Show Tracks';
-                        toggleBtn.onclick = function() {
-                            const tracksDiv = this.nextElementSibling;
-                            if (tracksDiv.classList.contains('hidden')) {
-                                tracksDiv.classList.remove('hidden');
-                                this.textContent = 'Hide Tracks';
-                            } else {
-                                tracksDiv.classList.add('hidden');
-                                this.textContent = 'Show Tracks';
-                            }
-                        };
-
+                        
                         const h3 = document.createElement('h3');
                         h3.innerHTML = `${playlistName} (${playlists[playlistName].length} tracks) `;
-                        h3.appendChild(toggleBtn);
-                        li.appendChild(h3);
+                        h3.appendChild(toggleBtn); // Append button to h3
 
                         const tracksDiv = document.createElement('div');
                         tracksDiv.className = 'playlist-tracks hidden'; // Hidden by default
@@ -557,7 +765,35 @@
                             p.textContent = `${track.title} by ${track.author}`;
                             tracksDiv.appendChild(p);
                         });
-                        li.appendChild(tracksDiv);
+                        
+                        li.appendChild(h3); // Append h3 (which contains the button) to li
+                        li.appendChild(tracksDiv); // Append tracksDiv to li
+
+                        // Corrected onclick function to reference tracksDiv via its parent (li)
+                        toggleBtn.onclick = function() {
+                            // 'this' refers to the toggleBtn
+                            // 'this.closest("li")' finds the nearest parent <li> element
+                            // 'tracksDiv' is the second child of the <li> (after the h3)
+                            const parentLi = this.closest("li");
+                            if (parentLi) {
+                                const tracksDiv = parentLi.querySelector('.playlist-tracks'); // Find tracksDiv within this specific li
+                                if (tracksDiv) {
+                                    if (tracksDiv.classList.contains('hidden')) {
+                                        tracksDiv.classList.remove('hidden');
+                                        this.textContent = 'Hide Tracks';
+                                    } else {
+                                        tracksDiv.classList.add('hidden');
+                                        this.textContent = 'Show Tracks';
+                                    }
+                                } else {
+                                    console.error("Could not find tracksDiv for playlist toggle button in parent li:", parentLi);
+                                }
+                            } else {
+                                console.error("Could not find parent li for playlist toggle button:", this);
+                            }
+                        };
+
+
                         playlistList.appendChild(li);
                     }
                 }
