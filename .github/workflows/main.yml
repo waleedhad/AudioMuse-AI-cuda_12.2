@@ -3,9 +3,10 @@ name: Build and Push AudioMuse AI Docker Image
 on:
   push:
     branches:
-      - main  # Trigger on pushes to the main branch for 'latest' tag
+      - main        # Trigger for 'latest'
+      - development # Trigger for 'devel'
     tags:
-      - 'v*.*.*' # Trigger on new Git tags like v1.0.0, v1.1.2 for versioned tags
+      - 'v*.*.*'    # Trigger for version tags like v1.0.0
 
 jobs:
   build:
@@ -13,59 +14,51 @@ jobs:
 
     permissions:
       contents: read
-      packages: write # Needed for ghcr.io
+      packages: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Use a newer action version
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3 # Use a newer action version
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3 # Use a newer action version
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ────────────────────────────────────────────────────────────────────
-      # Define tags for the Docker image
       - name: Determine Docker image tags
-        id: docker_tags # This ID is used to reference outputs from this step
+        id: docker_tags
         run: |
-          # Convert github.repository to lowercase for valid Docker tags
           REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          ALL_TAGS=""
 
-          # Default tag (always built for 'main' branch pushes)
-          MAIN_TAG="ghcr.io/$REPO_NAME_LOWER:latest"
-          ALL_TAGS="$MAIN_TAG"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            MAIN_TAG="ghcr.io/$REPO_NAME_LOWER:latest"
+            ALL_TAGS="$MAIN_TAG"
+            echo "Building latest tag: $MAIN_TAG"
 
-          # Print informational message to standard output
-          echo "Building latest tag: $MAIN_TAG"
+          elif [[ "${GITHUB_REF}" == "refs/heads/development" ]]; then
+            DEV_TAG="ghcr.io/$REPO_NAME_LOWER:devel"
+            ALL_TAGS="$DEV_TAG"
+            echo "Building devel tag: $DEV_TAG"
 
-          # Check if the push was a Git tag
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            # Extract version from Git tag (e.g., v1.0.0 -> 1.0.0)
-            VERSION_TAG=$(echo "${{ github.ref }}" | sed -e 's|refs/tags/v||g')
-            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}" # Use the lowercase repo name here too
-            ALL_TAGS="$ALL_TAGS,$VERSIONED_TAG"
-            # Print informational message to standard output
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
+            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}"
+            ALL_TAGS="$VERSIONED_TAG"
             echo "Building versioned tag: $VERSIONED_TAG"
           fi
 
-          # Set outputs for subsequent steps (MUST be in the format 'name=value')
           echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
 
-      # ────────────────────────────────────────────────────────────────────
-      # Build & push the AudioMuse AI image
       - name: Build and Push AudioMuse AI Image
         uses: docker/build-push-action@v5
         with:
-          context: . # Current directory as build context
-          file: ./Dockerfile # Path to your Dockerfile
+          context: .
+          file: ./Dockerfile
           push: true
-          tags: ${{ steps.docker_tags.outputs.docker_tags }} # Use the determined tags
-          # Set build arguments if you had any (e.g., for versions from env)
-          # build-args: |
-          #   APP_VERSION=${{ steps.docker_tags.outputs.version_tag }}
+          tags: ${{ steps.docker_tags.outputs.docker_tags }}
