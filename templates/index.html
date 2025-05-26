@@ -3,744 +3,747 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Music Analyzer & Playlist Generator</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <title>Jellyfin Music Analyzer</title>
     <style>
-        /* Custom styles for better readability and spacing */
+        /* Dark Theme inspired by Jellyfin */
         body {
-            font-family: 'Inter', sans-serif;
-            background-color: #1a202c; /* Dark background */
-            color: #e2e8f0; /* Light text */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0; /* Remove default body margin */
+            background-color: #2e2e3f; /* Dark background */
+            color: #dcdcdc; /* Light text */
             line-height: 1.6;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start; /* Align items to the top */
+            min-height: 100vh;
+            padding: 20px 0; /* Add padding top/bottom */
         }
         .container {
-            max-width: 1000px;
+            width: 100%;
+            max-width: 1000px; /* Wider container */
+            background: #3a3a4c; /* Slightly lighter dark background for containers */
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.4); /* More pronounced shadow */
+            margin-bottom: 20px;
         }
-        .card {
-            background-color: #2d3748; /* Darker card background */
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        h1, h2 {
+            color: #e0e0e0; /* Lighter headings */
+            border-bottom: 2px solid #5a5a6a; /* Subtle border */
+            padding-bottom: 10px;
+            margin-top: 25px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #4a4a5c; /* Even lighter background for sections */
+            border-radius: 6px;
+            border: 1px solid #5a5a6a;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #c0c0c0; /* Slightly darker light text */
         }
         input[type="text"],
         input[type="number"],
-        textarea,
-        select { /* Added select */
-            background-color: #4a5568;
-            border: 1px solid #4a5568;
-            color: #e2e8f0;
-            padding: 0.5rem 0.75rem;
-            border-radius: 0.25rem;
-            width: 100%;
+        input[type="password"], /* Added for API Key */
+        select {
+            width: calc(100% - 22px);
+            padding: 10px;
+            border: 1px solid #666; /* Darker border */
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+            background-color: #5a5a6a; /* Darker input background */
+            color: #dcdcdc; /* Light input text */
         }
         button {
-            background-color: #63b3ed; /* Blue button */
-            color: #ffffff;
-            padding: 0.75rem 1.5rem;
-            border-radius: 0.25rem;
-            font-weight: bold;
-            transition: background-color 0.2s ease-in-out;
+            background-color: #4CAF50; /* Green (Jellyfin green) */
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+            margin-right: 10px;
         }
         button:hover {
-            background-color: #4299e1; /* Darker blue on hover */
+            background-color: #409244; /* Darker green on hover */
+            transform: translateY(-1px);
+        }
+        button:active {
+            transform: translateY(0);
         }
         button:disabled {
-            background-color: #a0aec0;
+            background-color: #666;
             cursor: not-allowed;
         }
-        .log-output {
-            background-color: #171923; /* Even darker for logs */
-            color: #cbd5e0;
-            font-family: monospace;
-            white-space: pre-wrap; /* Preserve whitespace and break lines */
-            max-height: 300px;
-            overflow-y: auto;
-            border-radius: 0.25rem;
-            padding: 1rem;
+        button.cancel-button {
+            background-color: #e74c3c; /* Red */
+        }
+        button.cancel-button:hover {
+            background-color: #c0392b; /* Darker red on hover */
+        }
+        button.show-more-button {
+            background-color: #5c6bc0; /* A different blue */
+            padding: 8px 15px;
+            font-size: 14px;
+            margin-left: 10px; /* Space from count */
+            margin-bottom: 5px; /* space from ul */
+        }
+        button.show-more-button:hover {
+            background-color: #4c5a9d;
         }
         .status-box {
-            padding: 1rem;
-            border-radius: 0.25rem;
-            font-weight: bold;
+            background-color: #3d3d4e; /* Slightly different dark background */
+            border: 1px solid #6a6a7a;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
         }
-        .status-PENDING { background-color: #2a4365; } /* Blue-gray */
-        .status-PROGRESS { background-color: #3182ce; } /* Blue */
-        .status-SUCCESS { background-color: #38a169; } /* Green */
-        .status-FAILURE { background-color: #e53e3e; } /* Red */
-        .status-REVOKED { background-color: #dd6b20; } /* Orange */
-
-
-        .playlist-list {
+        .status-box p {
+            margin: 5px 0;
+            color: #b0b0b0;
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #666; /* Darker progress bar background */
+            border-radius: 5px;
+            margin-top: 10px;
+            overflow: hidden; /* Ensure text inside doesn't overflow rounded corners */
+        }
+        .progress-bar {
+            width: 0%;
+            height: 25px;
+            background-color: #6c5ce7; /* Purple accent (Jellyfin purple) */
+            border-radius: 5px; /* Needs to match container for full effect */
+            text-align: center;
+            line-height: 25px;
+            color: white;
+            font-weight: bold;
+            transition: width 0.5s ease-out; /* Smooth progress animation */
+        }
+        pre {
+            background-color: #2a2a35; /* Even darker for code/logs */
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #4a4a5c;
+            color: #a0a0a0; /* Log text color */
+        }
+        .hidden {
+            display: none;
+        }
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .config-table th, .config-table td {
+            border: 1px solid #5a5a6a;
+            padding: 8px;
+            text-align: left;
+        }
+        .config-table th {
+            background-color: #4a4a5c;
+            color: #e0e0e0;
+        }
+        .playlists-list ul {
             list-style: none;
-            padding-left: 0;
-        }
-        .playlist-list li {
-            background-color: #4a5568;
-            margin-bottom: 0.5rem;
-            padding: 0.75rem;
-            border-radius: 0.25rem;
-            display: flex;
-            flex-direction: column; /* Changed to column for better layout of tracks */
-            align-items: flex-start;
-        }
-        .playlist-list li:last-child {
-            margin-bottom: 0;
-        }
-        .playlist-list h3 {
-            color: #63b3ed;
-            margin-bottom: 0.5rem;
-            display: flex;
-            justify-content: space-between;
-            width: 100%;
-            align-items: center;
-        }
-        .playlist-toggle {
-            background: none;
-            border: none;
-            color: #63b3ed;
-            font-weight: bold;
-            cursor: pointer;
             padding: 0;
-            margin-left: auto; /* Push to right */
+            margin-top: 5px; /* Adjust spacing */
         }
-        .playlist-tracks {
-            margin-top: 0.5rem;
-            border-top: 1px solid #63b3ed;
-            padding-top: 0.5rem;
-            width: 100%;
+        .playlists-list > div { /* Individual playlist container */
+            background-color: #3d3d4e;
+            margin-bottom: 12px;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #5a5a6a;
         }
-        .playlist-tracks p {
-            margin-bottom: 0.25rem;
+        .playlists-list h3 {
+            color: #7ed6df; /* Light blue accent for playlist names */
+            margin-top: 0;
+            margin-bottom: 5px;
+            display: inline-block; /* Allow text and button on same line */
+        }
+        .playlists-list .track-count {
+            color: #b0b0b0;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .playlists-list ul.song-list {
+            list-style: disc; /* Use bullets for songs */
+            padding-left: 25px; /* Indent song list */
+            margin-top: 10px;
+            color: #c0c0c0;
+        }
+        .playlists-list ul.song-list li {
+            background-color: transparent; /* No background for individual songs */
+            border: none; /* No border for individual songs */
+            padding: 3px 0; /* Smaller padding for songs */
+            margin-bottom: 2px;
+            font-size: 0.95em;
+        }
+        .mood-tags {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #4a4a5c;
+            border-radius: 5px;
+            border: 1px solid #5a5a6a;
+        }
+        .mood-tags strong {
+            color: #e0e0e0;
+        }
+        .mood-tags span {
+            display: inline-block;
+            background-color: #6c5ce7; /* Purple accent */
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            margin: 5px;
+            font-size: 0.9em;
         }
     </style>
 </head>
-<body class="p-8">
-    <div class="container mx-auto">
-        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">Essentia Music Analyzer & Playlist Generator</h1>
+<body>
+    <div class="container">
+        <h1>Jellyfin Music Analyzer & Playlist Generator</h1>
 
-        <div class="card p-6 mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Start Music Analysis</h2>
-            <form id="analysisForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label for="jellyfin_url" class="block text-gray-400 text-sm font-bold mb-2">Jellyfin URL:</label>
-                    <input type="text" id="jellyfin_url" name="jellyfin_url" placeholder="Enter Jellyfin URL" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="jellyfin_user_id" class="block text-gray-400 text-sm font-bold mb-2">Jellyfin User ID:</label>
-                    <input type="text" id="jellyfin_user_id" name="jellyfin_user_id" placeholder="Enter Jellyfin User ID" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="jellyfin_token" class="block text-gray-400 text-sm font-bold mb-2">Jellyfin API Token:</label>
-                    <input type="text" id="jellyfin_token" name="jellyfin_token" placeholder="Enter Jellyfin API Token" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="num_recent_albums" class="block text-gray-400 text-sm font-bold mb-2">Number of Recent Albums (0 for all):</label>
-                    <input type="number" id="num_recent_albums" name="num_recent_albums" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="top_n_moods" class="block text-gray-400 text-sm font-bold mb-2">Top N Moods per Track:</label>
-                    <input type="number" id="top_n_moods" name="top_n_moods" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-
-                <div class="col-span-1 md:col-span-2 mt-4 text-center">
-                    <button type="submit" id="startAnalysisBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                        Start Analysis
-                    </button>
-                </div>
-            </form>
-        </div>
-
-        <div id="analysisProgressContainer" class="card p-6 mb-8 hidden">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Analysis Status</h2>
-            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="analysisTaskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
-            <p class="text-lg mb-4 status-box" id="analysisStatus">Status: Idle</p>
-            <div class="w-full bg-gray-600 rounded-full h-4 mb-4">
-                <div id="analysisProgressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
+        <div class="section" id="analysis-section">
+            <h2>Music Analysis</h2>
+            <p>Configure parameters for music feature extraction and mood prediction.</p>
+            <div class="form-group">
+                <label for="jellyfinUrl">Jellyfin URL (e.g., http://localhost:8096):</label>
+                <input type="text" id="jellyfinUrl" placeholder="http://your-jellyfin-server:8096">
             </div>
-            <p class="text-gray-400 text-sm mb-2">Current Album: <span id="currentAlbumName">N/A</span> (<span id="currentAlbumProgress">0/0</span>)</p>
-            <h3 class="text-xl font-semibold mb-2 text-white">Analysis Log:</h3>
-            <pre id="analysisLogOutput" class="log-output"></pre>
-            <div class="mt-4 text-center">
-                   <button id="cancelAnalysisBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                    Cancel Analysis
-                </button>
+            <div class="form-group">
+                <label for="jellyfinUserId">Jellyfin User ID:</label>
+                <input type="text" id="jellyfinUserId" placeholder="Your Jellyfin User ID">
+            </div>
+            <div class="form-group">
+                <label for="jellyfinApiKey">Jellyfin API Key (Token):</label>
+                <input type="password" id="jellyfinApiKey" placeholder="Your Jellyfin API Key">
+            </div>
+            <div class="form-group">
+                <label for="numRecentAlbums">Number of Recent Albums to Analyze:</label>
+                <input type="number" id="numRecentAlbums" value="50" min="1">
+            </div>
+            <div class="form-group">
+                <label for="topNMoods">Top N Moods to Extract per Track:</label>
+                <input type="number" id="topNMoods" value="5" min="1">
+            </div>
+            <button id="startAnalysisBtn">Start Analysis</button>
+            <button id="cancelAnalysisBtn" class="cancel-button hidden">Cancel Analysis</button>
+
+            <div class="status-box hidden" id="analysisStatusBox">
+                <p>Status: <span id="analysisOverallStatus">Idle</span></p>
+                <p>Progress: <span id="analysisProgressText">0%</span></p>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="analysisProgressBar"></div>
+                </div>
+                <p id="analysisAlbumInfo"></p>
+                <p>Log Details:</p>
+                <pre id="analysisLog"></pre>
             </div>
         </div>
 
-        <div class="card p-6 mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Generate Playlists</h2>
-            <form id="playlistForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label for="clustering_method" class="block text-gray-400 text-sm font-bold mb-2">Clustering Method:</label>
-                    <select id="clustering_method" name="clustering_method" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                        <option value="kmeans">KMeans</option>
-                        <option value="dbscan">DBSCAN</option>
-                    </select>
-                </div>
-                <div id="kmeans_options">
-                    <label for="num_clusters" class="block text-gray-400 text-sm font-bold mb-2">Number of Clusters (KMeans, 0 for auto):</label>
-                    <input type="number" id="num_clusters" name="num_clusters" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div id="dbscan_options" class="hidden">
-                    <div>
-                        <label for="dbscan_eps" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Epsilon (eps):</label>
-                        <input type="number" step="0.01" id="dbscan_eps" name="dbscan_eps" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div class="mt-2">
-                        <label for="dbscan_min_samples" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Min Samples:</label>
-                        <input type="number" id="dbscan_min_samples" name="dbscan_min_samples" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                </div>
-                <div>
-                    <label for="pca_components" class="block text-gray-400 text-sm font-bold mb-2">PCA Components (0 to disable):</label>
-                    <input type="number" id="pca_components" name="pca_components" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="clustering_runs" class="block text-gray-400 text-sm font-bold mb-2">Clustering Runs (for diversity):</label>
-                    <input type="number" id="clustering_runs" name="clustering_runs" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-
-                <div class="col-span-1 md:col-span-2 mt-4 text-center">
-                    <button type="submit" id="generatePlaylistsBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                        Generate Playlists
-                    </button>
-                    <button type="button" id="fetchPlaylistsBtn" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-4">
-                        Fetch Saved Playlists
-                    </button>
-                </div>
-            </form>
-        </div>
-
-        <div id="clusteringProgressContainer" class="card p-6 mb-8 hidden">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Clustering Status</h2>
-            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="clusteringTaskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
-            <p class="text-lg mb-4 status-box" id="clusteringStatus">Status: Idle</p>
-            <div class="w-full bg-gray-600 rounded-full h-4 mb-4">
-                <div id="clusteringProgressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
+        <div class="section" id="clustering-section">
+            <h2>Playlist Clustering</h2>
+            <p>Define how tracks are grouped into mood-based playlists.</p>
+            <div class="form-group">
+                <label for="clusteringMethod">Clustering Method:</label>
+                <select id="clusteringMethod">
+                    <option value="kmeans">K-Means</option>
+                    <option value="dbscan">DBSCAN</option>
+                </select>
             </div>
-            <p class="text-gray-400 text-sm mb-2">Current Step: <span id="currentClusteringStep">N/A</span> (<span id="currentClusteringProgress">0/0</span>)</p>
-            <h3 class="text-xl font-semibold mb-2 text-white">Clustering Log:</h3>
-            <pre id="clusteringLogOutput" class="log-output"></pre>
-            <div class="mt-4 text-center">
-                   <button id="cancelClusteringBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                    Cancel Clustering
-                </button>
+
+            <div id="kmeansParams">
+                <div class="form-group">
+                    <label for="numClusters">Number of Clusters (K-Means):</label>
+                    <input type="number" id="numClusters" value="10" min="1">
+                </div>
+            </div>
+
+            <div id="dbscanParams" class="hidden">
+                <div class="form-group">
+                    <label for="dbscanEps">DBSCAN Epsilon (eps):</label>
+                    <input type="number" id="dbscanEps" value="0.5" step="0.01" min="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="dbscanMinSamples">DBSCAN Min Samples:</label>
+                    <input type="number" id="dbscanMinSamples" value="5" min="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="pcaComponents">PCA Components (0 to disable PCA):</label>
+                <input type="number" id="pcaComponents" value="0" min="0">
+                <small style="color: #b0b0b0;">Higher values capture more variance but increase dimensionality.</small>
+            </div>
+             <div class="form-group">
+                <label for="clusteringRuns">Number of Clustering Runs:</label>
+                <input type="number" id="clusteringRuns" value="5" min="1">
+                <small style="color: #b0b0b0;">More runs can lead to better cluster configurations for K-Means.</small>
+            </div>
+            <button id="startClusteringBtn">Start Clustering</button>
+            <button id="cancelClusteringBtn" class="cancel-button hidden">Cancel Clustering</button>
+
+            <div class="status-box hidden" id="clusteringStatusBox">
+                <p>Status: <span id="clusteringOverallStatus">Idle</span></p>
+                <p>Progress: <span id="clusteringProgressText">0%</span></p>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="clusteringProgressBar"></div>
+                </div>
+                <p>Log Details:</p>
+                <pre id="clusteringLog"></pre>
+                <div class="mood-tags hidden" id="predominantMoods">
+                    <strong>Unique Predominant Moods Found:</strong> <span id="moodTagsList"></span>
+                </div>
             </div>
         </div>
-        <div id="playlistsDisplay" class="card p-6 hidden">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Generated Playlists</h2>
-            <ul id="playlistList" class="playlist-list">
-                </ul>
+
+        <div class="section" id="playlists-section">
+            <h2>Generated Playlists</h2>
+            <div id="playlistsList" class="playlists-list">
+                <p>No playlists generated yet or loaded. Run clustering to create some!</p>
+                </div>
         </div>
     </div>
 
     <script>
-        const API_BASE_URL = '/api';
+        const API_BASE_URL = window.location.origin;
 
-        // Analysis Elements
-        const analysisForm = document.getElementById('analysisForm');
-        const startAnalysisBtn = document.getElementById('startAnalysisBtn');
-        const analysisProgressContainer = document.getElementById('analysisProgressContainer');
-        const analysisTaskIdDisplay = document.getElementById('analysisTaskIdDisplay');
-        const analysisStatus = document.getElementById('analysisStatus');
-        const analysisProgressBar = document.getElementById('analysisProgressBar');
-        const currentAlbumName = document.getElementById('currentAlbumName');
-        const currentAlbumProgress = document.getElementById('currentAlbumProgress');
-        const analysisLogOutput = document.getElementById('analysisLogOutput');
-        const cancelAnalysisBtn = document.getElementById('cancelAnalysisBtn');
+        let analysisTaskId = null;
+        let clusteringTaskId = null;
+        let analysisInterval = null;
+        let clusteringInterval = null;
 
-        // Playlist/Clustering Elements
-        const playlistForm = document.getElementById('playlistForm');
-        const clusteringMethodSelect = document.getElementById('clustering_method');
-        const kmeansOptions = document.getElementById('kmeans_options');
-        const dbscanOptions = document.getElementById('dbscan_options');
-        const generatePlaylistsBtn = document.getElementById('generatePlaylistsBtn');
-        const fetchPlaylistsBtn = document.getElementById('fetchPlaylistsBtn');
+        // Define a set of "final" states for a task
+        const FINAL_TASK_STATES = ['SUCCESS', 'FAILURE', 'REVOKED'];
 
-        // NEW Clustering Progress Elements
-        const clusteringProgressContainer = document.getElementById('clusteringProgressContainer');
-        const clusteringTaskIdDisplay = document.getElementById('clusteringTaskIdDisplay');
-        const clusteringStatus = document.getElementById('clusteringStatus');
-        const clusteringProgressBar = document.getElementById('clusteringProgressBar');
-        const currentClusteringStep = document.getElementById('currentClusteringStep');
-        const currentClusteringProgress = document.getElementById('currentClusteringProgress');
-        const clusteringLogOutput = document.getElementById('clusteringLogOutput');
-        const cancelClusteringBtn = document.getElementById('cancelClusteringBtn');
+        document.addEventListener('DOMContentLoaded', () => {
+            loadConfigAndDefaults();
+            setupEventListeners();
+            // Check last task status for both types on load
+            checkLastTaskStatus('analysis');
+            checkLastTaskStatus('clustering');
+            loadPlaylists(); // Load playlists on initial page load
+        });
 
-
-        const clusteringRunsInput = document.getElementById('clustering_runs'); // Existing, just re-referencing
-
-        const playlistsDisplay = document.getElementById('playlistsDisplay');
-        const playlistList = document.getElementById('playlistList');
-
-        let analysisPollingInterval = null;
-        let currentAnalysisTaskId = null;
-
-        let clusteringPollingInterval = null; // NEW
-        let currentClusteringTaskId = null;   // NEW
-
-        // --- Utility Functions ---
-
-        function showProgressContainer(containerId, show = true) {
-            document.getElementById(containerId).classList.toggle('hidden', !show);
+        function setupEventListeners() {
+            document.getElementById('startAnalysisBtn').addEventListener('click', startAnalysis);
+            document.getElementById('cancelAnalysisBtn').addEventListener('click', () => cancelTask(analysisTaskId, 'analysis'));
+            document.getElementById('startClusteringBtn').addEventListener('click', startClustering);
+            document.getElementById('cancelClusteringBtn').addEventListener('click', () => cancelTask(clusteringTaskId, 'clustering'));
+            document.getElementById('clusteringMethod').addEventListener('change', toggleClusteringParams);
         }
 
-        function setStatus(statusElement, statusText, stateClass) {
-            statusElement.textContent = `Status: ${statusText}`;
-            statusElement.className = 'text-lg mb-4 status-box'; // Reset classes
-            if (stateClass) {
-                statusElement.classList.add(`status-${stateClass}`); // Add state-specific class
-            }
-        }
+        async function loadConfigAndDefaults() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/config`);
+                const config = await response.json();
+                console.log('Loaded config:', config);
 
-        // Renamed for clarity: updateAnalysisProgress and updateClusteringProgress
-        function updateAnalysisProgress(data) {
-            setStatus(analysisStatus, data.status, data.state);
-            const percentage = data.progress || 0;
-            analysisProgressBar.style.width = `${percentage}%`;
-            currentAlbumName.textContent = data.current_album || 'N/A';
-            currentAlbumProgress.textContent = `${data.current_album_idx || 0}/${data.total_albums || 0}`;
-            if (Array.isArray(data.log_output)) {
-                analysisLogOutput.textContent = data.log_output.join('\n');
-            } else {
-                analysisLogOutput.textContent = String(data.log_output || '');
-            }
-            analysisLogOutput.scrollTop = analysisLogOutput.scrollHeight;
+                // Set default values for analysis inputs
+                document.getElementById('jellyfinUrl').value = config.jellyfin_url || '';
+                document.getElementById('jellyfinUserId').value = config.jellyfin_user_id || '';
+                // WARNING: Do NOT pre-fill API key for security reasons in production.
+                // For a simple local app, we'll allow it, but best practice is to require re-entry.
+                document.getElementById('jellyfinApiKey').value = config.jellyfin_token || '';
 
-            if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state)) {
-                clearInterval(analysisPollingInterval);
-                analysisPollingInterval = null;
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                currentAnalysisTaskId = null;
-            } else {
-                startAnalysisBtn.disabled = true;
-                cancelAnalysisBtn.disabled = false;
+                document.getElementById('numRecentAlbums').value = config.num_recent_albums || 50;
+                document.getElementById('topNMoods').value = config.top_n_moods || 5;
+
+                // Set default values for clustering inputs
+                document.getElementById('clusteringMethod').value = config.cluster_algorithm || 'kmeans';
+                document.getElementById('numClusters').value = config.num_clusters || 10;
+                document.getElementById('dbscanEps').value = config.dbscan_eps || 0.5;
+                document.getElementById('dbscanMinSamples').value = config.dbscan_min_samples || 5;
+                document.getElementById('pcaComponents').value = config.pca_enabled ? config.pca_components : 0;
+                document.getElementById('clusteringRuns').value = config.clustering_runs || 5;
+
+                toggleClusteringParams(); // Initialize correct params visibility based on loaded config
+            } catch (error) {
+                console.error('Error loading configuration:', error);
+                // Optionally show a user-friendly message, but for development, console is fine.
+                // alert('Failed to load configuration. Using hardcoded defaults. See console for details.');
             }
         }
 
-        // NEW: Function to update clustering progress UI
-        function updateClusteringProgress(data) {
-            setStatus(clusteringStatus, data.status, data.state);
-            const percentage = data.progress || 0;
-            clusteringProgressBar.style.width = `${percentage}%`;
-            currentClusteringStep.textContent = data.current_step || 'N/A';
-            currentClusteringProgress.textContent = `${data.current_step_idx || 0}/${data.total_steps || 0}`;
-            if (Array.isArray(data.log_output)) {
-                clusteringLogOutput.textContent = data.log_output.join('\n');
-            } else {
-                clusteringLogOutput.textContent = String(data.log_output || '');
-            }
-            clusteringLogOutput.scrollTop = clusteringLogOutput.scrollHeight;
+        function toggleClusteringParams() {
+            const method = document.getElementById('clusteringMethod').value;
+            document.getElementById('kmeansParams').classList.toggle('hidden', method !== 'kmeans');
+            document.getElementById('dbscanParams').classList.toggle('hidden', method !== 'dbscan');
+        }
 
-            if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state)) {
-                clearInterval(clusteringPollingInterval);
-                clusteringPollingInterval = null;
-                generatePlaylistsBtn.disabled = false; // Re-enable generate button
-                cancelClusteringBtn.disabled = true;
-                currentClusteringTaskId = null;
-                // If clustering was successful, automatically fetch playlists
-                if (data.state === 'SUCCESS') {
-                    fetchPlaylists();
+        async function startAnalysis() {
+            const jellyfinUrl = document.getElementById('jellyfinUrl').value;
+            const jellyfinUserId = document.getElementById('jellyfinUserId').value;
+            const jellyfinApiKey = document.getElementById('jellyfinApiKey').value;
+            const numRecentAlbums = document.getElementById('numRecentAlbums').value;
+            const topNMoods = document.getElementById('topNMoods').value;
+
+            if (!jellyfinUrl || !jellyfinUserId || !jellyfinApiKey) {
+                alert('Please fill in all Jellyfin connection details.');
+                return;
+            }
+
+            const startBtn = document.getElementById('startAnalysisBtn');
+            const cancelBtn = document.getElementById('cancelAnalysisBtn');
+            const statusBox = document.getElementById('analysisStatusBox');
+
+            // Reset UI for new task
+            statusBox.classList.remove('hidden');
+            document.getElementById('analysisLog').textContent = '';
+            document.getElementById('analysisOverallStatus').textContent = 'Starting...';
+            document.getElementById('analysisProgressText').textContent = '0%';
+            document.getElementById('analysisProgressBar').style.width = '0%';
+            document.getElementById('analysisProgressBar').textContent = '0%';
+            document.getElementById('analysisAlbumInfo').textContent = '';
+
+            startBtn.disabled = true;
+            cancelBtn.classList.remove('hidden');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/analysis/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jellyfin_url: jellyfinUrl,
+                        jellyfin_user_id: jellyfinUserId,
+                        jellyfin_token: jellyfinApiKey,
+                        num_recent_albums: parseInt(numRecentAlbums),
+                        top_n_moods: parseInt(topNMoods)
+                    })
+                });
+                const data = await response.json();
+                analysisTaskId = data.task_id;
+                console.log('Analysis task started:', data);
+                startPolling(analysisTaskId, 'analysis');
+            } catch (error) {
+                console.error('Error starting analysis:', error);
+                alert('Failed to start analysis. See console for details.');
+                resetButtons('analysis');
+                statusBox.classList.add('hidden'); // Hide status box if start fails
+            }
+        }
+
+        async function startClustering() {
+            const clusteringMethod = document.getElementById('clusteringMethod').value;
+            const numClusters = document.getElementById('numClusters').value;
+            const dbscanEps = document.getElementById('dbscanEps').value;
+            const dbscanMinSamples = document.getElementById('dbscanMinSamples').value;
+            const pcaComponents = document.getElementById('pcaComponents').value;
+            const clusteringRuns = document.getElementById('clusteringRuns').value;
+
+            // Re-fetch Jellyfin credentials to pass to clustering task for playlist creation
+            const jellyfinUrl = document.getElementById('jellyfinUrl').value;
+            const jellyfinUserId = document.getElementById('jellyfinUserId').value;
+            const jellyfinApiKey = document.getElementById('jellyfinApiKey').value;
+
+            if (!jellyfinUrl || !jellyfinUserId || !jellyfinApiKey) {
+                alert('Please fill in all Jellyfin connection details in the Analysis section first.');
+                return;
+            }
+
+            const startBtn = document.getElementById('startClusteringBtn');
+            const cancelBtn = document.getElementById('cancelClusteringBtn');
+            const statusBox = document.getElementById('clusteringStatusBox');
+
+            // Reset UI for new task
+            statusBox.classList.remove('hidden');
+            document.getElementById('clusteringLog').textContent = '';
+            document.getElementById('clusteringOverallStatus').textContent = 'Starting...';
+            document.getElementById('clusteringProgressText').textContent = '0%';
+            document.getElementById('clusteringProgressBar').style.width = '0%';
+            document.getElementById('clusteringProgressBar').textContent = '0%';
+            document.getElementById('predominantMoods').classList.add('hidden');
+            document.getElementById('moodTagsList').innerHTML = '';
+
+
+            startBtn.disabled = true;
+            cancelBtn.classList.remove('hidden');
+
+            const payload = {
+                jellyfin_url: jellyfinUrl,
+                jellyfin_user_id: jellyfinUserId,
+                jellyfin_token: jellyfinApiKey,
+                clustering_method: clusteringMethod,
+                num_clusters: parseInt(numClusters),
+                dbscan_eps: parseFloat(dbscanEps),
+                dbscan_min_samples: parseInt(dbscanMinSamples),
+                pca_components: parseInt(pcaComponents),
+                pca_enabled: parseInt(pcaComponents) > 0,
+                clustering_runs: parseInt(clusteringRuns)
+            };
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/clustering/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                clusteringTaskId = data.task_id;
+                console.log('Clustering task started:', data);
+                startPolling(clusteringTaskId, 'clustering');
+            } catch (error) {
+                console.error('Error starting clustering:', error);
+                alert('Failed to start clustering. See console for details.');
+                resetButtons('clustering');
+                statusBox.classList.add('hidden'); // Hide status box if start fails
+            }
+        }
+
+        function updateTaskUI(type, data) {
+            const overallStatusSpan = document.getElementById(`${type}OverallStatus`);
+            const progressTextSpan = document.getElementById(`${type}ProgressText`);
+            const progressBarDiv = document.getElementById(`${type}ProgressBar`);
+            const logPre = document.getElementById(`${type}Log`);
+            const albumInfoP = document.getElementById('analysisAlbumInfo');
+            const predominantMoodsDiv = document.getElementById('predominantMoods');
+            const moodTagsListSpan = document.getElementById('moodTagsList');
+
+            overallStatusSpan.textContent = data.status || data.state;
+
+            const progress = data.progress !== undefined ? data.progress : 0;
+            progressTextSpan.textContent = `${progress}%`;
+            progressBarDiv.style.width = `${progress}%`;
+            progressBarDiv.textContent = `${progress}%`; // Display percentage inside bar
+
+            if (type === 'analysis' && data.current_album) {
+                albumInfoP.textContent = `Analyzing album: ${data.current_album} (${data.current_album_idx || 0}/${data.total_albums || 0})`;
+            } else if (type === 'analysis') {
+                 albumInfoP.textContent = ''; // Clear if no album info or on other tasks
+            }
+
+            if (data.log_output && Array.isArray(data.log_output)) {
+                const newLogContent = data.log_output.join('\n');
+                // Only update if content changed to avoid unnecessary re-renders
+                if (logPre.textContent !== newLogContent) {
+                    logPre.textContent = newLogContent;
+                    logPre.scrollTop = logPre.scrollHeight; // Auto-scroll to bottom
                 }
             } else {
-                generatePlaylistsBtn.disabled = true; // Keep disabled if in progress
-                cancelClusteringBtn.disabled = false;
+                logPre.textContent = data.status || data.state;
             }
-            // Always enable fetch playlists if no clustering task is active (or if finished)
-            fetchPlaylistsBtn.disabled = (currentClusteringTaskId !== null && data.state !== 'SUCCESS' && data.state !== 'FAILURE' && data.state !== 'REVOKED');
+
+            // Handle predominant moods for clustering
+            if (type === 'clustering') {
+                if (data.state === 'SUCCESS' && data.unique_moods && data.unique_moods.length > 0) {
+                    predominantMoodsDiv.classList.remove('hidden');
+                    moodTagsListSpan.innerHTML = data.unique_moods.map(mood => `<span>${mood}</span>`).join('');
+                } else if (data.state === 'SUCCESS' && data.unique_moods && data.unique_moods.length === 0) {
+                     predominantMoodsDiv.classList.remove('hidden');
+                     moodTagsListSpan.innerHTML = '<span>No distinct moods found for clustering.</span>';
+                }
+                else if (FINAL_TASK_STATES.includes(data.state) && data.state !== 'SUCCESS') {
+                    predominantMoodsDiv.classList.add('hidden'); // Hide if failed/cancelled
+                    moodTagsListSpan.innerHTML = '';
+                }
+            }
         }
 
 
-        async function pollStatus(taskType, taskId, updateFn, taskIdDisplayElement, progressContainerId) {
-            if (taskType === 'analysis' && analysisPollingInterval) {
-                clearInterval(analysisPollingInterval);
-            } else if (taskType === 'clustering' && clusteringPollingInterval) { // NEW
-                clearInterval(clusteringPollingInterval);
-            }
+        function startPolling(taskId, type) {
+            const statusBox = document.getElementById(`${type}StatusBox`);
+            statusBox.classList.remove('hidden');
 
-            showProgressContainer(progressContainerId, true);
-            const intervalFn = async () => {
+            const poll = async () => {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/${taskType}/status/${taskId}`);
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
+                    const response = await fetch(`${API_BASE_URL}/api/task/status/${taskId}`);
                     const data = await response.json();
-                    taskIdDisplayElement.textContent = data.task_id;
-                    updateFn(data);
-                } catch (error) {
-                    console.error(`Error polling ${taskType} status:`, error);
-                    updateFn({ // Create a generic error state
-                        task_id: taskId,
-                        state: 'FAILURE',
-                        status: `Error polling: ${error.message || error}`,
-                        progress: 0,
-                        current_album: 'Error', // Re-use for analysis
-                        current_step: 'Error', // Re-use for clustering
-                        log_output: [`Error polling: ${error.message || error}`]
-                    });
-                    if (taskType === 'analysis') {
-                        clearInterval(analysisPollingInterval);
-                        analysisPollingInterval = null;
-                        startAnalysisBtn.disabled = false;
-                        cancelAnalysisBtn.disabled = true;
-                        currentAnalysisTaskId = null;
-                    } else if (taskType === 'clustering') { // NEW
-                        clearInterval(clusteringPollingInterval);
-                        clusteringPollingInterval = null;
-                        generatePlaylistsBtn.disabled = false;
-                        cancelClusteringBtn.disabled = true;
-                        currentClusteringTaskId = null;
+                    // console.log(`${type} task status:`, data); // For debugging, can be noisy
+
+                    updateTaskUI(type, data); // Update UI with current task data
+
+                    if (FINAL_TASK_STATES.includes(data.state)) {
+                        stopPolling(type);
+                        resetButtons(type);
+                        if (type === 'clustering' && data.state === 'SUCCESS') {
+                            loadPlaylists(); // Load playlists after successful clustering
+                        }
                     }
+                } catch (error) {
+                    console.error(`Error polling ${type} task status:`, error);
+                    document.getElementById(`${type}OverallStatus`).textContent = `Error: ${error.message}`;
+                    stopPolling(type);
+                    resetButtons(type);
                 }
             };
 
-            if (taskType === 'analysis') {
-                analysisPollingInterval = setInterval(intervalFn, 3000);
-            } else if (taskType === 'clustering') { // NEW
-                clusteringPollingInterval = setInterval(intervalFn, 3000);
+            stopPolling(type); // Clear any existing interval before starting a new one
+            if (type === 'analysis') {
+                analysisInterval = setInterval(poll, 1000);
+            } else { // clustering
+                clusteringInterval = setInterval(poll, 1000);
             }
-            intervalFn(); // Run immediately on start
+            poll(); // Call immediately to get initial status
         }
 
-        async function populateConfig() {
+        function stopPolling(type) {
+            if (type === 'analysis' && analysisInterval) {
+                clearInterval(analysisInterval);
+                analysisInterval = null;
+            } else if (type === 'clustering' && clusteringInterval) {
+                clearInterval(clusteringInterval);
+                clusteringInterval = null;
+            }
+        }
+
+        function resetButtons(type) {
+            if (type === 'analysis') {
+                document.getElementById('startAnalysisBtn').disabled = false;
+                document.getElementById('cancelAnalysisBtn').classList.add('hidden');
+            } else { // clustering
+                document.getElementById('startClusteringBtn').disabled = false;
+                document.getElementById('cancelClusteringBtn').classList.add('hidden');
+            }
+        }
+
+        async function cancelTask(taskId, type) {
+            if (!taskId) {
+                alert('No task running to cancel.');
+                return;
+            }
+            if (!confirm(`Are you sure you want to cancel the ${type} task (ID: ${taskId})?`)) {
+                return;
+            }
+
+            const overallStatusSpan = document.getElementById(`${type}OverallStatus`);
+            const logPre = document.getElementById(`${type}Log`);
+
+            overallStatusSpan.textContent = 'Cancelling...';
+            logPre.textContent += '\nCancellation requested...'; // Add to log
+
             try {
-                const response = await fetch(`${API_BASE_URL}/config`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const config = await response.json();
+                const response = await fetch(`${API_BASE_URL}/api/task/cancel/${taskId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                console.log(data.message);
 
-                document.getElementById('jellyfin_url').value = config.jellyfin_url || '';
-                document.getElementById('jellyfin_user_id').value = config.jellyfin_user_id || '';
-                document.getElementById('jellyfin_token').value = config.jellyfin_token || '';
-                document.getElementById('num_recent_albums').value = config.num_recent_albums !== undefined ? config.num_recent_albums : 0;
-                document.getElementById('top_n_moods').value = config.top_n_moods !== undefined ? config.top_n_moods : 5;
-
-                document.getElementById('clustering_method').value = config.cluster_algorithm || 'kmeans';
-                document.getElementById('num_clusters').value = config.num_clusters !== undefined ? config.num_clusters : 40;
-                document.getElementById('dbscan_eps').value = config.dbscan_eps !== undefined ? config.dbscan_eps : 0.15;
-                document.getElementById('dbscan_min_samples').value = config.dbscan_min_samples !== undefined ? config.dbscan_min_samples : 10;
-                document.getElementById('pca_components').value = config.pca_enabled ? config.pca_components : 0; // Use config.pca_components
-                clusteringRunsInput.value = config.clustering_runs !== undefined ? config.clustering_runs : 10;
-
-                toggleClusteringOptions();
+                // Even if cancellation requested, continue polling briefly to see it transition to REVOKED
+                // This ensures the UI reflects the true state once Celery processes the revoke.
+                // The polling function handles stopping itself when state is FINAL_TASK_STATES.
+                // If it doesn't transition, user might need to check Celery worker logs.
             } catch (error) {
-                console.error("Failed to fetch initial configuration:", error);
-                alert("Could not load initial configuration. Please check the backend API.");
+                console.error(`Error requesting cancellation of ${type} task:`, error);
+                alert(`Failed to send cancel request. See console for details: ${error.message}`);
+                overallStatusSpan.textContent = `Error during cancellation: ${error.message}`;
             }
         }
 
-        function toggleClusteringOptions() {
-            if (clusteringMethodSelect.value === 'kmeans') {
-                kmeansOptions.classList.remove('hidden');
-                dbscanOptions.classList.add('hidden');
-            } else {
-                kmeansOptions.classList.add('hidden');
-                dbscanOptions.classList.remove('hidden');
-            }
-        }
-
-        // Modified to check for both analysis and clustering tasks
-        async function fetchLastTaskStatuses() {
+        async function checkLastTaskStatus(type) {
             try {
-                // Fetch last analysis task status
-                const analysisResponse = await fetch(`${API_BASE_URL}/analysis/last_task`);
-                const analysisData = await analysisResponse.json();
-                if (analysisData.task_id && ['PENDING', 'PROGRESS', 'STARTED'].includes(analysisData.status)) {
-                    currentAnalysisTaskId = analysisData.task_id;
-                    analysisTaskIdDisplay.textContent = currentAnalysisTaskId;
-                    showProgressContainer('analysisProgressContainer', true);
-                    setStatus(analysisStatus, analysisData.status, analysisData.status);
-                    pollStatus('analysis', currentAnalysisTaskId, updateAnalysisProgress, analysisTaskIdDisplay, 'analysisProgressContainer');
-                } else if (analysisData.task_id) {
-                    currentAnalysisTaskId = analysisData.task_id;
-                    analysisTaskIdDisplay.textContent = currentAnalysisTaskId;
-                    showProgressContainer('analysisProgressContainer', true);
-                    setStatus(analysisStatus, analysisData.status, analysisData.status);
-                    analysisProgressBar.style.width = '100%';
-                    analysisLogOutput.textContent = `Previous analysis task (ID: ${currentAnalysisTaskId}) finished with status: ${analysisData.status}.`;
-                    startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
-                } else {
-                    showProgressContainer('analysisProgressContainer', false);
-                    startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
-                }
+                const response = await fetch(`${API_BASE_URL}/api/${type}/last_task`);
+                const data = await response.json();
+                console.log(`Last ${type} task check result:`, data);
 
-                // NEW: Fetch last clustering task status
-                const clusteringResponse = await fetch(`${API_BASE_URL}/clustering/last_task`);
-                const clusteringData = await clusteringResponse.json();
-                if (clusteringData.task_id && ['PENDING', 'PROGRESS', 'STARTED'].includes(clusteringData.status)) {
-                    currentClusteringTaskId = clusteringData.task_id;
-                    clusteringTaskIdDisplay.textContent = currentClusteringTaskId;
-                    showProgressContainer('clusteringProgressContainer', true);
-                    setStatus(clusteringStatus, clusteringData.status, clusteringData.status);
-                    pollStatus('clustering', currentClusteringTaskId, updateClusteringProgress, clusteringTaskIdDisplay, 'clusteringProgressContainer');
-                } else if (clusteringData.task_id) {
-                    currentClusteringTaskId = clusteringData.task_id;
-                    clusteringTaskIdDisplay.textContent = currentClusteringTaskId;
-                    showProgressContainer('clusteringProgressContainer', true);
-                    setStatus(clusteringStatus, clusteringData.status, clusteringData.status);
-                    clusteringProgressBar.style.width = '100%';
-                    clusteringLogOutput.textContent = `Previous clustering task (ID: ${currentClusteringTaskId}) finished with status: ${clusteringData.status}.`;
-                    generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    // If the last clustering task was successful, fetch playlists
-                    if (clusteringData.status === 'SUCCESS') {
-                        fetchPlaylists();
+                const statusBox = document.getElementById(`${type}StatusBox`);
+
+                if (data.task_id && data.status !== 'NO_PREVIOUS_TASK') {
+                    // Update UI with the state of the last task
+                    statusBox.classList.remove('hidden');
+                    updateTaskUI(type, data);
+
+                    if (FINAL_TASK_STATES.includes(data.status)) {
+                        console.log(`Last ${type} task (ID: ${data.task_id}) is in a final state: ${data.status}. Not resuming polling.`);
+                        resetButtons(type);
+                    } else {
+                        // If it's still active (PENDING, STARTED, PROGRESS), resume polling
+                        if (type === 'analysis') {
+                            analysisTaskId = data.task_id;
+                        } else { // clustering
+                            clusteringTaskId = data.task_id;
+                        }
+                        console.log(`Last ${type} task (ID: ${data.task_id}) is active: ${data.status}. Resuming polling.`);
+                        startPolling(data.task_id, type);
+                        // Enable cancel button and disable start button if task is pending/in progress
+                        if (type === 'analysis') {
+                             document.getElementById('startAnalysisBtn').disabled = true;
+                             document.getElementById('cancelAnalysisBtn').classList.remove('hidden');
+                        } else {
+                             document.getElementById('startClusteringBtn').disabled = true;
+                             document.getElementById('cancelClusteringBtn').classList.remove('hidden');
+                        }
                     }
                 } else {
-                    showProgressContainer('clusteringProgressContainer', false);
-                    generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
+                     console.log(`No previous ${type} task found or it's not relevant.`);
+                     statusBox.classList.add('hidden'); // Hide if no relevant task
+                     resetButtons(type); // Ensure buttons are reset if no active task
                 }
             } catch (error) {
-                console.error("Error fetching last task statuses:", error);
-                showProgressContainer('analysisProgressContainer', false);
-                showProgressContainer('clusteringProgressContainer', false);
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                generatePlaylistsBtn.disabled = false;
-                cancelClusteringBtn.disabled = true;
-            } finally {
-                 // Ensure fetch playlists button is enabled if no clustering task is active (or if finished)
-                if (!currentClusteringTaskId) {
-                    fetchPlaylistsBtn.disabled = false;
-                }
+                console.error(`Error checking last ${type} task status:`, error);
+                document.getElementById(`${type}StatusBox`).classList.add('hidden'); // Hide status box on error
+                resetButtons(type); // Ensure buttons are reset on error
             }
         }
 
-        // --- Event Listeners ---
-
-        analysisForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            startAnalysisBtn.disabled = true;
-            cancelAnalysisBtn.disabled = false;
-            analysisLogOutput.textContent = '';
-            analysisProgressBar.style.width = '0%';
-            currentAlbumName.textContent = 'N/A';
-            currentAlbumProgress.textContent = '0/0';
-            setStatus(analysisStatus, 'Initiating...', 'PENDING');
-            showProgressContainer('analysisProgressContainer', true);
-
-            const formData = new FormData(analysisForm);
-            const data = Object.fromEntries(formData.entries());
-            data.num_recent_albums = parseInt(data.num_recent_albums, 10);
-            data.top_n_moods = parseInt(data.top_n_moods, 10);
-
+        async function loadPlaylists() {
             try {
-                const response = await fetch(`${API_BASE_URL}/analysis/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                currentAnalysisTaskId = result.task_id;
-                analysisTaskIdDisplay.textContent = currentAnalysisTaskId;
-                pollStatus('analysis', currentAnalysisTaskId, updateAnalysisProgress, analysisTaskIdDisplay, 'analysisProgressContainer');
-                alert("Analysis started successfully!");
-            } catch (error) {
-                console.error("Error starting analysis:", error);
-                alert(`Failed to start analysis: ${error.message || error}`);
-                setStatus(analysisStatus, 'Failed to start', 'FAILURE');
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                showProgressContainer('analysisProgressContainer', false);
-            }
-        });
-
-        cancelAnalysisBtn.addEventListener('click', async () => {
-            if (!currentAnalysisTaskId) {
-                alert("No active analysis to cancel.");
-                return;
-            }
-            if (!confirm(`Are you sure you want to cancel analysis task ${currentAnalysisTaskId}?`)) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/analysis/cancel/${currentAnalysisTaskId}`, {
-                    method: 'POST'
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                alert(result.message);
-                if (analysisPollingInterval) {
-                    clearInterval(analysisPollingInterval);
-                    analysisPollingInterval = null;
-                }
-                setStatus(analysisStatus, 'Cancelled', 'REVOKED');
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                currentAnalysisTaskId = null;
-            } catch (error) {
-                console.error("Error cancelling analysis:", error);
-                alert(`Failed to cancel analysis: ${error.message || error}`);
-            }
-        });
-
-
-        playlistForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            generatePlaylistsBtn.disabled = true;
-            fetchPlaylistsBtn.disabled = true; // Disable fetch while new clustering starts
-            cancelClusteringBtn.disabled = false;
-            clusteringLogOutput.textContent = '';
-            clusteringProgressBar.style.width = '0%';
-            currentClusteringStep.textContent = 'N/A';
-            currentClusteringProgress.textContent = '0/0';
-            setStatus(clusteringStatus, 'Initiating...', 'PENDING');
-            showProgressContainer('clusteringProgressContainer', true); // Show new container
-
-            try {
-                const formData = new FormData(playlistForm);
-                const data = Object.fromEntries(formData.entries());
-
-                data.num_clusters = parseInt(data.num_clusters, 10);
-                data.dbscan_eps = parseFloat(data.dbscan_eps);
-                data.dbscan_min_samples = parseInt(data.dbscan_min_samples, 10);
-                const pca_components = parseInt(data.pca_components, 10);
-                data.pca_enabled = pca_components > 0;
-                if (!data.pca_enabled) {
-                    delete data.pca_components;
-                }
-                data.clustering_runs = parseInt(data.clustering_runs, 10);
-
-                // NEW: Call the new clustering endpoint
-                const response = await fetch(`${API_BASE_URL}/clustering`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                currentClusteringTaskId = result.task_id; // Store clustering task ID
-                clusteringTaskIdDisplay.textContent = currentClusteringTaskId;
-                // NEW: Start polling for clustering status
-                pollStatus('clustering', currentClusteringTaskId, updateClusteringProgress, clusteringTaskIdDisplay, 'clusteringProgressContainer');
-                alert("Clustering started successfully!");
-            } catch (error) {
-                console.error("Error generating playlists:", error);
-                alert(`Failed to generate playlists: ${error.message || error}`);
-                setStatus(clusteringStatus, 'Failed to start', 'FAILURE');
-                generatePlaylistsBtn.disabled = false;
-                fetchPlaylistsBtn.disabled = false;
-                cancelClusteringBtn.disabled = true;
-                showProgressContainer('clusteringProgressContainer', false);
-            }
-        });
-
-        // NEW: Event listener for canceling clustering
-        cancelClusteringBtn.addEventListener('click', async () => {
-            if (!currentClusteringTaskId) {
-                alert("No active clustering to cancel.");
-                return;
-            }
-            if (!confirm(`Are you sure you want to cancel clustering task ${currentClusteringTaskId}?`)) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/clustering/cancel/${currentClusteringTaskId}`, {
-                    method: 'POST'
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                alert(result.message);
-                if (clusteringPollingInterval) {
-                    clearInterval(clusteringPollingInterval);
-                    clusteringPollingInterval = null;
-                }
-                setStatus(clusteringStatus, 'Cancelled', 'REVOKED');
-                generatePlaylistsBtn.disabled = false;
-                cancelClusteringBtn.disabled = true;
-                fetchPlaylistsBtn.disabled = false; // Enable fetch playlists after cancel
-                currentClusteringTaskId = null;
-            } catch (error) {
-                console.error("Error cancelling clustering:", error);
-                alert(`Failed to cancel clustering: ${error.message || error}`);
-            }
-        });
-
-
-        clusteringMethodSelect.addEventListener('change', toggleClusteringOptions);
-
-        async function fetchPlaylists() {
-            // Only fetch playlists if no clustering task is currently active
-            if (currentClusteringTaskId && ['PENDING', 'PROGRESS', 'STARTED'].includes(clusteringStatus.dataset.status)) {
-                alert("Clustering is in progress. Please wait for it to complete or cancel it before fetching playlists.");
-                return;
-            }
-
-            playlistsDisplay.classList.add('hidden');
-            playlistList.innerHTML = ''; // Clear existing list
-            try {
-                const response = await fetch(`${API_BASE_URL}/playlists`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                const response = await fetch(`${API_BASE_URL}/api/playlists`);
                 const playlists = await response.json();
+                const playlistsListDiv = document.getElementById('playlistsList');
+                playlistsListDiv.innerHTML = ''; // Clear existing content
+
                 if (Object.keys(playlists).length === 0) {
-                    playlistList.innerHTML = '<li class="text-center text-gray-400">No playlists found. Run analysis and generate playlists first.</li>';
-                } else {
-                    for (const playlistName in playlists) {
-                        const li = document.createElement('li');
-                        const toggleBtn = document.createElement('button');
-                        toggleBtn.className = 'playlist-toggle';
-                        toggleBtn.textContent = 'Show Tracks';
-                        toggleBtn.onclick = function() {
-                            const tracksDiv = this.nextElementSibling;
-                            if (tracksDiv.classList.contains('hidden')) {
-                                tracksDiv.classList.remove('hidden');
-                                this.textContent = 'Hide Tracks';
-                            } else {
-                                tracksDiv.classList.add('hidden');
-                                this.textContent = 'Show Tracks';
-                            }
-                        };
-
-                        const h3 = document.createElement('h3');
-                        h3.innerHTML = `${playlistName} (${playlists[playlistName].length} tracks) `;
-                        h3.appendChild(toggleBtn);
-                        li.appendChild(h3);
-
-                        const tracksDiv = document.createElement('div');
-                        tracksDiv.className = 'playlist-tracks hidden'; // Hidden by default
-                        playlists[playlistName].forEach(track => {
-                            const p = document.createElement('p');
-                            p.textContent = `${track.title} by ${track.author}`;
-                            tracksDiv.appendChild(p);
-                        });
-                        li.appendChild(tracksDiv);
-                        playlistList.appendChild(li);
-                    }
+                    playlistsListDiv.innerHTML = '<p>No playlists generated yet or loaded. Run clustering to create some!</p>';
+                    return;
                 }
-                playlistsDisplay.classList.remove('hidden');
+
+                for (const playlistName in playlists) {
+                    const playlistDiv = document.createElement('div');
+                    const numSongs = playlists[playlistName].length;
+
+                    const h3 = document.createElement('h3');
+                    h3.textContent = playlistName;
+                    playlistDiv.appendChild(h3);
+
+                    const trackCountSpan = document.createElement('span');
+                    trackCountSpan.className = 'track-count';
+                    trackCountSpan.textContent = `(${numSongs} songs)`;
+                    playlistDiv.appendChild(trackCountSpan);
+
+                    if (numSongs > 0) {
+                        const showMoreBtn = document.createElement('button');
+                        showMoreBtn.className = 'show-more-button';
+                        showMoreBtn.textContent = 'Show Songs';
+                        playlistDiv.appendChild(showMoreBtn);
+
+                        const ul = document.createElement('ul');
+                        ul.className = 'song-list hidden'; // Initially hidden
+                        playlists[playlistName].forEach(track => {
+                            const li = document.createElement('li');
+                            li.textContent = `${track.title} by ${track.author}`;
+                            ul.appendChild(li);
+                        });
+                        playlistDiv.appendChild(ul);
+
+                        showMoreBtn.addEventListener('click', () => {
+                            ul.classList.toggle('hidden');
+                            showMoreBtn.textContent = ul.classList.contains('hidden') ? 'Show Songs' : 'Hide Songs';
+                        });
+                    }
+
+                    playlistsListDiv.appendChild(playlistDiv);
+                }
             } catch (error) {
-                console.error("Error fetching playlists:", error);
-                playlistList.innerHTML = `<li class="text-center text-red-400">Failed to load playlists: ${error.message}</li>`;
-                playlistsDisplay.classList.remove('hidden');
+                console.error('Error loading playlists:', error);
+                playlistsListDiv.innerHTML = '<p style="color: red;">Failed to load playlists.</p>';
             }
         }
 
-        fetchPlaylistsBtn.addEventListener('click', fetchPlaylists);
-
-        // --- Initial Load ---
-        document.addEventListener('DOMContentLoaded', async () => {
-            await populateConfig();
-            await fetchLastTaskStatuses(); // Check for ongoing or last tasks for both
-        });
     </script>
 </body>
 </html>
