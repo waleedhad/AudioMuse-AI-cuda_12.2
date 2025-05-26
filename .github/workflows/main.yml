@@ -1,15 +1,15 @@
-name: Build and Push AudioMuse AI Docker Image
+name: Build, Test, and Push AudioMuse AI Docker Image
 
 on:
   push:
     branches:
       - main        # Trigger for 'latest'
-      - devel       # Trigger for 'devel' - CORRECTED BRANCH NAME
+      - devel       # Trigger for 'devel'
     tags:
       - 'v*.*.*'    # Trigger for version tags like v1.0.0
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     permissions:
@@ -41,7 +41,7 @@ jobs:
             ALL_TAGS="$MAIN_TAG"
             echo "Building latest tag: $MAIN_TAG"
 
-          elif [[ "${GITHUB_REF}" == "refs/heads/devel" ]]; then # Checks for 'devel' branch
+          elif [[ "${GITHUB_REF}" == "refs/heads/devel" ]]; then
             DEV_TAG="ghcr.io/$REPO_NAME_LOWER:devel"
             ALL_TAGS="$DEV_TAG"
             echo "Building devel tag: $DEV_TAG"
@@ -53,9 +53,84 @@ jobs:
             echo "Building versioned tag: $VERSIONED_TAG"
           fi
 
+          # Export the tags for subsequent steps
           echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
+          # Also export a simplified tag for internal testing purposes
+          echo "test_tag=audiomuse-ai-temp:latest" >> "$GITHUB_OUTPUT"
 
-      - name: Build and Push AudioMuse AI Image
+      - name: Build Docker image (for testing)
+        id: docker_build_test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false # Do not push yet, just build
+          tags: ${{ steps.docker_tags.outputs.test_tag }}
+          load: true # Load image into Docker daemon for immediate use
+
+      - name: Run Flask App Container Health Check
+        run: |
+          echo "Starting Flask app container for health check..."
+          # Run the container in detached mode (-d) and map port 8000
+          docker run -d --name flask-test-app -p 8000:8000 -e SERVICE_TYPE=flask ${{ steps.docker_tags.outputs.test_tag }}
+
+          echo "Waiting for Flask app to start (max 60 seconds)..."
+          # Health check loop: Try to connect to the Flask app's /api/status endpoint
+          for i in $(seq 1 60); do
+            if curl -s http://localhost:8000/api/status > /dev/null; then
+              echo "Flask app is up and responsive!"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 1
+          done
+          echo "Flask app did not start or respond within the expected time."
+          docker logs flask-test-app # Print logs for debugging
+          exit 1 # Fail the job if app doesn't start
+
+      - name: Run Celery Worker Container Health Check
+        run: |
+          echo "Starting temporary Redis container for Celery broker..."
+          docker run -d --name redis-test redis:latest
+
+          echo "Waiting for Redis to start..."
+          sleep 5 # Give Redis a few seconds to initialize
+
+          echo "Starting Celery worker container for health check..."
+          # Run the celery worker container in detached mode, linking to redis
+          docker run -d --name celery-test-worker \
+            --link redis-test:redis \
+            -e SERVICE_TYPE=celery \
+            -e CELERY_BROKER_URL=redis://redis:6379/0 \
+            ${{ steps.docker_tags.outputs.test_tag }}
+
+          echo "Waiting for Celery worker to start (max 30 seconds)..."
+          # Check if the Celery worker container is running and if its logs indicate successful connection to Redis
+          for i in $(seq 1 30); do
+            if docker ps -f name=celery-test-worker --format '{{.Status}}' | grep -q 'Up'; then
+              if docker logs celery-test-worker 2>&1 | grep -q "connected to redis"; then
+                  echo "Celery worker container is running and connected to Redis."
+                  exit 0
+              fi
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          echo "Celery worker container did not start or connect to Redis within the expected time."
+          docker logs celery-test-worker # Print logs for debugging
+          exit 1 # Fail the job
+
+      - name: Clean up Docker containers and temporary image
+        if: always() # Run this step even if previous steps fail
+        run: |
+          echo "Cleaning up temporary Docker containers and image..."
+          docker rm -f flask-test-app || true # || true prevents error if container didn't start or was already removed
+          docker rm -f celery-test-worker || true
+          docker rm -f redis-test || true
+          docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true # Remove the temporary image
+
+      - name: Build and Push AudioMuse AI Image (Final Push)
+        # This step only runs if all previous test steps passed
         uses: docker/build-push-action@v5
         with:
           context: .
