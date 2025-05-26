@@ -3,6 +3,7 @@ import json
 import time
 import logging
 import sqlite3
+import requests # Re-add requests, it was implicitly removed in my mind but needed for JellyfinClient
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from celery import Celery
@@ -10,19 +11,23 @@ from celery.result import AsyncResult
 from celery.signals import task_postrun
 from datetime import datetime
 
-# Import for Clustering (moved from cluster_generator.py)
+# Imports for Essentia Analysis (now internal)
+import essentia.standard as es
 import numpy as np
+# Removed librosa and soundfile as per user's request
+import tempfile
+import shutil # For cleaning up temporary directories
+import pathlib # For handling paths
+
+# Imports for Clustering (now internal)
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import uuid
-import math # Math was not explicitly used in ClusterGenerator, but might be useful for future enhancements.
+import math
 
-# Import your configuration and existing modules (jellyfin_client, essentia_analyzer)
+# Import your configuration
 import config
-# Assuming these files are in the same directory or accessible via Python path
-from jellyfin_client import JellyfinClient
-from essentia_analyzer import EssentiaAnalyzer
 
 
 # --- Flask App Setup ---
@@ -40,6 +45,316 @@ celery_app = Celery(
     backend=config.CELERY_RESULT_BACKEND
 )
 celery_app.conf.update(app.config)
+
+
+# --- JellyfinClient Class (Integrated) ---
+class JellyfinClient:
+    def __init__(self, jellyfin_url, user_id, api_token):
+        self.jellyfin_url = jellyfin_url
+        self.headers = {
+            "X-Emby-Token": api_token,
+            "X-Emby-User-ID": user_id,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        self.user_id = user_id
+        logger.info(f"JellyfinClient initialized for URL: {self.jellyfin_url} and User ID: {self.user_id}")
+
+    def _make_request(self, endpoint, method="GET", params=None, data=None):
+        url = f"{self.jellyfin_url}/{endpoint}"
+        try:
+            if method == "GET":
+                response = requests.get(url, headers=self.headers, params=params)
+            elif method == "POST":
+                response = requests.post(url, headers=self.headers, params=params, json=data)
+            response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error for {url}: {e.response.status_code} - {e.response.text}")
+            raise
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection error for {url}: {e}")
+            raise
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout error for {url}: {e}")
+            raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error for {url}: {e}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error for {url}: {e} - Response: {response.text}")
+            raise
+
+    def get_user_views(self):
+        return self._make_request(f"Users/{self.user_id}/Views")
+
+    def get_latest_albums(self, limit=config.NUM_RECENT_ALBUMS):
+        # Adjust limit based on config, 0 means no limit (get all)
+        if limit == 0:
+            params = {"Recursive": "true", "IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending"}
+        else:
+            params = {"Recursive": "true", "IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending", "Limit": limit}
+        
+        # Discover the library ID for Music
+        views_data = self.get_user_views()
+        music_library_id = None
+        for item in views_data.get('Items', []):
+            if item.get('CollectionType') == 'music':
+                music_library_id = item['Id']
+                logger.info(f"Found Music Library ID: {music_library_id}")
+                break
+
+        if not music_library_id:
+            logger.warning("No music library found for the user.")
+            return [] # Return empty if no music library found
+
+        return self._make_request(f"Users/{self.user_id}/Items", params={"ParentId": music_library_id, **params})
+
+    def get_album_tracks(self, album_id):
+        return self._make_request(f"Albums/{album_id}/Items")
+
+    def get_track_stream_url(self, track_id):
+        # Assumes direct access for simplicity, adjust for transcoding if needed
+        return f"{self.jellyfin_url}/Audio/{track_id}/stream.mp3?static=true"
+
+
+# --- EssentiaAnalyzer Class (Integrated) ---
+class EssentiaAnalyzer:
+    def __init__(self, jellyfin_url, jellyfin_user_id, jellyfin_token, db_manager, temp_dir, model_path, prediction_model_path, mood_labels=None):
+        self.jellyfin_client = JellyfinClient(jellyfin_url, jellyfin_user_id, jellyfin_token)
+        self.db_manager = db_manager
+        self.temp_dir = pathlib.Path(temp_dir)
+        self.temp_dir.mkdir(parents=True, exist_ok=True) # Ensure temp directory exists
+
+        # Load models
+        self.musicnn_embeddings_model = es.TensorflowPredictMusiCNN(graph=model_path, output="activations")
+        self.musicnn_prediction_model = es.TensorflowPredictMusiCNN(graph=prediction_model_path, output="predictions")
+        logger.info(f"Essentia models loaded: {model_path}, {prediction_model_path}")
+
+        self.num_recent_albums = config.NUM_RECENT_ALBUMS # Default from config
+        self.top_n_moods = config.TOP_N_MOODS # Default from config
+
+        # Essentia configuration (these can be tuned)
+        self.frame_size = 2048
+        self.hop_size = 1024
+        self.sample_rate = 44100 # Standard sample rate for audio analysis
+
+        # Placeholder for mood labels; ideally loaded from a mapping file or passed
+        if mood_labels is None:
+            # Example mood labels based on a common MusicNN output
+            self.mood_labels = [
+                'acoustic', 'aggresive', 'ambient', 'chilled', 'dark', 'epic', 'funky', 'groovy',
+                'happy', 'intense', 'light', 'melancholic', 'party', 'relaxing', 'romantic',
+                'sad', 'sexy', 'uplifting', 'energetic', 'calm'
+            ]
+        else:
+            self.mood_labels = mood_labels
+
+
+    def _download_audio(self, track_id, output_path):
+        stream_url = self.jellyfin_client.get_track_stream_url(track_id)
+        logger.info(f"Attempting to download audio from: {stream_url} to {output_path}")
+        try:
+            response = requests.get(stream_url, stream=True)
+            response.raise_for_status()
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            logger.info(f"Successfully downloaded {track_id} to {output_path}")
+            return output_path
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error downloading {track_id}: {e}")
+            raise
+
+    def _analyze_audio(self, audio_path):
+        # *** ONLY USING ESSENTIA'S MONOLOADER AS REQUESTED ***
+        try:
+            audio = es.MonoLoader(filename=audio_path, sampleRate=self.sample_rate)()
+            if audio.size == 0:
+                raise ValueError(f"Essentia MonoLoader loaded empty audio from {audio_path}")
+        except Exception as e:
+            logger.error(f"Failed to load audio with Essentia MonoLoader: {e}", exc_info=True)
+            raise ValueError(f"Could not load audio file {audio_path} using Essentia: {e}")
+
+
+        # Feature Extraction
+        # Danceability, Energy, Valence (from Low-Level features)
+        rhythm_extractor = es.RhythmExtractor2013(frameSize=self.frame_size, hopSize=self.hop_size)
+        rhythm = rhythm_extractor(audio)
+        danceability = rhythm[0] # BPM
+        # For energy and valence, we might need a more direct psychoacoustic model or use aggregated spectral features
+        # For simplicity, let's use aggregated spectral centroid/energy for a proxy
+        frame_cutter = es.FrameCutter(frameSize=self.frame_size, hopSize=self.hop_size)
+        window = es.Windowing(type="blackmanharris62")
+        fft = es.FFT()
+        spectrum = es.Spectrum()
+        spectral_centroid = es.SpectralCentroid()
+        energy_feature = es.Energy()
+
+        all_energies = []
+        all_spectral_centroids = []
+        for frame in es.FrameGenerator(audio, frameSize=self.frame_size, hopSize=self.hop_size):
+            windowed_frame = window(frame)
+            mag_spectrum = spectrum(fft(windowed_frame))
+            all_energies.append(energy_feature(windowed_frame))
+            all_spectral_centroids.append(spectral_centroid(mag_spectrum))
+
+        # Simple average of energy and centroid as proxies for energy/valence
+        avg_energy = np.mean(all_energies) if all_energies else 0.0
+        avg_spectral_centroid = np.mean(all_spectral_centroids) if all_spectral_centroids else 0.0
+
+        # Normalize energy and centroid to a 0-1 range for a rough proxy (not true perceptual values)
+        # These normalization ranges are heuristic; proper ranges would come from a larger dataset
+        normalized_energy = np.clip(avg_energy / 0.1, 0, 1) # Assuming max energy around 0.1
+        normalized_valence = np.clip((avg_spectral_centroid - 1000) / 4000, 0, 1) # Assuming centroid 1000-5000
+
+        # Essentia Features: Chroma, MFCC, Spectral Contrast, Tonnetz
+        # For consistency and simplicity, let's use the aggregated features from Essentia's pre-trained models or common pipelines
+        # Using a fixed-size descriptor approach for overall features suitable for clustering.
+
+        # For overall_features, let's create a combined feature vector:
+        # MusicNN embeddings provide a good high-level representation
+        embeddings = self.musicnn_embeddings_model(audio)
+        # Average embeddings across time to get a single vector per track
+        overall_features = np.mean(embeddings, axis=0) if embeddings.shape[0] > 0 else np.zeros(50) # MusicNN outputs 50-dim features
+
+        # Mood Prediction using MusicNN's prediction model
+        predictions = self.musicnn_prediction_model(audio) # Raw predictions from the prediction model
+        # Average predictions over time
+        avg_predictions = np.mean(predictions, axis=0) if predictions.shape[0] > 0 else np.zeros(len(self.mood_labels))
+        
+        # Get top N moods
+        top_mood_indices = avg_predictions.argsort()[-self.top_n_moods:][::-1]
+        top_moods_with_scores = [
+            {'mood': self.mood_labels[i], 'score': float(avg_predictions[i])}
+            for i in top_mood_indices
+        ]
+        
+        # Standard Essentia features (for more granular control if needed)
+        # Using aggregated values for simplicity.
+        try:
+            mfcc = es.MFCC(numberCoefficients=13)(es.Spectrum(es.FFT()(es.Windowing(type="blackmanharris62")(audio))))
+            avg_mfcc = np.mean(mfcc, axis=0) if mfcc.shape[0] > 0 else np.zeros(13)
+        except Exception:
+            avg_mfcc = np.zeros(13) # Fallback if audio too short or problem
+
+        try:
+            spectral_contrast = es.SpectralContrast()(es.Spectrum(es.FFT()(es.Windowing(type="blackmanharris62")(audio))))
+            avg_spectral_contrast = np.mean(spectral_contrast, axis=0) if spectral_contrast.shape[0] > 0 else np.zeros(7) # 7 bands
+        except Exception:
+            avg_spectral_contrast = np.zeros(7)
+
+        try:
+            tonnetz = es.TonalExtractor(frameSize=self.frame_size, hopSize=self.hop_size)(audio)
+            avg_tonnetz = np.mean(tonnetz[0], axis=0) if tonnetz[0].shape[0] > 0 else np.zeros(6) # 6 coefficients
+        except Exception:
+            avg_tonnetz = np.zeros(6)
+
+        try:
+            chroma = es.ChromaExtractor(frameSize=self.frame_size, hopSize=self.hop_size)(audio)
+            avg_chroma = np.mean(chroma[0], axis=0) if chroma[0].shape[0] > 0 else np.zeros(12) # 12 pitches
+        except Exception:
+            avg_chroma = np.zeros(12)
+
+        # Concatenate all features into a single, comprehensive vector for clustering
+        # Ensure all components are 1-D arrays
+        combined_features = np.concatenate([
+            overall_features,
+            np.array([danceability, normalized_energy, normalized_valence]),
+            avg_mfcc,
+            avg_spectral_contrast,
+            avg_tonnetz,
+            avg_chroma
+        ]).tolist() # Convert to list for JSON serialization
+
+
+        return {
+            "danceability": float(danceability),
+            "energy": float(normalized_energy),
+            "valence": float(normalized_valence),
+            "moods": top_moods_with_scores,
+            "chroma_features": avg_chroma.tolist(),
+            "mfcc_features": avg_mfcc.tolist(),
+            "spectral_contrast_features": avg_spectral_contrast.tolist(),
+            "tonnetz_features": avg_tonnetz.tolist(),
+            "overall_features": combined_features # This will be the primary vector for clustering
+        }
+
+    def run_analysis(self, progress_callback=None):
+        logger.info(f"Starting analysis for {self.num_recent_albums if self.num_recent_albums > 0 else 'all'} recent albums...")
+        try:
+            albums_data = self.jellyfin_client.get_latest_albums(limit=self.num_recent_albums)
+            if not albums_data or not albums_data.get('Items'):
+                logger.warning("No albums found for analysis.")
+                if progress_callback:
+                    progress_callback("No albums found for analysis.", 0, 0, 100)
+                return
+
+            albums = albums_data['Items']
+            total_albums = len(albums)
+            total_tracks_processed = 0
+            all_tracks_data = []
+
+            for i, album in enumerate(albums):
+                album_title = album.get('Name', 'Unknown Album')
+                album_id = album.get('Id')
+                
+                # Update progress per album
+                progress_percent = (i / total_albums) * 100
+                if progress_callback:
+                    progress_callback(f"Analyzing album: {album_title}", i + 1, total_albums, progress_percent)
+                logger.info(f"Processing album {i+1}/{total_albums}: {album_title} (ID: {album_id})")
+
+                tracks_in_album = self.jellyfin_client.get_album_tracks(album_id)
+                if not tracks_in_album or not tracks_in_album.get('Items'):
+                    logger.info(f"No tracks found for album {album_title}.")
+                    continue
+
+                for track in tracks_in_album['Items']:
+                    track_id = track.get('Id')
+                    track_title = track.get('Name', 'Unknown Track')
+                    track_artist = track.get('ArtistItems', [{}])[0].get('Name', 'Unknown Artist')
+
+                    logger.info(f"  Processing track: {track_title} by {track_artist} (ID: {track_id})")
+
+                    temp_audio_file = self.temp_dir / f"{track_id}.mp3"
+                    try:
+                        self._download_audio(track_id, temp_audio_file)
+                        features = self._analyze_audio(str(temp_audio_file))
+                        track_data = {
+                            "id": track_id,
+                            "title": track_title,
+                            "author": track_artist,
+                            "album_id": album_id,
+                            "album_name": album_title,
+                            **features
+                        }
+                        self.db_manager.insert_track(track_data)
+                        all_tracks_data.append(track_data)
+                        total_tracks_processed += 1
+                        logger.info(f"  Analyzed and saved features for track: {track_title}")
+                    except Exception as e:
+                        logger.error(f"Failed to analyze track {track_title} (ID: {track_id}): {e}")
+                    finally:
+                        if temp_audio_file.exists():
+                            os.remove(temp_audio_file)
+                            logger.debug(f"Removed temporary file: {temp_audio_file}")
+
+            if progress_callback:
+                progress_callback(f"Analysis complete. Processed {total_tracks_processed} tracks.", total_albums, total_albums, 100)
+            logger.info(f"Analysis finished. Total tracks processed: {total_tracks_processed}")
+
+        except Exception as e:
+            logger.error(f"Error during analysis: {e}", exc_info=True)
+            if progress_callback:
+                progress_callback(f"Analysis failed: {e}", 0, 0, 0)
+            raise
+        finally:
+            # Clean up the entire temp directory after analysis
+            if self.temp_dir.exists():
+                shutil.rmtree(self.temp_dir)
+                logger.info(f"Cleaned up temporary directory: {self.temp_dir}")
+
 
 # --- SQLite Database Management for Main Data ---
 # This remains a class as it handles complex data structures
@@ -233,7 +548,7 @@ def get_last_task_status_from_db(task_type):
     return dict(row) if row else None
 
 
-# --- ClusterGenerator Class (Moved from separate file) ---
+# --- ClusterGenerator Class (Integrated) ---
 class ClusterGenerator:
     def __init__(self, db_manager):
         self.db_manager = db_manager
@@ -403,9 +718,16 @@ class ClusterGenerator:
 
 
 # --- Initialize Essentia Analyzer and Cluster Generator ---
-essentia_analyzer = EssentiaAnalyzer(
+# Initialize JellyfinClient first, then pass an instance to EssentiaAnalyzer
+jellyfin_client_instance = JellyfinClient(
     jellyfin_url=config.JELLYFIN_URL,
-    jellyfin_user_id=config.JELLYFIN_USER_ID,
+    user_id=config.JELLYFIN_USER_ID,
+    api_token=config.JELLYFIN_TOKEN
+)
+
+essentia_analyzer = EssentiaAnalyzer(
+    jellyfin_url=config.JELLYFIN_URL, # These are just passed to the internal JellyfinClient constructor
+    jellyfin_user_id=config.JELLYFIN_USER_ID, # The class now contains the JellyfinClient logic
     jellyfin_token=config.JELLYFIN_TOKEN,
     db_manager=db_manager,
     temp_dir=config.TEMP_DIR,
@@ -469,14 +791,15 @@ def start_analysis_task(self, jellyfin_config):
         logger.info(f"Task {self.request.id} progress: {progress_percent}% - {msg}")
 
     try:
-        jellyfin_client = JellyfinClient(
-            jellyfin_url=jellyfin_config['jellyfin_url'],
-            user_id=jellyfin_config['jellyfin_user_id'],
-            api_token=jellyfin_config['jellyfin_token']
-        )
-        essentia_analyzer.jellyfin_client = jellyfin_client # Update client in analyzer
-        essentia_analyzer.num_recent_albums = jellyfin_config.get('num_recent_albums', 0)
-        essentia_analyzer.top_n_moods = jellyfin_config.get('top_n_moods', 5)
+        # Update parameters on the analyzer instance
+        essentia_analyzer.num_recent_albums = jellyfin_config.get('num_recent_albums', config.NUM_RECENT_ALBUMS)
+        essentia_analyzer.top_n_moods = jellyfin_config.get('top_n_moods', config.TOP_N_MOODS)
+        # Update the jellyfin_client within the essentia_analyzer if its config changed
+        essentia_analyzer.jellyfin_client.jellyfin_url = jellyfin_config['jellyfin_url']
+        essentia_analyzer.jellyfin_client.user_id = jellyfin_config['jellyfin_user_id']
+        essentia_analyzer.jellyfin_client.headers["X-Emby-User-ID"] = jellyfin_config['jellyfin_user_id']
+        essentia_analyzer.jellyfin_client.headers["X-Emby-Token"] = jellyfin_config['jellyfin_token']
+
 
         essentia_analyzer.run_analysis(update_frontend_progress)
 
