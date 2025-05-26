@@ -41,7 +41,7 @@ jobs:
             ALL_TAGS="$MAIN_TAG"
             echo "Building latest tag: $MAIN_TAG"
 
-          elif [[ "${GITHUB_REF}" == "refs/heads/development" ]]; then
+          elif [[ "${GITHUB_REF}" == "refs/heads/devel" ]]; then
             DEV_TAG="ghcr.io/$REPO_NAME_LOWER:devel"
             ALL_TAGS="$DEV_TAG"
             echo "Building devel tag: $DEV_TAG"
