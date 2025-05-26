@@ -49,7 +49,7 @@ with app.app_context():
 def get_status_db():
     if 'status_db' not in g:
         g.status_db = sqlite3.connect(STATUS_DB_PATH)
-        g.status_db.row_factory = sqlite3.Row
+        g.status_db.row_factory = sqlite3.Row # This makes rows accessible by column name
     return g.status_db
 
 @app.teardown_appcontext
@@ -61,8 +61,18 @@ def close_status_db(exception):
 def save_task_status(task_id, status="PENDING", task_type="analysis"):
     conn = get_status_db()
     cur = conn.cursor()
+    # Use INSERT OR REPLACE to update existing task or insert new one
     cur.execute("INSERT OR REPLACE INTO analysis_status (task_id, status, task_type) VALUES (?, ?, ?)", (task_id, status, task_type))
     conn.commit()
+
+# NEW HELPER FUNCTION: Get task type from DB
+def get_task_type_from_db(task_id):
+    conn = get_status_db()
+    cur = conn.cursor()
+    cur.execute("SELECT task_type FROM analysis_status WHERE task_id = ?", (task_id,))
+    row = cur.fetchone()
+    return row['task_type'] if row else None
+
 
 def get_last_task_status(task_type="analysis"):
     conn = get_status_db()
@@ -223,7 +233,7 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
         tempo_label = "Medium"
     else:
         tempo_label = "Fast"
-    
+
     if len(mood_values) == 0 or np.sum(mood_values) == 0:
         top_indices = []
     else:
@@ -232,10 +242,10 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
     mood_names = [mood_labels[i] for i in top_indices if i < len(mood_labels)]
     mood_part = "_".join(mood_names).title() if mood_names else "Mixed"
     full_name = f"{mood_part}_{tempo_label}"
-    
+
     top_mood_scores = {mood_labels[i]: mood_values[i] for i in top_indices if i < len(mood_labels)}
     extra_info = {"tempo": round(tempo_norm, 2)}
-    
+
     return full_name, {**top_mood_scores, **extra_info}
 
 def update_playlist_table(db_path, playlists):
@@ -292,7 +302,7 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, heade
 def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods):
     headers = {"X-Emby-Token": jellyfin_token}
     log_messages = []
-    
+
     def log_and_update(message, progress, current_album=None, current_album_idx=0, total_albums=0):
         log_messages.append(message)
         self.update_state(state='PROGRESS', meta={
@@ -301,7 +311,8 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             'log_output': log_messages,
             'current_album': current_album,
             'current_album_idx': current_album_idx,
-            'total_albums': total_albums
+            'total_albums': total_albums,
+            'task_type': 'analysis' # Ensure task_type is always in meta
         })
     try:
         log_and_update("🚀 Starting mood-based analysis...", 0)
@@ -315,6 +326,11 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             analysis_start_progress = 5
             analysis_end_progress = 85
             for idx, album in enumerate(albums, 1):
+                # Check for revocation at each album
+                if self.request.is_revoked():
+                    log_and_update(f"Task {self.request.id} revoked during album processing. Exiting.", 100)
+                    return {"status": "REVOKED", "message": "Analysis task was revoked."}
+
                 album_progress_base = analysis_start_progress + int((analysis_end_progress - analysis_start_progress) * ((idx - 1) / total_albums))
                 log_and_update(f"🎵 Processing Album: {album['Name']} ({idx}/{total_albums})", album_progress_base, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
                 tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album['Id'])
@@ -323,6 +339,11 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                     continue
                 total_tracks_in_album = len(tracks)
                 for track_idx, item in enumerate(tracks, 1):
+                    # Check for revocation at each track
+                    if self.request.is_revoked():
+                        log_and_update(f"Task {self.request.id} revoked during track processing. Exiting.", 100)
+                        return {"status": "REVOKED", "message": "Analysis task was revoked."}
+
                     track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
                     track_progress_within_album = int((analysis_end_progress - analysis_start_progress) * (1 / total_albums) * (track_idx / total_tracks_in_album))
                     current_overall_progress = album_progress_base + track_progress_within_album
@@ -351,50 +372,58 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                                 print(f"WARNING: Failed to clean up temp file {path}: {cleanup_e}")
             clean_temp(TEMP_DIR)
         log_and_update("Analysis phase complete.", 90)
-        return {"status": "SUCCESS", "message": "Analysis complete!"}
+        return {"status": "SUCCESS", "message": "Analysis complete!", 'task_type': 'analysis'}
     except Exception as e:
         error_traceback = traceback.format_exc()
         print(f"FATAL ERROR: Analysis failed: {e}\n{error_traceback}")
         log_and_update(f"❌ Analysis failed: {e}", 100)
-        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Analysis failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"]})
-        return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
+        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Analysis failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'analysis'})
+        return {"status": "FAILURE", "message": f"Analysis failed: {e}", 'task_type': 'analysis'}
 
 @celery.task(bind=True)
 def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
                         clustering_method, num_clusters, dbscan_eps,
                         dbscan_min_samples, pca_components, pca_enabled, num_clustering_runs):
-    
+
     headers = {"X-Emby-Token": jellyfin_token}
     log_messages = []
+    unique_predominant_moods = [] # To store the moods for the frontend
 
     def log_and_update(message, progress):
         log_messages.append(message)
         self.update_state(state='PROGRESS', meta={
             'progress': progress,
             'status': message,
-            'log_output': log_messages
+            'log_output': log_messages,
+            'task_type': 'clustering' # Ensure task_type is always in meta
         })
 
     try:
         log_and_update("▶️ Starting clustering and playlist generation...", 0)
-        
+
         rows = get_all_tracks(DB_PATH)
         if len(rows) < 2:
             log_and_update("⛔ Not enough analyzed tracks for clustering. Requires at least 2.", 100)
-            return {"status": "FAILURE", "message": "Not enough analyzed tracks for clustering."}
-        
+            return {"status": "FAILURE", "message": "Not enough analyzed tracks for clustering.", 'task_type': 'clustering'}
+
         X_original = [score_vector(row, MOOD_LABELS) for row in rows]
         X_scaled = np.array(X_original)
 
         best_diversity_score = -1
         best_clustering_results = None
+        best_unique_predominant_moods = [] # Store for the best run
 
         log_and_update(f"📊 Running {num_clustering_runs} clustering iterations...", 10)
 
         for run_idx in range(num_clustering_runs):
+            # Check for revocation at each run iteration
+            if self.request.is_revoked():
+                log_and_update(f"Task {self.request.id} revoked during clustering iterations. Exiting.", 100)
+                return {"status": "REVOKED", "message": "Clustering task was revoked.", 'task_type': 'clustering'}
+
             current_run_progress = 10 + int(80 * ((run_idx + 1) / num_clustering_runs)) # 10% for initial, 80% for runs
             log_and_update(f"🔄 Clustering Run {run_idx + 1}/{num_clustering_runs}", current_run_progress)
-            
+
             pca_model = None
             data_for_clustering = X_scaled
 
@@ -417,7 +446,7 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
             elif clustering_method == "dbscan":
                 dbscan = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples)
                 labels = dbscan.fit_predict(data_for_clustering)
-                
+
                 for cluster_id in set(labels):
                     if cluster_id == -1:
                         continue
@@ -430,11 +459,11 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
                         cluster_centers_raw[cluster_id] = center
             else:
                 log_and_update(f"❌ Unsupported clustering algorithm: {clustering_method}", current_run_progress)
-                return {"status": "FAILURE", "message": f"Unsupported clustering algorithm: {clustering_method}"}
+                return {"status": "FAILURE", "message": f"Unsupported clustering algorithm: {clustering_method}", 'task_type': 'clustering'}
 
             max_dist = raw_distances.max()
             normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-            
+
             track_info = []
             for row, label, vec, dist in zip(rows, labels, data_for_clustering, normalized_distances):
                 track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
@@ -447,7 +476,7 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
                 if not cluster_tracks:
                     continue
                 cluster_tracks.sort(key=lambda x: x["distance"])
-                
+
                 count_per_artist = defaultdict(int)
                 selected = []
                 for t in cluster_tracks:
@@ -463,22 +492,24 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
 
             current_named_playlists = defaultdict(list)
             current_playlist_centroids = {}
-            predominant_moods_found = set()
+            predominant_moods_found_this_run = set() # Use a set for this run
 
             for label, songs in filtered_clusters.items():
                 if songs:
                     center_raw = cluster_centers_raw[label]
                     name, top_scores = name_cluster(center_raw, pca_model, pca_enabled, MOOD_LABELS)
-                    
-                    if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
-                        predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
-                        if predominant_mood_key in MOOD_LABELS:
-                             predominant_moods_found.add(predominant_mood_key)
+
+                    # Extract predominant moods for this run
+                    if top_scores:
+                        for mood_label in MOOD_LABELS:
+                            if mood_label in top_scores and top_scores[mood_label] > 0.1: # Threshold for "predominant"
+                                predominant_moods_found_this_run.add(mood_label)
+
 
                     current_named_playlists[name].extend(songs)
                     current_playlist_centroids[name] = top_scores
 
-            diversity_score = len(predominant_moods_found)
+            diversity_score = len(predominant_moods_found_this_run)
             log_and_update(f"Run {run_idx + 1}: Found {diversity_score} unique predominant moods.", current_run_progress)
 
             if diversity_score > best_diversity_score:
@@ -487,10 +518,11 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
                     "named_playlists": current_named_playlists,
                     "playlist_centroids": current_playlist_centroids,
                 }
+                best_unique_predominant_moods = list(predominant_moods_found_this_run) # Store the list for the best run
 
         if not best_clustering_results:
             log_and_update("❌ No valid clusters found after multiple runs.", 100)
-            return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
+            return {"status": "FAILURE", "message": "No valid clusters found after multiple runs.", 'task_type': 'clustering'}
 
         log_and_update("✅ Clustering complete. Updating Jellyfin playlists...", 95)
 
@@ -499,16 +531,16 @@ def run_clustering_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token,
 
         update_playlist_table(DB_PATH, final_named_playlists)
         create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, headers, final_named_playlists, final_playlist_centroids, MOOD_LABELS)
-        
+
         log_and_update(f"🎉 Playlists generated and updated on Jellyfin! Best run had {best_diversity_score} unique predominant moods.", 100)
-        return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had {best_diversity_score} unique predominant moods."}
+        return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had {best_diversity_score} unique predominant moods.", 'task_type': 'clustering', 'unique_moods': best_unique_predominant_moods}
 
     except Exception as e:
         error_traceback = traceback.format_exc()
         print(f"FATAL ERROR: Clustering failed: {e}\n{error_traceback}")
         log_and_update(f"❌ Clustering failed: {e}", 100)
-        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"]})
-        return {"status": "FAILURE", "message": f"Clustering failed: {e}"}
+        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'clustering'})
+        return {"status": "FAILURE", "message": f"Clustering failed: {e}", 'task_type': 'clustering'}
 
 # --- API Endpoints ---
 
@@ -525,6 +557,7 @@ def start_analysis():
     num_recent_albums = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS))
     top_n_moods = int(data.get('top_n_moods', TOP_N_MOODS))
     task = run_analysis_task.delay(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods)
+    # Ensure task_type is correctly passed here
     save_task_status(task.id, "PENDING", "analysis")
     return jsonify({"task_id": task.id, "status": "PENDING", "task_type": "analysis"}), 202
 
@@ -537,44 +570,75 @@ def get_task_status(task_id):
         'status': 'Processing...'
     }
     task_info = task.info if isinstance(task.info, dict) else {}
-    if task.state == 'PENDING':
+
+    # If the task is in a final state, retrieve its status from the DB for persistence
+    # This is important if a task was revoked/failed and we want to show that state
+    # even if the Celery worker has forgotten it (e.g., after restart)
+    if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
+        response.update(task_info) # Celery's live info
+    else: # SUCCESS, FAILURE, REVOKED
+        conn = get_status_db()
+        cur = conn.cursor()
+        cur.execute("SELECT status, task_type FROM analysis_status WHERE task_id = ?", (task_id,))
+        db_row = cur.fetchone()
+        if db_row:
+            response['state'] = db_row['status'] # Use DB status for final states
+            response['status'] = db_row['status'] # Update status message
+            response['task_type'] = db_row['task_type'] # Get task_type from DB
+            # If there's more info needed from task_info for final states, merge it
+            response.update(task_info) # Still merge any info from Celery's AsyncResult
+        else:
+            # Fallback if task not found in DB (shouldn't happen if save_task_status is reliable)
+            response.update(task_info)
+
+
+    # Special handling for progress and log output
+    if response['state'] == 'PENDING':
         response['status'] = 'Task is pending or not yet started.'
         response.update({'progress': 0, 'status': 'Initializing...', 'log_output': ['Task pending...']})
-        response.update(task_info)
-    elif task.state == 'PROGRESS':
-        response.update(task_info)
-    elif task.state == 'SUCCESS':
+    elif response['state'] == 'PROGRESS':
+        pass # Info already updated above
+    elif response['state'] == 'SUCCESS':
         response['status'] = 'Task complete!'
-        response.update({'progress': 100, 'status': 'Task complete!', 'log_output': []})
-        response.update(task_info)
-        # Update DB status only if it's a final state for the first time
-        if 'task_type' in task_info and task_info.get('status') != 'Task complete!':
-             save_task_status(task_id, "SUCCESS", task_info.get('task_type', 'unknown'))
-    elif task.state == 'FAILURE':
+        response.update({'progress': 100})
+        # For clustering, include unique_moods if available
+        if response.get('task_type') == 'clustering' and 'unique_moods' not in response:
+             # Try to parse from message if not directly present (less reliable)
+             if "unique predominant moods" in response['message']:
+                 # This is a fallback, ideally the task returns unique_moods directly
+                 pass # The task.info should already have it if successful
+    elif response['state'] == 'FAILURE':
         response['status'] = str(task.info)
-        response.update({'progress': 100, 'status': 'Task failed!', 'log_output': [str(task.info)]})
-        response.update(task_info)
-        if 'task_type' in task_info and task_info.get('status') != 'Task failed!':
-             save_task_status(task_id, "FAILURE", task_info.get('task_type', 'unknown'))
-    elif task.state == 'REVOKED':
+        response.update({'progress': 100, 'log_output': [str(task.info)]})
+    elif response['state'] == 'REVOKED':
         response['status'] = 'Task revoked.'
-        response.update({'progress': 100, 'status': 'Task revoked.', 'log_output': ['Task was cancelled.']})
-        response.update(task_info)
-        if 'task_type' in task_info and task_info.get('status') != 'Task revoked.':
-             save_task_status(task_id, "REVOKED", task_info.get('task_type', 'unknown'))
+        response.update({'progress': 100, 'log_output': ['Task was cancelled.']})
     else:
-        response['status'] = f'Unknown state: {task.state}'
-        response.update(task_info)
+        response['status'] = f'Unknown state: {response["state"]}'
+
     return jsonify(response)
+
 
 @app.route('/api/task/cancel/<task_id>', methods=['POST'])
 def cancel_task(task_id):
     task = AsyncResult(task_id, app=celery)
     if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
+        # IMPORTANT: Get the original task_type from the database before revoking
+        # This ensures we update the correct entry and the frontend can find it.
+        original_task_type = get_task_type_from_db(task_id)
+        task_type_to_save = original_task_type if original_task_type else "unknown"
+
+        # Forceful termination
         task.revoke(terminate=True, signal='SIGKILL')
-        save_task_status(task_id, "REVOKED", "unknown")
-        return jsonify({"message": "Task cancelled.", "task_id": task_id}), 200
+
+        # Immediately update the database status to REVOKED with its original task_type
+        save_task_status(task_id, "REVOKED", task_type_to_save)
+        print(f"Task {task_id} of type '{task_type_to_save}' cancellation requested and DB status updated to REVOKED.")
+
+        # Return a response that indicates cancellation and the correct task_type
+        return jsonify({"message": f"Task {task_id} cancellation requested.", "task_id": task_id, "state": "REVOKED", "task_type": task_type_to_save}), 200
     else:
+        print(f"Task {task_id} is already in state: {task.state}, no cancellation needed.")
         return jsonify({"message": "Task cannot be cancelled in its current state.", "state": task.state}), 400
 
 @app.route('/api/analysis/last_task', methods=['GET'])
@@ -633,6 +697,7 @@ def start_clustering():
         clustering_method, num_clusters, dbscan_eps,
         dbscan_min_samples, pca_components, pca_enabled, num_clustering_runs
     )
+    # Ensure task_type is correctly passed here
     save_task_status(task.id, "PENDING", "clustering")
     return jsonify({"task_id": task.id, "status": "PENDING", "task_type": "clustering"}), 202
 
