@@ -22,7 +22,7 @@ from sklearn.decomposition import PCA
 from config import *
 
 # --- Flask App Setup ---
-app = Flask(__name__)
+app = Flask(__app.name__)
 # Update to use environment variables for Celery broker and backend
 app.config['CELERY_BROKER_URL'] = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 app.config['CELERY_RESULT_BACKEND'] = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
