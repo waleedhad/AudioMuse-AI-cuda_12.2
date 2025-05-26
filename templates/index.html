@@ -194,7 +194,10 @@
                     <label for="pca_components" class="block text-gray-400 text-sm font-bold mb-2">PCA Components (0 to disable):</label>
                     <input type="number" id="pca_components" name="pca_components" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                 </div>
-
+                <div>
+                    <label for="clustering_runs" class="block text-gray-400 text-sm font-bold mb-2">Clustering Runs (for diversity):</label>
+                    <input type="number" id="clustering_runs" name="clustering_runs" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
                 <div class="col-span-1 md:col-span-2 mt-4 text-center">
                     <button type="submit" id="generatePlaylistsBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         Generate Playlists
@@ -237,6 +240,9 @@
         const playlistsDisplay = document.getElementById('playlistsDisplay');
         const playlistList = document.getElementById('playlistList');
         const fetchPlaylistsBtn = document.getElementById('fetchPlaylistsBtn');
+
+        // NEW FIELD ELEMENT
+        const clusteringRunsInput = document.getElementById('clustering_runs');
 
         let pollingInterval = null;
         let currentTaskId = null; // Removed localStorage.getItem here, will fetch from DB first
@@ -333,6 +339,9 @@
                 document.getElementById('dbscan_eps').value = config.dbscan_eps !== undefined ? config.dbscan_eps : 0.15;
                 document.getElementById('dbscan_min_samples').value = config.dbscan_min_samples !== undefined ? config.dbscan_min_samples : 10;
                 document.getElementById('pca_components').value = config.pca_enabled ? 3 : 0; // Set to 3 if enabled, 0 if disabled
+                // --- NEW JS CHANGES HERE ---
+                clusteringRunsInput.value = config.clustering_runs !== undefined ? config.clustering_runs : 10; // Populate new field
+                // --- END NEW JS CHANGES ---
 
                 toggleClusteringOptions(); // Adjust visibility based on loaded config
             } catch (error) {
@@ -480,6 +489,9 @@
                 if (!data.pca_enabled) {
                     delete data.pca_components;
                 }
+                // --- NEW JS CHANGES HERE ---
+                data.clustering_runs = parseInt(data.clustering_runs, 10);
+                // --- END NEW JS CHANGES ---
 
                 const response = await fetch(`${API_BASE_URL}/clustering`, {
                     method: 'POST',
