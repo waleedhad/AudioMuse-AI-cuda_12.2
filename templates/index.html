@@ -624,6 +624,7 @@
 
             overallStatusSpan.textContent = 'Cancelling...';
             logPre.textContent += '\nCancellation requested...'; // Add to log
+            logPre.scrollTop = logPre.scrollHeight; // Auto-scroll to bottom
 
             try {
                 const response = await fetch(`${API_BASE_URL}/api/task/cancel/${taskId}`, {
@@ -631,16 +632,34 @@
                     headers: { 'Content-Type': 'application/json' }
                 });
                 const data = await response.json();
-                console.log(data.message);
+                console.log(`Cancellation response for ${type} task:`, data);
 
-                // Even if cancellation requested, continue polling briefly to see it transition to REVOKED
-                // This ensures the UI reflects the true state once Celery processes the revoke.
-                // The polling function handles stopping itself when state is FINAL_TASK_STATES.
-                // If it doesn't transition, user might need to check Celery worker logs.
+                // Immediately update UI based on the response from the backend
+                // This ensures 'REVOKED' is shown quickly if the backend confirms it.
+                // The 'data.task_type' from the backend response is used for consistency.
+                updateTaskUI(type, {
+                    task_id: taskId,
+                    state: data.state, // Should be 'REVOKED' from backend
+                    status: data.message, // Message from backend
+                    progress: 100,
+                    log_output: (logPre.textContent + '\n' + data.message).split('\n'), // Merge existing log
+                    task_type: data.task_type // Use the task_type returned by the backend
+                });
+                stopPolling(type); // Ensure polling stops
+                resetButtons(type); // Reset buttons
+
+                if (type === 'clustering') {
+                    // Hide predominant moods if clustering was cancelled
+                    document.getElementById('predominantMoods').classList.add('hidden');
+                    document.getElementById('moodTagsList').innerHTML = '';
+                }
+
             } catch (error) {
                 console.error(`Error requesting cancellation of ${type} task:`, error);
                 alert(`Failed to send cancel request. See console for details: ${error.message}`);
                 overallStatusSpan.textContent = `Error during cancellation: ${error.message}`;
+                // Do not reset buttons or stop polling immediately if cancellation request itself failed
+                // The polling loop will eventually time out or report failure if the task is truly stuck.
             }
         }
 
@@ -655,10 +674,13 @@
                 if (data.task_id && data.status !== 'NO_PREVIOUS_TASK') {
                     // Update UI with the state of the last task
                     statusBox.classList.remove('hidden');
-                    updateTaskUI(type, data);
+                    // Fetch full task info to get progress, logs, etc. for the last task
+                    const fullTaskResponse = await fetch(`${API_BASE_URL}/api/task/status/${data.task_id}`);
+                    const fullTaskData = await fullTaskResponse.json();
+                    updateTaskUI(type, fullTaskData);
 
-                    if (FINAL_TASK_STATES.includes(data.status)) {
-                        console.log(`Last ${type} task (ID: ${data.task_id}) is in a final state: ${data.status}. Not resuming polling.`);
+                    if (FINAL_TASK_STATES.includes(fullTaskData.state)) {
+                        console.log(`Last ${type} task (ID: ${data.task_id}) is in a final state: ${fullTaskData.state}. Not resuming polling.`);
                         resetButtons(type);
                     } else {
                         // If it's still active (PENDING, STARTED, PROGRESS), resume polling
@@ -667,7 +689,7 @@
                         } else { // clustering
                             clusteringTaskId = data.task_id;
                         }
-                        console.log(`Last ${type} task (ID: ${data.task_id}) is active: ${data.status}. Resuming polling.`);
+                        console.log(`Last ${type} task (ID: ${data.task_id}) is active: ${fullTaskData.state}. Resuming polling.`);
                         startPolling(data.task_id, type);
                         // Enable cancel button and disable start button if task is pending/in progress
                         if (type === 'analysis') {
