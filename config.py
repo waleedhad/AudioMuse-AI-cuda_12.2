@@ -31,6 +31,9 @@ DBSCAN_MIN_SAMPLES = 10
 # --- KMEANS Only Constant (Read from Environment Variables) ---
 NUM_CLUSTERS = int(os.getenv("NUM_CLUSTERS", "40")) # if 0 it automatically defined
 
+# --- Clustering Runs for Diversity (New Constant) ---
+CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "10")) # Default to 10 runs
+
 # --- Celery Broker/Backend URLs (from ConfigMap in your deployment) ---
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
@@ -60,5 +63,6 @@ print(f"DEBUG: NUM_RECENT_ALBUMS: {NUM_RECENT_ALBUMS}")
 print(f"DEBUG: CLUSTER_ALGORITHM: {CLUSTER_ALGORITHM}")
 print(f"DEBUG: PCA_ENABLED: {PCA_ENABLED}")
 print(f"DEBUG: NUM_CLUSTERS: {NUM_CLUSTERS}")
+print(f"DEBUG: CLUSTERING_RUNS: {CLUSTERING_RUNS}") # New debug print
 print(f"DEBUG: CELERY_BROKER_URL: {CELERY_BROKER_URL}")
 print(f"DEBUG: CELERY_RESULT_BACKEND: {CELERY_RESULT_BACKEND}")
