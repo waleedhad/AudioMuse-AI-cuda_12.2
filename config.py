@@ -51,8 +51,8 @@ PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "10")) # Max components
 CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 
 # --- Celery Broker/Backend URLs (from ConfigMap in your deployment) ---
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
 
 
 # --- Classifier Constant ---
