@@ -20,9 +20,8 @@ MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 40 # This is a hard limit for chunking playlists for Jellyfin, not the desired playlist size
 MAX_SONGS_PER_ARTIST = 3
 
-# Changed NUM_RECENT_ALBUMS to MIN_RECENT_ALBUMS and added MAX_RECENT_ALBUMS
-MIN_RECENT_ALBUMS = int(os.getenv("MIN_RECENT_ALBUMS", "40")) # Min recent albums to fetch
-MAX_RECENT_ALBUMS = int(os.getenv("MAX_RECENT_ALBUMS", "60")) # Max recent albums to fetch
+# Number of recent albums to fetch for analysis
+NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000"))
 
 
 # --- Algorithm Choose Constant (Read from Environment Variables) ---
@@ -48,7 +47,7 @@ CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "1000")) # Changed default
 
 # --- Playlist Song Number Constraints (User Configurable) ---
 MIN_SONGS_PER_PLAYLIST = int(os.getenv("MIN_SONGS_PER_PLAYLIST", "20"))
-MAX_SONGS_PER_PLAYLIST = int(os.getenv("MAX_SONGS_PER_PLAYLIST", "40"))
+MAX_SONGS_PER_PLAYLIST = int(os.getenv("MAX_SONGS_PER_PLAYLIST", "60"))
 
 
 # --- Celery Constants ---
@@ -82,8 +81,7 @@ print(f"DEBUG: JELLYFIN_TOKEN: {'***hidden***' if JELLYFIN_TOKEN else 'None'}")
 print(f"DEBUG: TEMP_DIR: {TEMP_DIR}")
 print(f"DEBUG: DB_PATH: {DB_PATH}")
 print(f"DEBUG: STATUS_DB_PATH: {STATUS_DB_PATH}")
-print(f"DEBUG: MIN_RECENT_ALBUMS: {MIN_RECENT_ALBUMS}") # Updated debug print
-print(f"DEBUG: MAX_RECENT_ALBUMS: {MAX_RECENT_ALBUMS}") # New debug print
+print(f"DEBUG: NUM_RECENT_ALBUMS: {NUM_RECENT_ALBUMS}") # Updated debug print
 print(f"DEBUG: CLUSTER_ALGORITHM: {CLUSTER_ALGORITHM}")
 print(f"DEBUG: NUM_CLUSTERS_MIN: {NUM_CLUSTERS_MIN}")
 print(f"DEBUG: NUM_CLUSTERS_MAX: {NUM_CLUSTERS_MAX}")
