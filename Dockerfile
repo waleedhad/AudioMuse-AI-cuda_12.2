@@ -17,6 +17,9 @@ RUN apt-get update && \
     iputils-ping \
     libopenblas-dev \
     liblapack-dev \
+    # Added dependencies for psycopg2-binary
+    libpq-dev \
+    gcc \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -30,7 +33,9 @@ RUN pip3 install --no-cache-dir \
     requests \
     scikit-learn \
     pyyaml \
-    six
+    six \
+    # Added psycopg2-binary for PostgreSQL connectivity
+    psycopg2-binary
 
 RUN pip3 install --no-cache-dir essentia-tensorflow
 
