@@ -45,7 +45,7 @@ GMM_COVARIANCE_TYPE = os.getenv("GMM_COVARIANCE_TYPE", "full") # 'full', 'tied',
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
 PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA
-PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "10")) # Max components for PCA
+PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "5")) # Max components for PCA
 
 # --- Clustering Runs for Diversity (New Constant) ---
 CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
