@@ -1,3 +1,4 @@
+# config.py
 import os
 
 # --- Jellyfin and DB Constants (Read from Environment Variables first) ---
@@ -16,7 +17,7 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
 # --- General Constants (Read from Environment Variables where applicable) ---
 MAX_DISTANCE = 0.5
-MAX_SONGS_PER_CLUSTER = 40
+MAX_SONGS_PER_CLUSTER = 40 # This is a hard limit for chunking playlists for Jellyfin, not the desired playlist size
 MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
 
@@ -30,37 +31,45 @@ DBSCAN_EPS_MAX = float(os.getenv("DBSCAN_EPS_MAX", "0.5"))
 DBSCAN_MIN_SAMPLES_MIN = int(os.getenv("DBSCAN_MIN_SAMPLES_MIN", "5"))
 DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20"))
 
-
-# --- KMEANS Only Constants (Ranges for Evolutionary Approach) ---
-# Default ranges for KMeans parameters
-NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "20"))
-NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "60"))
-
-# --- PCA Constants (Ranges for Evolutionary Approach) ---
-# Default ranges for PCA components
-PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA
+# --- KMEANS and DBSCAN (PCA Components) ---
+PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA initially
 PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "10")) # Max components for PCA
 
-# --- Clustering Runs for Diversity (New Constant) ---
-CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "100")) # Default to 100 runs for evolutionary search
+# --- KMEANS Only Constants (Ranges for Evolutionary Approach) ---
+NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "3"))
+NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "10"))
 
-# --- Celery Broker/Backend URLs (from ConfigMap in your deployment) ---
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+# --- Evolutionary Clustering Runs ---
+CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "10")) # Number of clustering runs for evolutionary approach
+
+# --- Playlist Song Number Constraints (User Configurable) ---
+MIN_SONGS_PER_PLAYLIST = int(os.getenv("MIN_SONGS_PER_PLAYLIST", "20"))
+MAX_SONGS_PER_PLAYLIST = int(os.getenv("MAX_SONGS_PER_PLAYLIST", "40"))
 
 
-# --- Classifier Constant ---
+# --- Celery Constants ---
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+
+# --- Essentia Model Paths ---
+# These are the paths to the models within the Docker container / app environment
+# Ensure these are correct based on where your models are mounted or stored
+EMBEDDING_MODEL_PATH = "/app/msd-musicnn-1.pb"
+PREDICTION_MODEL_PATH = "/app/msd-discogs-effnet.pb" # Corrected path for consistency, assuming discogs for mood prediction
+
+# --- Mood Labels ---
+# Updated list of mood labels based on a common set, ensures consistency if model changes
 MOOD_LABELS = [
-    'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s', 'alternative rock', 'jazz',
-    'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock', 'soul', 'indie rock', 'Mellow', 'electronica', '80s',
-    'folk', '90s', 'chill', 'instrumental', 'punk', 'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental',
-    'female vocalist', 'guitar', 'Hip-Hop', '70s', 'party', 'country', 'easy listening', 'sexy', 'catchy', 'funk', 'electro',
-    'heavy metal', 'Progressive rock', '60s', 'rnb', 'indie pop', 'sad', 'House', 'happy'
+    'danceable', 'energetic', 'calm', 'romantic', 'sad', 'happy',
+    'aggressive', 'relaxed', 'upbeat', 'dark', 'exciting', 'peaceful',
+    'dreamy', 'driving', 'groovy', 'laid-back', 'melancholy', 'pensive',
+    'rowdy', 'soothing', 'spiritual', 'stirring', 'thought-provoking',
+    'uplifting', 'mellow', 'intense', 'epic', 'light', 'mysterious',
+    'passion', 'resolute', 'serene', 'smooth', 'somber', 'sparkling',
+    'spooky', 'unsettling', 'vibrant', 'whimsical', 'gritty'
 ]
 
 TOP_N_MOODS = 5
-EMBEDDING_MODEL_PATH = "/app/msd-musicnn-1.pb"
-PREDICTION_MODEL_PATH = "/app/msd-msd-musicnn-1.pb"
 
 # --- Debugging (Optional, remove in production if not needed) ---
 print(f"DEBUG: JELLYFIN_USER_ID: {JELLYFIN_USER_ID}")
@@ -80,5 +89,5 @@ print(f"DEBUG: DBSCAN_MIN_SAMPLES_MAX: {DBSCAN_MIN_SAMPLES_MAX}")
 print(f"DEBUG: PCA_COMPONENTS_MIN: {PCA_COMPONENTS_MIN}")
 print(f"DEBUG: PCA_COMPONENTS_MAX: {PCA_COMPONENTS_MAX}")
 print(f"DEBUG: CLUSTERING_RUNS: {CLUSTERING_RUNS}")
-print(f"DEBUG: CELERY_BROKER_URL: {CELERY_BROKER_URL}")
-print(f"DEBUG: CELERY_RESULT_BACKEND: {CELERY_RESULT_BACKEND}")
+print(f"DEBUG: MIN_SONGS_PER_PLAYLIST: {MIN_SONGS_PER_PLAYLIST}")
+print(f"DEBUG: MAX_SONGS_PER_PLAYLIST: {MAX_SONGS_PER_PLAYLIST}")
