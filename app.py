@@ -13,6 +13,7 @@ from contextlib import closing
 import json
 import time
 import random
+from urllib.parse import urljoin # Added for robust URL joining
 
 # Import your existing analysis functions
 from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
@@ -39,8 +40,6 @@ def get_db_connection():
     Uses Flask's `g` object to store the connection per request.
     This function requires an active Flask application context.
     """
-    # Ensure this is only called within an app context or a task context.
-    # The 'g' object is specific to Flask's request/app contexts.
     if 'db_conn' not in g:
         try:
             g.db_conn = psycopg2.connect(DATABASE_URL)
@@ -134,10 +133,6 @@ def init_main_db():
         if conn:
             conn.close()
 
-# Ensure DB tables are initialized when the app starts
-# This block runs once when the Flask app starts.
-# For Celery workers, this code will also run on startup.
-# The init_db functions themselves don't use 'g', so they are fine here.
 with app.app_context():
     init_status_db()
     init_main_db()
@@ -188,46 +183,61 @@ def clean_temp(temp_dir):
 
 def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
     """Fetches recent albums from Jellyfin."""
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
+    # Ensure jellyfin_url has a trailing slash for robust joining
+    base_url_with_slash = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
+    # Construct path segments carefully
+    path = f"Users/{jellyfin_user_id.strip('/')}/Items"
+    full_url = urljoin(base_url_with_slash, path)
+
     params = {
         "IncludeItemTypes": "MusicAlbum",
         "SortBy": "DateCreated",
         "SortOrder": "Descending",
-        "Limit": limit if limit > 0 else None, # Handle 0 for all albums
+        "Limit": limit if limit > 0 else None,
         "Recursive": True,
     }
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
+        print(f"DEBUG: Fetching recent albums from URL: {full_url} with params: {params}")
+        r = requests.get(full_url, headers=headers, params=params, timeout=30)
         r.raise_for_status()
         return r.json().get("Items", [])
     except Exception as e:
-        print(f"ERROR: get_recent_albums: {e}")
+        print(f"ERROR: get_recent_albums: {e} for url: {r.url if 'r' in locals() and hasattr(r, 'url') else full_url}")
         return []
 
 def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
     """Fetches tracks belonging to a specific album from Jellyfin."""
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
+    base_url_with_slash = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
+    path = f"Users/{jellyfin_user_id.strip('/')}/Items"
+    full_url = urljoin(base_url_with_slash, path)
+
     params = {"ParentId": album_id, "IncludeItemTypes": "Audio"}
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
+        print(f"DEBUG: Fetching tracks for album {album_id} from URL: {full_url} with params: {params}")
+        r = requests.get(full_url, headers=headers, params=params, timeout=30)
         r.raise_for_status()
         return r.json().get("Items", []) if r.ok else []
     except Exception as e:
-        print(f"ERROR: get_tracks_from_album {album_id}: {e}")
+        print(f"ERROR: get_tracks_from_album {album_id}: {e} for url: {r.url if 'r' in locals() and hasattr(r, 'url') else full_url}")
         return []
 
 def download_track(jellyfin_url, headers, temp_dir, item):
     """Downloads a track from Jellyfin to a temporary directory."""
     filename = f"{item['Id']}_{item['Name'].replace('/', '_')}-{item.get('AlbumArtist', 'Unknown')}.mp3"
     path = os.path.join(temp_dir, filename)
+    
+    base_url_with_slash = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
+    download_path = f"Items/{item['Id']}/Download"
+    full_download_url = urljoin(base_url_with_slash, download_path)
+
     try:
-        r = requests.get(f"{jellyfin_url}/Items/{item['Id']}/Download", headers=headers, timeout=120)
+        r = requests.get(full_download_url, headers=headers, timeout=120)
         r.raise_for_status()
         with open(path, 'wb') as f:
             f.write(r.content)
         return path
     except Exception as e:
-            print(f"ERROR: download_track {item['Name']}: {e}")
+            print(f"ERROR: download_track {item['Name']}: {e} for url: {full_download_url}")
             return None
 
 def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods_count):
@@ -278,13 +288,12 @@ def save_track_analysis_to_db(item_id, title, author, tempo, key, scale, moods):
 def score_vector(row, mood_labels_list):
     """Converts a database row into a numerical feature vector for clustering."""
     tempo = float(row['tempo']) if row['tempo'] is not None else 0.0
-    mood_str = row['mood_vector'] or "{}" # Ensure it's a valid JSON string or empty dict
+    mood_str = row['mood_vector'] or "{}" 
     
-    # Parse mood_vector from JSON string
     try:
         moods_dict = json.loads(mood_str)
     except json.JSONDecodeError:
-        moods_dict = {} # Fallback to empty dict if parsing fails
+        moods_dict = {} 
 
     tempo_norm = (tempo - 40) / (200 - 40)
     tempo_norm = np.clip(tempo_norm, 0.0, 1.0)
@@ -305,12 +314,7 @@ def get_all_tracks_from_db():
     return rows
 
 def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_list):
-    """
-    Generates a human-readable name for a cluster based on its centroid's
-    tempo and predominant moods. Also returns top mood scores for diversity calculation.
-    """
     if pca_enabled and pca_model is not None:
-        # Inverse transform to get back to the original feature space
         try:
             scaled_vector = pca_model.inverse_transform(centroid_scaled_vector.reshape(1, -1))[0]
         except ValueError:
@@ -332,7 +336,7 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     if len(mood_values) == 0 or np.sum(mood_values) == 0:
         top_indices = []
     else:
-        top_indices = np.argsort(mood_values)[::-1][:3] # Get top 3 moods
+        top_indices = np.argsort(mood_values)[::-1][:3] 
 
     mood_names = [mood_labels_list[i] for i in top_indices if i < len(mood_labels_list)]
     mood_part = "_".join(mood_names).title() if mood_names else "Mixed"
@@ -344,10 +348,9 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     return full_name, {**top_mood_scores, **extra_info}
 
 def update_playlist_table_in_db(playlists):
-    """Updates the playlist table in the database with new playlist data."""
     conn = get_db_connection()
     with get_db_cursor(conn) as cur:
-        cur.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME))) # Clear existing playlists
+        cur.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME))) 
         for name, cluster in playlists.items():
             for item_id, title, author in cluster:
                 cur.execute(sql.SQL("INSERT INTO {} (playlist, item_id, title, author) VALUES (%s, %s, %s, %s)").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)),
@@ -355,15 +358,17 @@ def update_playlist_table_in_db(playlists):
     conn.commit()
 
 def delete_old_automatic_playlists_from_jellyfin(jellyfin_url, jellyfin_user_id, headers):
-    """Deletes old automatically generated playlists from Jellyfin."""
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
+    url_base = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
+    path = f"Users/{jellyfin_user_id.strip('/')}/Items"
+    full_url = urljoin(url_base, path)
     params = {"IncludeItemTypes": "Playlist", "Recursive": True}
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
+        r = requests.get(full_url, headers=headers, params=params, timeout=30)
         r.raise_for_status()
         for item in r.json().get("Items", []):
             if "_automatic" in item.get("Name", ""):
-                del_url = f"{jellyfin_url}/Items/{item['Id']}"
+                del_path = f"Items/{item['Id']}"
+                del_url = urljoin(url_base, del_path)
                 del_resp = requests.delete(del_url, headers=headers, timeout=10)
                 if del_resp.ok:
                     print(f"🗑️ Deleted old playlist: {item['Name']}")
@@ -371,8 +376,10 @@ def delete_old_automatic_playlists_from_jellyfin(jellyfin_url, jellyfin_user_id,
         print(f"Failed to clean old playlists: {e}")
 
 def create_or_update_playlists_on_jellyfin(jellyfin_url_val, jellyfin_user_id_val, headers_val, playlists_val, cluster_centers_val, mood_labels_list, max_songs_val):
-    """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists_from_jellyfin(jellyfin_url_val, jellyfin_user_id_val, headers_val)
+    url_base = jellyfin_url_val if jellyfin_url_val.endswith('/') else jellyfin_url_val + '/'
+    playlist_creation_url = urljoin(url_base, "Playlists")
+
     for base_name, cluster in playlists_val.items():
         chunks = [cluster[i:i+max_songs_val] for i in range(0, len(cluster), max_songs_val)]
         for idx, chunk in enumerate(chunks, 1):
@@ -382,7 +389,7 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url_val, jellyfin_user_id_va
                 continue
             body = {"Name": playlist_name, "Ids": item_ids, "UserId": jellyfin_user_id_val}
             try:
-                r = requests.post(f"{jellyfin_url_val}/Playlists", headers=headers_val, json=body, timeout=30)
+                r = requests.post(playlist_creation_url, headers=headers_val, json=body, timeout=30)
                 if r.ok:
                     centroid_info = cluster_centers_val.get(base_name, {})
                     top_moods = {k: v for k, v in centroid_info.items() if k in mood_labels_list}
@@ -397,12 +404,6 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url_val, jellyfin_user_id_va
 
 @celery.task
 def analyze_album_task(album_details, jellyfin_url_val, jellyfin_user_id_val, jellyfin_token_val, top_n_moods_val, temp_dir_base, embedding_path, prediction_path, mood_labels_list_val):
-    """
-    Celery task to analyze all tracks in a single album.
-    It creates a unique temporary directory for its downloads and cleans it up.
-    Returns a tuple: (album_name, number_of_tracks_analyzed, number_of_tracks_failed, list_of_errors)
-    """
-    # Push app context for this task to allow DB operations
     with app.app_context():
         album_id = album_details['Id']
         album_name = album_details['Name']
@@ -465,12 +466,6 @@ def run_single_clustering_iteration_task(run_idx, X_scaled_data, rows_data, mood
                                          gmm_n_components_min_val, gmm_n_components_max_val,
                                          pca_components_min_val, pca_components_max_val,
                                          max_songs_per_cluster_val, current_max_songs_per_artist):
-    """
-    Performs a single clustering iteration with randomly sampled parameters.
-    This task is designed to be run in parallel by multiple Celery workers.
-    Returns a dictionary with the diversity score, parameters used, and clustering results.
-    """
-    # Push app context for this task to allow DB operations
     with app.app_context():
         current_num_clusters = 0
         current_dbscan_eps = 0.0
@@ -649,11 +644,6 @@ def run_single_clustering_iteration_task(run_idx, X_scaled_data, rows_data, mood
 
 @celery.task(bind=True)
 def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums_val, top_n_moods_val):
-    """
-    Main Celery task to coordinate the analysis of multiple albums in parallel.
-    It dispatches individual `analyze_album_task` for each album.
-    """
-    # Push app context for this task to allow DB operations
     with app.app_context():
         task_id = self.request.id
         save_task_status(task_id, "analysis", "STARTED")
@@ -762,11 +752,6 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                         gmm_n_components_min, gmm_n_components_max,
                         pca_components_min, pca_components_max,
                         num_clustering_runs, max_songs_per_cluster, current_max_songs_per_artist=MAX_SONGS_PER_ARTIST):
-    """
-    Main Celery task to coordinate multiple clustering iterations in parallel.
-    It dispatches individual `run_single_clustering_iteration_task` for each run.
-    """
-    # Push app context for this task to allow DB operations
     with app.app_context():
         task_id = self.request.id
         save_task_status(task_id, "clustering", "STARTED")
@@ -878,22 +863,17 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             log_messages.append(f"❌ Clustering orchestration failed: {e}")
             self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'clustering'})
             save_task_status(task_id, "clustering", "FAILURE")
-            return {"status": "FAILURE", "message": f"Clustering failed: {e}"}
+            return {"status": "FAILURE", "message": f"Clustering orchestration failed: {e}"}
 
 
 # --- API Endpoints ---
 
 @app.route('/')
 def index():
-    """Renders the main HTML page."""
     return render_template('index.html')
 
 @app.route('/api/analysis/start', methods=['POST'])
 def start_analysis():
-    """
-    Starts the music analysis as an asynchronous Celery task.
-    Records the task ID and type in the database.
-    """
     data = request.json or {}
     jellyfin_url_req = data.get('jellyfin_url', JELLYFIN_URL)
     jellyfin_user_id_req = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
@@ -902,16 +882,14 @@ def start_analysis():
     top_n_moods_req = int(data.get('top_n_moods', TOP_N_MOODS))
     
     task = run_analysis_task.delay(jellyfin_url_req, jellyfin_user_id_req, jellyfin_token_req, num_recent_albums_req, top_n_moods_req)
-    save_task_status(task.id, "analysis", "PENDING") 
+    # save_task_status is called inside the task now, no need to call here if we want STARTED status from task
+    # For PENDING status from API immediately:
+    with app.app_context(): # Need app context for DB ops here if not in task
+        save_task_status(task.id, "analysis", "PENDING") 
     return jsonify({"task_id": task.id, "task_type": "analysis", "status": "PENDING"}), 202
 
 @app.route('/api/clustering/start', methods=['POST'])
 def start_clustering():
-    """
-    Starts the playlist clustering as an asynchronous Celery task.
-    Accepts parameter ranges for evolutionary search.
-    Records the task ID and type in the database.
-    """
     data = request.json
     clustering_method_req = data.get('clustering_method', CLUSTER_ALGORITHM)
     num_clusters_min_req = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
@@ -937,15 +915,13 @@ def start_clustering():
         num_clustering_runs_req,
         max_songs_per_cluster_req
     )
-    save_task_status(task.id, "clustering", "PENDING")
+    with app.app_context(): # Need app context for DB ops here if not in task
+      save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
 
 
 @app.route('/api/status/<task_id>', methods=['GET'])
 def get_task_status_endpoint(task_id):
-    """
-    Retrieves the status of any task (analysis or clustering).
-    """
     task = AsyncResult(task_id, app=celery)
     response = {
         'task_id': task.id,
@@ -975,15 +951,15 @@ def get_task_status_endpoint(task_id):
     elif task.state == 'SUCCESS':
         response['status'] = task_info.get('status', 'Task complete!')
         response['progress'] = 100
-        save_task_status(task_id, task_info.get('task_type', 'unknown'), "SUCCESS")
+        with app.app_context(): save_task_status(task_id, task_info.get('task_type', 'unknown'), "SUCCESS")
     elif task.state == 'FAILURE':
         response['status'] = task_info.get('status', str(task.info)) 
         response['progress'] = 100
-        save_task_status(task_id, task_info.get('task_type', 'unknown'), "FAILURE")
+        with app.app_context(): save_task_status(task_id, task_info.get('task_type', 'unknown'), "FAILURE")
     elif task.state == 'REVOKED':
         response['status'] = 'Task revoked/cancelled.'
         response['progress'] = 100
-        save_task_status(task_id, task_info.get('task_type', 'unknown'), "REVOKED")
+        with app.app_context(): save_task_status(task_id, task_info.get('task_type', 'unknown'), "REVOKED")
     else: 
         response['status'] = f'Task state: {task.state}'
         if not response.get('log_output'): response['log_output'] = [f'Current state: {task.state}']
@@ -998,16 +974,15 @@ def get_task_status_endpoint(task_id):
 
 @app.route('/api/cancel/<task_id>', methods=['POST'])
 def cancel_task_endpoint(task_id):
-    """
-    Cancels an active task (analysis or clustering).
-    """
     task = AsyncResult(task_id, app=celery)
-    
-    conn = get_db_connection()
-    with get_db_cursor(conn) as cur:
-        cur.execute(sql.SQL("SELECT task_type FROM {} WHERE task_id = %s").format(sql.Identifier(STATUS_DB_TABLE_NAME)), (task_id,))
-        row = cur.fetchone()
-    task_type_from_db = row['task_type'] if row else 'unknown'
+    task_type_from_db = 'unknown' # Default
+    with app.app_context():
+        conn = get_db_connection()
+        with get_db_cursor(conn) as cur:
+            cur.execute(sql.SQL("SELECT task_type FROM {} WHERE task_id = %s").format(sql.Identifier(STATUS_DB_TABLE_NAME)), (task_id,))
+            row = cur.fetchone()
+        if row: task_type_from_db = row['task_type']
+
 
     if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
         task.revoke(terminate=True, signal='SIGKILL') 
@@ -1020,25 +995,22 @@ def cancel_task_endpoint(task_id):
                     child_task_res.revoke(terminate=True, signal='SIGKILL')
         except Exception as e:
             print(f"Error trying to revoke children of task {task_id}: {e}")
-
-        save_task_status(task_id, task_type_from_db, "REVOKED")
+        with app.app_context():
+          save_task_status(task_id, task_type_from_db, "REVOKED")
         return jsonify({"message": "Task cancellation requested.", "task_id": task_id}), 200
     else:
         return jsonify({"message": "Task cannot be cancelled in its current state.", "state": task.state}), 400
 
 @app.route('/api/last_task', methods=['GET'])
 def get_last_overall_task_status():
-    """
-    Retrieves the status of the last recorded task, regardless of type.
-    """
-    last_task = get_last_task_status()
+    with app.app_context(): # Ensure app context for get_last_task_status
+        last_task = get_last_task_status()
     if last_task:
         return jsonify(last_task), 200
     return jsonify({"task_id": None, "task_type": None, "status": "NO_PREVIOUS_TASK"}), 200
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
-    """Returns the current configuration parameters, including new ranges."""
     return jsonify({
         "jellyfin_url": JELLYFIN_URL,
         "jellyfin_user_id": JELLYFIN_USER_ID,
@@ -1065,11 +1037,11 @@ def get_config():
 
 @app.route('/api/playlists', methods=['GET'])
 def get_playlists():
-    """Retrieves all saved playlists from the database."""
-    conn = get_db_connection()
-    with get_db_cursor(conn) as cur:
-        cur.execute(sql.SQL("SELECT playlist, item_id, title, author FROM {} ORDER BY playlist, title").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)))
-        rows = cur.fetchall()
+    with app.app_context(): # Ensure app context for DB operations
+        conn = get_db_connection()
+        with get_db_cursor(conn) as cur:
+            cur.execute(sql.SQL("SELECT playlist, item_id, title, author FROM {} ORDER BY playlist, title").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)))
+            rows = cur.fetchall()
     playlists_data = defaultdict(list)
     for row in rows:
         playlists_data[row['playlist']].append({"item_id": row['item_id'], "title": row['title'], "author": row['author']})
