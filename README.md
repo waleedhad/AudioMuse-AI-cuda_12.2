@@ -21,6 +21,30 @@ This is the main workflow on how this algorithm work. To have an easy way to use
 
 **Persistence:** SQLite databases (db.sqlite, status_db.sqlite) are stored in mounted volumes to retain data between restarts.
 
+## 📊 Clustering Algorithm Deep Dive
+
+AudioMuse-AI offers three algorithms, each suited for different scenarios when clustering music based on tempo and 5 mood scores. This clustering algorithm are executed multiple time (default 1000) following an Evolutionary Monte Carlo approch: in this way multiple configuration of parameter are tested and the best one are keep.
+
+Here an explanetion of the pro and cons of the different algorithm:
+
+### 1. K-Means
+* **Best For:** Speed, simplicity, when clusters are roughly spherical and of similar size.
+* **Pros:** Very fast, scalable, clear "average" cluster profiles.
+* **Cons:** Requires knowing cluster count ($K$), struggles with irregular shapes, sensitive to outliers.
+
+### 2. DBSCAN
+* **Best For:** Discovering clusters of arbitrary shapes, handling outliers well, when the number of clusters is unknown.
+* **Pros:** No need to set $K$, finds varied shapes, robust to noise.
+* **Cons:** Sensitive to `eps` and `min_samples` parameters, can struggle with varying cluster densities, no direct "centroids."
+
+### 3. GMM (Gaussian Mixture Models)
+* **Best For:** Modeling more complex, elliptical cluster shapes and when a probabilistic assignment of tracks to clusters is beneficial.
+* **Pros:** Flexible cluster shapes, "soft" assignments, model-based insights.
+* **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
+
+**Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using an high number of run (default 1000) help the integrated evolutionary algorithm to find a good 
+
+
 ## Configuration parameter
 
 This are the parameter accepted for thi script, you can pass them as env value using as an example **/depoyment/deployment.yaml** in this repository.
@@ -31,8 +55,8 @@ The **mandatory** parameter that you need to change from the example are this:
 | `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`      |
 | `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID (K8s Secret)    | *(N/A - from Secret)*               |
 | `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token (K8s Secret)  | *(N/A - from Secret)*               |
-| `CELERY_BROKER_URL`     | URL for Celery broker (your redis endpoint) | `redis://redis-service.playlist:6379/0`|
-| `CELERY_RESULT_BACKEND` | Celery result backend (your redit endpoint) | `redis://redis-service.playlist:6379/0`|
+| `CELERY_BROKER_URL`     | (Required) URL for Celery broker (your redis endpoint) | `redis://redis-service.playlist:6379/0`|
+| `CELERY_RESULT_BACKEND` | (Required) Celery result backend (your redit endpoint) | `redis://redis-service.playlist:6379/0`|
 
 This are parameter that you can leave as it is, the important things is that you mount **/workspace** container folder in a PVC or in an hostPath. This because the db with all the song analysis will be saved there.
 | Parameter               | Description                                 | Default Value                       |
@@ -44,16 +68,34 @@ This are parameter that you can leave as it is, the important things is that you
 This are the default parameters on wich the analysis or clustering task will be lunched. You will be able to change them to another value directly in the front-end
 | Parameter               | Description                                 | Default Value                       |
 | ----------------------- | ------------------------------------------- | ----------------------------------- |
+| **Analysis General** | 
 | `NUM_RECENT_ALBUMS`     | Albums to fetch from Jellyfin               | `500`                               |
 | `TOP_N_MOODS`           | Number of top moods for naming playlists    | `3`                                 |
-| `NUM_CLUSTERS`          | KMeans: Number of clusters                  | `10`                                |
-| `MAX_DISTANCE`          | Max normalized distance for track inclusion | `0.5`                               |
-| `MAX_SONGS_PER_CLUSTER` | Max tracks in a playlist                    | `50`                                |
-| `MAX_SONGS_PER_ARTIST`  | Max songs per artist per playlist           | `3`                                 |
-| `CLUSTER_ALGORITHM`     | Clustering algorithm (`kmeans`, `dbscan`)   | `kmeans`                            |
-| `PCA_ENABLED`           | Enable PCA (True/False)                     | `False`                             |
-| `DBSCAN_EPS`            | DBSCAN epsilon param                        | `0.5`                               |
-| `DBSCAN_MIN_SAMPLES`    | DBSCAN min samples param                    | `5`                                 |
+| **Jellyfin & Core** |                                                                             |                    |
+| `NUM_RECENT_ALBUMS`       | Number of recent albums to scan (0 for all).                                | `2000`   |
+| `TOP_N_MOODS`             | Number of top moods per track for feature vector.                           | `5`      |
+| **Clustering General** |                                                                             |                    |
+| `CLUSTER_ALGORITHM`       | Default clustering: `kmeans`, `dbscan`, `gmm`.                              | `kmeans` |
+| `MAX_SONGS_PER_CLUSTER`   | Max songs per generated playlist segment.                                   | `40`     |
+| `MAX_SONGS_PER_ARTIST`    | Max songs from one artist per cluster.                                      | `3`      |
+| `MAX_DISTANCE`            | Normalized distance threshold for tracks in a cluster.                      | `0.5`    |
+| `CLUSTERING_RUNS`         | Iterations for Monte Carlo evolutionary search.                             | `1000`   |
+| **K-Means Ranges** |                                                                             |                    |
+| `NUM_CLUSTERS_MIN`        | Min $K$ for K-Means.                                                        | `20`     |
+| `NUM_CLUSTERS_MAX`        | Max $K$ for K-Means.                                                        | `60`     |
+| **DBSCAN Ranges** |                                                                             |                    |
+| `DBSCAN_EPS_MIN`          | Min epsilon for DBSCAN.                                                     | `0.1`    |
+| `DBSCAN_EPS_MAX`          | Max epsilon for DBSCAN.                                                     | `0.5`    |
+| `DBSCAN_MIN_SAMPLES_MIN`  | Min `min_samples` for DBSCAN.                                               | `5`      |
+| `DBSCAN_MIN_SAMPLES_MAX`  | Max `min_samples` for DBSCAN.                                               | `20`     |
+| **GMM Ranges** |                                                                             |                    |
+| `GMM_N_COMPONENTS_MIN`    | Min components for GMM.                                                     | `20`     |
+| `GMM_N_COMPONENTS_MAX`    | Max components for GMM.                                                     | `60`     |
+| `GMM_COVARIANCE_TYPE`     | Covariance type for GMM (task uses `'full'`).                               | `full`   |
+| **PCA Ranges** |                                                                             |                    |
+| `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
+| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
+
 
 ## ☸️ Kubernetes Deployment (K3S Example)
 An example K8s deployment is provided in **deployments/deployment.yaml** start from it as a template.
@@ -80,6 +122,25 @@ kubectl apply -f deployments/deployment.yaml
 Access the Flask service through the port exposed by your LoadBalancer or service type.
 ```
 For having a more stable use I suggest to edit the deployment container image to use the **alpha** tags, for example **ghcr.io/neptunehub/audiomuse-ai:0.1.1-alpha**. The **latest** tag is used for development purpose
+
+## 🐳 Docker Image Tagging Strategy
+
+Our GitHub Actions workflow automatically builds and pushes Docker images. Here's how our tags work:
+
+* `:`**latest**
+    * Builds from the **`main` branch**.
+    * Represents the latest stable release.
+    * **Recommended for most users.**
+
+* `:`**devel**
+    * Builds from the **`devel` branch**.
+    * Contains feature still in development not fully tested, and they could not work
+    * **Use only for development.**
+
+* `:`**vX.Y.Z** (e.g., `:v0.1.4-alpha`, `:v1.0.0`)
+    * Immutable tags created from **specific Git releases/tags**.
+    * Ensures you're running a precise, versioned build.
+    * **Use for reproducible deployments or locking to a specific version.**
 
 ## Screenshots
 

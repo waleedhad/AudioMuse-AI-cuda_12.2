@@ -16,6 +16,7 @@ import random # Import random for parameter sampling
 from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
+from sklearn.mixture import GaussianMixture # Import GaussianMixture
 
 # Your existing config - assuming this is from config.py and sets global variables
 from config import *
@@ -397,7 +398,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
         return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
 
 @celery.task(bind=True)
-def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster):
+def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, gmm_n_components_min, gmm_n_components_max):
     """
     Celery task to run the clustering and playlist generation process with an
     evolutionary approach for parameter selection.
@@ -436,6 +437,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             current_num_clusters = 0
             current_dbscan_eps = 0.0
             current_dbscan_min_samples = 0
+            current_gmm_n_components = 0 # New GMM parameter
             current_pca_components = 0
             current_pca_enabled = False
 
@@ -453,6 +455,12 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                 # Sample dbscan_min_samples within the specified range (integer)
                 current_dbscan_min_samples = random.randint(dbscan_min_samples_min, dbscan_min_samples_max)
             
+            elif clustering_method == "gmm": # New GMM parameter sampling
+                current_gmm_n_components = random.randint(gmm_n_components_min, gmm_n_components_max)
+                current_gmm_n_components = min(current_gmm_n_components, len(rows))
+                if current_gmm_n_components == 0:
+                    current_gmm_n_components = max(1, len(rows) // max_songs_per_cluster)
+
             # Sample pca_components within the specified range
             current_pca_components = random.randint(pca_components_min, pca_components_max)
             current_pca_enabled = (current_pca_components > 0)
@@ -460,6 +468,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             log_and_update(f"Running clustering iteration {run_idx + 1}/{num_clustering_runs} with parameters: "
                            f"Method={clustering_method}, K={current_num_clusters}, "
                            f"Eps={current_dbscan_eps}, MinS={current_dbscan_min_samples}, "
+                           f"GMM_Comp={current_gmm_n_components}, " # Log GMM components
                            f"PCA_Comp={current_pca_components}...", progress_base)
             
             pca_model = None
@@ -508,6 +517,19 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                         for i in indices:
                             raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
                         cluster_centers[cluster_id] = center
+            elif clustering_method == "gmm": # GMM clustering logic
+                log_and_update(f"  Running GMM with {current_gmm_n_components} components...", progress_base + 5)
+                gmm = GaussianMixture(n_components=current_gmm_n_components, covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
+                gmm.fit(data_for_clustering)
+                labels = gmm.predict(data_for_clustering)
+                
+                for i in range(current_gmm_n_components):
+                    cluster_centers[i] = gmm.means_[i]
+                
+                # Calculate distances to assigned component means
+                centers_for_points = gmm.means_[labels]
+                raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+
             else:
                 log_and_update(f"Unsupported clustering algorithm: {clustering_method}", 100)
                 # Do not fail the entire task, just skip this run or log an error
@@ -590,6 +612,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                         "num_clusters": current_num_clusters,
                         "dbscan_eps": current_dbscan_eps,
                         "dbscan_min_samples": current_dbscan_min_samples,
+                        "gmm_n_components": current_gmm_n_components, # Store GMM components
                         "pca_enabled": current_pca_enabled,
                         "pca_components": current_pca_components,
                         "max_songs_per_cluster": max_songs_per_cluster # Store this too
@@ -672,6 +695,10 @@ def start_clustering():
     dbscan_min_samples_min = int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN))
     dbscan_min_samples_max = int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX))
 
+    # Get ranges for GMM parameters
+    gmm_n_components_min = int(data.get('gmm_n_components_min', GMM_N_COMPONENTS_MIN))
+    gmm_n_components_max = int(data.get('gmm_n_components_max', GMM_N_COMPONENTS_MAX))
+
     # Get ranges for PCA components
     pca_components_min = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
     pca_components_max = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
@@ -690,7 +717,8 @@ def start_clustering():
         dbscan_min_samples_min, dbscan_min_samples_max,
         pca_components_min, pca_components_max,
         num_clustering_runs,
-        max_songs_per_cluster # Pass the new parameter
+        max_songs_per_cluster,
+        gmm_n_components_min, gmm_n_components_max # Pass new GMM parameters
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
@@ -776,7 +804,7 @@ def get_config():
         "jellyfin_token": JELLYFIN_TOKEN,
         "num_recent_albums": NUM_RECENT_ALBUMS,
         "max_distance": MAX_DISTANCE,
-        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER, # Added this
+        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER,
         "max_songs_per_artist": MAX_SONGS_PER_ARTIST,
         "cluster_algorithm": CLUSTER_ALGORITHM,
         "num_clusters_min": NUM_CLUSTERS_MIN,
@@ -785,6 +813,8 @@ def get_config():
         "dbscan_eps_max": DBSCAN_EPS_MAX,
         "dbscan_min_samples_min": DBSCAN_MIN_SAMPLES_MIN,
         "dbscan_min_samples_max": DBSCAN_MIN_SAMPLES_MAX,
+        "gmm_n_components_min": GMM_N_COMPONENTS_MIN, # Added GMM min components
+        "gmm_n_components_max": GMM_N_COMPONENTS_MAX, # Added GMM max components
         "pca_components_min": PCA_COMPONENTS_MIN,
         "pca_components_max": PCA_COMPONENTS_MAX,
         "top_n_moods": TOP_N_MOODS,
