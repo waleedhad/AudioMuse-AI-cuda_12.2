@@ -134,15 +134,14 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 
 * `:`**devel**
     * Builds from the **`devel` branch**.
-    * Contains cutting-edge features; may be less stable.
-    * **Use for testing new features or development.**
+    * Contains feature still in development not fully tested, and they could not work
+    * **Use only for development.**
 
 * `:`**vX.Y.Z** (e.g., `:v0.1.4-alpha`, `:v1.0.0`)
     * Immutable tags created from **specific Git releases/tags**.
     * Ensures you're running a precise, versioned build.
     * **Use for reproducible deployments or locking to a specific version.**
- 
-    * 
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action:
