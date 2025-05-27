@@ -666,7 +666,8 @@ def start_analysis():
     jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
     jellyfin_user_id = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
     jellyfin_token = data.get('jellyfin_token', JELLYFIN_TOKEN)
-    num_recent_albums = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS)) # NUM_RECENT_ALBUMS from config
+    # Use NUM_RECENT_ALBUMS from config as default
+    num_recent_albums = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS)) 
     top_n_moods = int(data.get('top_n_moods', TOP_N_MOODS))
     task = run_analysis_task.delay(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods)
     save_task_status(task.id, "analysis", "PENDING")
@@ -827,12 +828,11 @@ def get_last_overall_task_status():
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """Returns the current configuration parameters, including new ranges."""
-    # NUM_RECENT_ALBUMS is used for analysis, not min/max like in config.py comments
     return jsonify({
         "jellyfin_url": JELLYFIN_URL,
         "jellyfin_user_id": JELLYFIN_USER_ID,
         "jellyfin_token": JELLYFIN_TOKEN,
-        "num_recent_albums": NUM_RECENT_ALBUMS, # This is the one used by analysis task
+        "num_recent_albums": NUM_RECENT_ALBUMS, # Now correctly using the single NUM_RECENT_ALBUMS
         "max_distance": MAX_DISTANCE,
         "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER, # Used for Jellyfin API chunking
         "max_songs_per_artist": MAX_SONGS_PER_ARTIST,
