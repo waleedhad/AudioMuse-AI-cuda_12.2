@@ -298,6 +298,7 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, heade
     """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers)
     for base_name, cluster in playlists.items():
+        # Use the MAX_SONGS_PER_CLUSTER from the task argument instead of global
         chunks = [cluster[i:i+MAX_SONGS_PER_CLUSTER] for i in range(0, len(cluster), MAX_SONGS_PER_CLUSTER)]
         for idx, chunk in enumerate(chunks, 1):
             playlist_name = f"{base_name}_automatic_{idx}" if len(chunks) > 1 else f"{base_name}_automatic"
@@ -394,7 +395,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
         return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
 
 @celery.task(bind=True)
-def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbscan_min_samples, pca_enabled, pca_components, num_clustering_runs):
+def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbscan_min_samples, pca_enabled, pca_components, num_clustering_runs, max_songs_per_cluster):
     """
     Celery task to run the clustering and playlist generation process.
     Updates task state with progress and log messages.
@@ -442,7 +443,7 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
             raw_distances = np.zeros(len(data_for_clustering))
 
             if clustering_method == "kmeans":
-                k = num_clusters if num_clusters > 0 else max(1, len(rows) // MAX_SONGS_PER_CLUSTER)
+                k = num_clusters if num_clusters > 0 else max(1, len(rows) // max_songs_per_cluster) # Use max_songs_per_cluster
                 log_and_update(f"  Running KMeans with {min(k, len(rows))} clusters...", progress_base + 5)
                 kmeans = KMeans(n_clusters=min(k, len(rows)), random_state=None, n_init='auto')
                 labels = kmeans.fit_predict(data_for_clustering)
@@ -494,7 +495,7 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
                     if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                         selected.append(t)
                         count_per_artist[author] += 1
-                    if len(selected) >= MAX_SONGS_PER_CLUSTER:
+                    if len(selected) >= max_songs_per_cluster: # Use max_songs_per_cluster
                         break
                 for t in selected:
                     item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
@@ -609,10 +610,11 @@ def start_clustering():
     pca_components = int(data.get('pca_components', 0))
     pca_enabled = (pca_components > 0)
     num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS))
+    max_songs_per_cluster = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER)) # Get new field value
 
     task = run_clustering_task.delay(
         clustering_method, num_clusters, dbscan_eps, dbscan_min_samples,
-        pca_enabled, pca_components, num_clustering_runs
+        pca_enabled, pca_components, num_clustering_runs, max_songs_per_cluster # Pass new field value
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
