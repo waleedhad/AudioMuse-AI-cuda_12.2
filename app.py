@@ -7,7 +7,7 @@ import requests
 from collections import defaultdict
 import numpy as np
 from flask import Flask, jsonify, request, render_template, g
-from celery import Celery, group, chord
+from celery import Celery, group, chord # Import group for parallel tasks
 from celery.result import AsyncResult
 from contextlib import closing
 import json
@@ -25,18 +25,33 @@ from config import * # This will now include PostgreSQL connection details
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-# Celery configuration is now read from config.py
-app.config['CELERY_BROKER_URL'] = CELERY_BROKER_URL
-app.config['CELERY_RESULT_BACKEND'] = CELERY_RESULT_BACKEND
 
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery.conf.update(app.config)
-celery.conf.task_track_started = True # Important for tracking sub-task states
+# --- Celery Configuration ---
+# Initialize Celery directly.
+celery = Celery(app.name)
+
+# Set Celery configuration using lowercase keys directly from config.py constants.
+# This prevents the "Cannot mix new and old setting keys" error.
+celery.conf.broker_url = CELERY_BROKER_URL
+celery.conf.result_backend = CELERY_RESULT_BACKEND
+
+# If you have other Celery-specific configurations (e.g., timezone, task_serializer)
+# that were previously set in app.config and picked up by celery.conf.update(app.config),
+# you should set them directly on celery.conf using their lowercase names as well.
+# Example:
+# celery.conf.task_serializer = 'json'
+# celery.conf.result_serializer = 'json'
+# celery.conf.accept_content = ['json']
+# celery.conf.timezone = 'UTC' # Or your desired timezone
+# celery.conf.enable_utc = True
+celery.conf.task_track_started = True # This was already set directly, good.
+
 
 # --- Database Connection Management ---
 def get_db_connection():
     """
     Establishes a new PostgreSQL database connection.
+    Uses Flask's `g` object to store the connection per request.
     """
     if 'db_conn' not in g:
         try:
@@ -130,6 +145,8 @@ def init_main_db():
             conn.close()
 
 # Ensure DB tables are initialized when the app starts
+# This block runs once when the Flask app starts.
+# For Celery workers, this code will also run on startup.
 with app.app_context():
     init_status_db()
     init_main_db()
@@ -218,8 +235,8 @@ def download_track(jellyfin_url, headers, temp_dir, item):
             f.write(r.content)
         return path
     except Exception as e:
-        print(f"ERROR: download_track {item['Name']}: {e}")
-        return None
+            print(f"ERROR: download_track {item['Name']}: {e}")
+            return None
 
 def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods_count):
     """Predicts moods for an audio file using pre-trained models."""
