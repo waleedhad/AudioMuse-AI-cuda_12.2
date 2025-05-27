@@ -174,6 +174,7 @@
                     <select id="clustering_method" name="clustering_method" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                         <option value="kmeans">KMeans</option>
                         <option value="dbscan">DBSCAN</option>
+                        <option value="gmm">Gaussian Mixture Model (GMM)</option>
                     </select>
                 </div>
                 <div id="kmeans_options" class="grid grid-cols-2 gap-4 col-span-2">
@@ -202,6 +203,16 @@
                     <div>
                         <label for="dbscan_min_samples_max" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Max Samples:</label>
                         <input type="number" id="dbscan_min_samples_max" name="dbscan_min_samples_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-align focus:outline-none focus:shadow-outline">
+                    </div>
+                </div>
+                <div id="gmm_options" class="grid grid-cols-2 gap-4 col-span-2 hidden">
+                    <div>
+                        <label for="gmm_n_components_min" class="block text-gray-400 text-sm font-bold mb-2">GMM Min Components:</label>
+                        <input type="number" id="gmm_n_components_min" name="gmm_n_components_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    </div>
+                    <div>
+                        <label for="gmm_n_components_max" class="block text-gray-400 text-sm font-bold mb-2">GMM Max Components:</label>
+                        <input type="number" id="gmm_n_components_max" name="gmm_n_components_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4 col-span-2">
@@ -277,6 +288,7 @@
         const clusteringMethodSelect = document.getElementById('clustering_method');
         const kmeansOptions = document.getElementById('kmeans_options');
         const dbscanOptions = document.getElementById('dbscan_options');
+        const gmmOptions = document.getElementById('gmm_options'); // New GMM options div
         const playlistsDisplay = document.getElementById('playlistsDisplay');
         const playlistList = document.getElementById('playlistList');
         const fetchPlaylistsBtn = document.getElementById('fetchPlaylistsBtn');
@@ -442,11 +454,14 @@
                 document.getElementById('dbscan_min_samples_min').value = config.dbscan_min_samples_min !== undefined ? config.dbscan_min_samples_min : 5;
                 document.getElementById('dbscan_min_samples_max').value = config.dbscan_min_samples_max !== undefined ? config.dbscan_min_samples_max : 20;
 
+                // Set min/max values for GMM
+                document.getElementById('gmm_n_components_min').value = config.gmm_n_components_min !== undefined ? config.gmm_n_components_min : 20;
+                document.getElementById('gmm_n_components_max').value = config.gmm_n_components_max !== undefined ? config.gmm_n_components_max : 60;
+
                 // Set min/max values for PCA
                 document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
                 document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
 
-                // Set max_songs_per_cluster
                 maxSongsPerClusterInput.value = config.max_songs_per_cluster !== undefined ? config.max_songs_per_cluster : 40;
 
                 document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 100;
@@ -461,12 +476,18 @@
         }
 
         function toggleClusteringOptions() {
+            // Hide all options first
+            kmeansOptions.classList.add('hidden');
+            dbscanOptions.classList.add('hidden');
+            gmmOptions.classList.add('hidden'); // Hide GMM options
+
+            // Show options based on selection
             if (clusteringMethodSelect.value === 'kmeans') {
                 kmeansOptions.classList.remove('hidden');
-                dbscanOptions.classList.add('hidden');
-            } else {
-                kmeansOptions.classList.add('hidden');
+            } else if (clusteringMethodSelect.value === 'dbscan') {
                 dbscanOptions.classList.remove('hidden');
+            } else if (clusteringMethodSelect.value === 'gmm') { // Show GMM options
+                gmmOptions.classList.remove('hidden');
             }
         }
 
@@ -704,9 +725,11 @@
             data.dbscan_eps_max = parseFloat(data.dbscan_eps_max);
             data.dbscan_min_samples_min = parseInt(data.dbscan_min_samples_min, 10);
             data.dbscan_min_samples_max = parseInt(data.dbscan_min_samples_max, 10);
+            data.gmm_n_components_min = parseInt(data.gmm_n_components_min, 10); // Parse new GMM field
+            data.gmm_n_components_max = parseInt(data.gmm_n_components_max, 10); // Parse new GMM field
             data.pca_components_min = parseInt(data.pca_components_min, 10);
             data.pca_components_max = parseInt(data.pca_components_max, 10);
-            data.max_songs_per_cluster = parseInt(data.max_songs_per_cluster, 10); // Parse new field
+            data.max_songs_per_cluster = parseInt(data.max_songs_per_cluster, 10);
             data.clustering_runs = parseInt(data.clustering_runs, 10);
 
             try {
