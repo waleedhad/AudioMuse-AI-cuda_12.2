@@ -183,7 +183,7 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     audio = MonoLoader(filename=file_path)()
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(file_path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, TOP_N_MOODS) # Use global paths and top_n_moods
+    moods = predict_moods(file_path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, top_n_moods) # Use global paths and top_n_moods
     return tempo, key, scale, moods
 
 def track_exists(db_path, item_id):
@@ -416,7 +416,8 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
     try:
         log_and_update("📊 Starting playlist clustering with evolutionary parameter search...", 0)
         rows = get_all_tracks(DB_PATH)
-        if len(rows) < 2:
+        if len(rows) < 2: # Ensure enough tracks for meaningful clustering
+            # Consider a higher threshold, e.g., min_songs_per_playlist * num_clusters_min
             log_and_update("Not enough analyzed tracks for clustering. Please run analysis first.", 100)
             self.update_state(state='FAILURE', meta={'progress': 100, 'status': 'Not enough tracks for clustering', 'log_output': log_messages})
             return {"status": "FAILURE", "message": "Not enough analyzed tracks for clustering."}
@@ -426,40 +427,32 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
         X_original = [score_vector(row, MOOD_LABELS) for row in rows]
         X_scaled = np.array(X_original)
 
-        best_diversity_score = -1.0 # Initialize with a float for comparison
+        best_diversity_score = -1.0 
         best_clustering_results = None
-        best_parameters_found = {} # To store the parameters that yielded the best score
+        best_parameters_found = {} 
 
         for run_idx in range(num_clustering_runs):
-            progress_base = 10 + int(80 * (run_idx / num_clustering_runs)) # 10% to 90% for clustering runs
+            progress_base = 10 + int(80 * (run_idx / num_clustering_runs)) 
             
-            # --- Parameter Sampling for each run (Evolutionary Approach) ---
             current_num_clusters = 0
             current_dbscan_eps = 0.0
             current_dbscan_min_samples = 0
             current_pca_components = 0
             current_pca_enabled = False
             
-            # Sample playlist song limits
-            # Ensure min_songs_per_playlist_sampled is <= max_songs_per_playlist_sampled
             min_songs_per_playlist_sampled = random.randint(min_songs_per_playlist, max_songs_per_playlist)
             max_songs_per_playlist_sampled = random.randint(min_songs_per_playlist_sampled, max_songs_per_playlist)
 
             if clustering_method == "kmeans":
-                # Sample num_clusters within the specified range
                 current_num_clusters = random.randint(num_clusters_min, num_clusters_max)
-                # Ensure num_clusters is not more than available tracks
                 current_num_clusters = min(current_num_clusters, len(rows))
-                if current_num_clusters == 0: # Fallback if range is bad or no tracks
-                     current_num_clusters = max(1, len(rows) // max_songs_per_playlist_sampled) if max_songs_per_playlist_sampled > 0 else 1
+                if current_num_clusters == 0: 
+                     current_num_clusters = max(1, len(rows) // max_songs_per_playlist_sampled if max_songs_per_playlist_sampled > 0 else 1)
                 
             elif clustering_method == "dbscan":
-                # Sample dbscan_eps within the specified range (float)
                 current_dbscan_eps = round(random.uniform(dbscan_eps_min, dbscan_eps_max), 2)
-                # Sample dbscan_min_samples within the specified range (integer)
                 current_dbscan_min_samples = random.randint(dbscan_min_samples_min, dbscan_min_samples_max)
             
-            # Sample pca_components within the specified range
             current_pca_components = random.randint(pca_components_min, pca_components_max)
             current_pca_enabled = (current_pca_components > 0)
 
@@ -474,46 +467,48 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
 
             if current_pca_enabled:
                 log_and_update(f"  Applying PCA with {current_pca_components} components...", progress_base + 2)
-                # Ensure PCA components don't exceed the number of features or samples
-                n_components_actual = min(current_pca_components, X_scaled.shape[1], len(rows) - 1)
+                n_components_actual = min(current_pca_components, X_scaled.shape[1], len(rows) - 1 if len(rows) > 1 else 1)
                 if n_components_actual > 0:
                     pca_model = PCA(n_components=n_components_actual)
                     X_pca = pca_model.fit_transform(X_scaled)
                     data_for_clustering = X_pca
                 else:
                     log_and_update("  PCA components too low or data insufficient, PCA disabled for this run.", progress_base + 2)
-                    current_pca_enabled = False # Effectively disable PCA for this run
+                    current_pca_enabled = False 
                     pca_model = None
 
 
             labels = None
-            cluster_centers = {}
+            cluster_centers_map = {} # Using a different name to avoid confusion with external 'cluster_centers'
             raw_distances = np.zeros(len(data_for_clustering))
 
             if clustering_method == "kmeans":
-                # Use the sampled current_num_clusters
                 k = current_num_clusters
                 log_and_update(f"  Running KMeans with {k} clusters...", progress_base + 5)
-                # Handle case where k might be 0 or 1, which KMeans doesn't like
-                if k < 2 and len(rows) >= 2: # If k is too small but we have enough data, default to 2
-                    k = 2
-                elif k < 1 and len(rows) < 2: # If not enough data, skip
-                    log_and_update("  Not enough tracks for KMeans clustering with K>=2. Skipping this run.", progress_base + 5)
+                if k < 1: # K must be at least 1
+                    log_and_update(f"  KMeans k must be >= 1. k={k} is invalid. Skipping this run.", progress_base + 5)
                     continue
-
+                # KMeans requires n_samples >= n_clusters.
+                if len(data_for_clustering) < k:
+                    log_and_update(f"  Not enough samples ({len(data_for_clustering)}) for KMeans with K={k}. Adjusting K to {len(data_for_clustering)}.", progress_base + 5)
+                    k = len(data_for_clustering)
+                    if k < 1: # Still not enough after adjustment
+                        log_and_update("  Not enough samples for KMeans. Skipping this run.", progress_base + 5)
+                        continue
+                
                 kmeans = KMeans(n_clusters=k, random_state=None, n_init='auto')
                 labels = kmeans.fit_predict(data_for_clustering)
-                cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(k)}
+                cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(k)}
                 centers_for_points = kmeans.cluster_centers_[labels]
                 raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+
             elif clustering_method == "dbscan":
-                # Use the sampled current_dbscan_eps and current_dbscan_min_samples
                 log_and_update(f"  Running DBSCAN (eps={current_dbscan_eps}, min_samples={current_dbscan_min_samples})...", progress_base + 5)
                 dbscan = DBSCAN(eps=current_dbscan_eps, min_samples=current_dbscan_min_samples)
                 labels = dbscan.fit_predict(data_for_clustering)
                 
                 for cluster_id in set(labels):
-                    if cluster_id == -1: # Noise points
+                    if cluster_id == -1: 
                         continue
                     indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
                     cluster_points = np.array([data_for_clustering[i] for i in indices])
@@ -521,14 +516,12 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                         center = cluster_points.mean(axis=0)
                         for i in indices:
                             raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
-                        cluster_centers[cluster_id] = center
+                        cluster_centers_map[cluster_id] = center
             else:
                 log_and_update(f"Unsupported clustering algorithm: {clustering_method}", 100)
-                # Do not fail the entire task, just skip this run or log an error
-                continue # Skip to next run_idx
+                continue 
 
-            # Handle cases where clustering might result in no valid labels (e.g., all noise in DBSCAN)
-            if labels is None or len(set(labels) - {-1}) == 0: # No clusters found (excluding noise)
+            if labels is None or len(set(labels) - {-1}) == 0: 
                 log_and_update(f"  Run {run_idx + 1}: No valid clusters generated for this parameter set. Skipping.", progress_base + 8)
                 continue
 
@@ -537,7 +530,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             
             track_info = []
             for row, label, vec, dist in zip(rows, labels, data_for_clustering, normalized_distances):
-                if label == -1: # Skip noise points from DBSCAN
+                if label == -1: 
                     continue
                 track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
 
@@ -545,7 +538,6 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             for cluster_id in set(labels):
                 if cluster_id == -1:
                     continue
-                # Filter by MAX_DISTANCE and sort by distance
                 cluster_tracks = [t for t in track_info if t["label"] == cluster_id and t["distance"] <= MAX_DISTANCE]
                 if not cluster_tracks:
                     continue
@@ -558,26 +550,24 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                     if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                         selected.append(t)
                         count_per_artist[author] += 1
-                    # Apply MAX_SONGS_PER_PLAYLIST (sampled value) as an upper limit for selection
-                    if len(selected) >= max_songs_per_playlist_sampled:
+                    if len(selected) >= max_songs_per_playlist_sampled: # Apply sampled max songs for this original cluster
                         break
                 
-                # After selection, check if the number of songs meets the minimum requirement
                 if len(selected) >= min_songs_per_playlist_sampled:
                     for t in selected:
                         item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
                         filtered_clusters[cluster_id].append((item_id, title, author))
 
-            current_named_playlists = defaultdict(list)
-            current_playlist_centroids = {}
+            current_named_playlists_merged = defaultdict(list)
+            current_playlist_centroids_info = {} 
             
-            unique_predominant_mood_scores = {} # Dictionary to store the max score for each unique mood found
+            unique_predominant_mood_scores = {} 
 
-            for label, songs in filtered_clusters.items():
-                if songs:
-                    center = cluster_centers.get(label) # Use .get() in case a cluster_id from labels isn't in cluster_centers (e.g., if it was noise)
+            for label_id, songs_in_cluster in filtered_clusters.items():
+                if songs_in_cluster: # songs_in_cluster is already limited by max_songs_per_playlist_sampled for this original cluster
+                    center = cluster_centers_map.get(label_id) 
                     if center is None:
-                        continue # Skip if no centroid found for this label
+                        continue 
 
                     name, top_scores = name_cluster(center, pca_model, current_pca_enabled, MOOD_LABELS)
                     
@@ -589,32 +579,43 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                                 unique_predominant_mood_scores.get(predominant_mood_key, 0.0),
                                 current_mood_score
                             )
+                    # This is where multiple original clusters with the same name merge their songs
+                    current_named_playlists_merged[name].extend(songs_in_cluster)
+                    # Store centroid info, potentially overwritten if multiple original clusters map to the same name
+                    current_playlist_centroids_info[name] = top_scores
 
-                    current_named_playlists[name].extend(songs)
-                    current_playlist_centroids[name] = top_scores
+
+            # --- Apply max_songs_per_playlist_sampled to the MERGED playlists ---
+            processed_current_playlists = defaultdict(list)
+            for name, song_list in current_named_playlists_merged.items():
+                if len(song_list) > max_songs_per_playlist_sampled:
+                    # Optional: random.shuffle(song_list) before truncating if desired
+                    processed_current_playlists[name] = song_list[:max_songs_per_playlist_sampled]
+                else:
+                    processed_current_playlists[name] = song_list
+            # --- End of MERGED playlist truncation ---
 
             diversity_score = sum(unique_predominant_mood_scores.values())
-
             log_and_update(f"  Run {run_idx + 1}: Weighted Diversity Score: {diversity_score:.2f}.", progress_base + 8)
 
             if diversity_score > best_diversity_score:
                 best_diversity_score = diversity_score
                 best_clustering_results = {
-                    "named_playlists": current_named_playlists,
-                    "playlist_centroids": current_playlist_centroids,
-                    "pca_model": pca_model, # Store the PCA model for inverse transform in naming
-                    "parameters": { # Store the parameters that yielded this best score
+                    "named_playlists": processed_current_playlists, # Store the TRUNCATED merged playlists
+                    "playlist_centroids": current_playlist_centroids_info, 
+                    "pca_model": pca_model, 
+                    "parameters": { 
                         "clustering_method": clustering_method,
-                        "num_clusters": current_num_clusters,
+                        "num_clusters": current_num_clusters if clustering_method == "kmeans" else len(set(labels) - {-1}), # Store actual number of clusters
                         "dbscan_eps": current_dbscan_eps,
                         "dbscan_min_samples": current_dbscan_min_samples,
                         "pca_enabled": current_pca_enabled,
                         "pca_components": current_pca_components,
                         "min_songs_per_playlist": min_songs_per_playlist_sampled,
-                        "max_songs_per_playlist": max_songs_per_playlist_sampled
+                        "max_songs_per_playlist": max_songs_per_playlist_sampled # This is the crucial value
                     }
                 }
-                best_parameters_found = best_clustering_results["parameters"] # Update best parameters found
+                best_parameters_found = best_clustering_results["parameters"] 
 
         if not best_clustering_results:
             log_and_update("No valid clusters found after multiple runs.", 100)
@@ -623,14 +624,17 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
 
         log_and_update(f"Applying best clustering results (Weighted Diversity Score: {best_diversity_score:.2f})...", 90)
         log_and_update(f"Best parameters: {best_parameters_found}", 90)
+        
         final_named_playlists = best_clustering_results["named_playlists"]
         final_playlist_centroids = best_clustering_results["playlist_centroids"]
-        final_pca_model = best_clustering_results["pca_model"] # Retrieve the PCA model
+        # final_pca_model = best_clustering_results["pca_model"] # Not directly used later but good to have
 
         log_and_update("Updating playlist database...", 95)
         update_playlist_table(DB_PATH, final_named_playlists)
         
         log_and_update("Creating/Updating playlists on Jellyfin...", 98)
+        # Note: create_or_update_playlists_on_jellyfin uses global MAX_SONGS_PER_CLUSTER for chunking to Jellyfin API
+        # This is separate from the max_songs_per_playlist logic applied above.
         create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS)
         
         log_and_update(f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}.", 100)
@@ -662,7 +666,7 @@ def start_analysis():
     jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
     jellyfin_user_id = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
     jellyfin_token = data.get('jellyfin_token', JELLYFIN_TOKEN)
-    num_recent_albums = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS))
+    num_recent_albums = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS)) # NUM_RECENT_ALBUMS from config
     top_n_moods = int(data.get('top_n_moods', TOP_N_MOODS))
     task = run_analysis_task.delay(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods)
     save_task_status(task.id, "analysis", "PENDING")
@@ -677,27 +681,16 @@ def start_clustering():
     """
     data = request.json
 
-    # Get clustering method
     clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
-
-    # Get ranges for K-Means parameters
     num_clusters_min = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
     num_clusters_max = int(data.get('num_clusters_max', NUM_CLUSTERS_MAX))
-
-    # Get ranges for DBSCAN parameters
     dbscan_eps_min = float(data.get('dbscan_eps_min', DBSCAN_EPS_MIN))
     dbscan_eps_max = float(data.get('dbscan_eps_max', DBSCAN_EPS_MAX))
     dbscan_min_samples_min = int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN))
     dbscan_min_samples_max = int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX))
-
-    # Get ranges for PCA components
     pca_components_min = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
     pca_components_max = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
-    
-    # Get total clustering runs
     num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS))
-
-    # Get min/max songs per playlist
     min_songs_per_playlist = int(data.get('min_songs_per_playlist', MIN_SONGS_PER_PLAYLIST))
     max_songs_per_playlist = int(data.get('max_songs_per_playlist', MAX_SONGS_PER_PLAYLIST))
 
@@ -708,7 +701,7 @@ def start_clustering():
         dbscan_min_samples_min, dbscan_min_samples_max,
         pca_components_min, pca_components_max,
         num_clustering_runs,
-        min_songs_per_playlist, max_songs_per_playlist # Pass new parameters
+        min_songs_per_playlist, max_songs_per_playlist 
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
@@ -720,39 +713,59 @@ def get_task_status_endpoint(task_id):
     Retrieves the status of any task (analysis or clustering).
     """
     task = AsyncResult(task_id, app=celery)
+    # Ensure task.info is a dictionary before trying to get 'task_type'
+    task_info_dict = task.info if isinstance(task.info, dict) else {}
+    task_type = task_info_dict.get('task_type', 'unknown') # Get task_type from Celery meta if available
+
     response = {
         'task_id': task.id,
         'state': task.state,
-        'status': 'Processing...'
+        'status': 'Processing...', # Default status message
+        'task_type': task_type # Include task_type in the response
     }
-    task_info = task.info if isinstance(task.info, dict) else {}
+    
+    # Update response with detailed task information from Celery meta
+    response.update(task_info_dict)
+
+
     if task.state == 'PENDING':
         response['status'] = 'Task is pending or not yet started.'
-        response.update({'progress': 0, 'status': 'Initializing...', 'log_output': ['Task pending...']})
-        # Add specific meta for analysis if it's an analysis task
-        if task_info.get('task_type') == 'analysis':
-            response.update({'current_album': 'N/A', 'current_album_idx': 0, 'total_albums': 0})
-        response.update(task_info) # Overwrite with actual task_info if available
-    elif task.state == 'PROGRESS':
-        response.update(task_info)
+        # Ensure default progress/log fields exist if not in task_info_dict
+        response.setdefault('progress', 0)
+        response.setdefault('log_output', ['Task pending...'])
+        if task_type == 'analysis': # Specific defaults for analysis task type
+            response.setdefault('current_album', 'N/A')
+            response.setdefault('current_album_idx', 0)
+            response.setdefault('total_albums', 0)
     elif task.state == 'SUCCESS':
-        response['status'] = 'Task complete!'
-        response.update({'progress': 100, 'status': 'Task complete!', 'log_output': []})
-        response.update(task_info)
-        save_task_status(task_id, task_info.get('task_type', 'unknown'), "SUCCESS")
+        response['status'] = task_info_dict.get('message', 'Task complete!')
+        response.setdefault('progress', 100)
+        save_task_status(task_id, task_type, "SUCCESS")
     elif task.state == 'FAILURE':
-        response['status'] = str(task.info)
-        response.update({'progress': 100, 'status': 'Task failed!', 'log_output': [str(task.info)]})
-        response.update(task_info)
-        save_task_status(task_id, task_info.get('task_type', 'unknown'), "FAILURE")
+        response['status'] = task_info_dict.get('message', str(task.info)) # Use detailed message if available
+        response.setdefault('progress', 100)
+        # Ensure log_output contains the error if not already present
+        if not task_info_dict.get('log_output') or str(task.info) not in task_info_dict.get('log_output', []):
+            current_logs = task_info_dict.get('log_output', [])
+            if isinstance(current_logs, list):
+                 current_logs.append(f"Error: {str(task.info)}")
+                 response['log_output'] = current_logs
+            else: # if log_output was not a list for some reason
+                 response['log_output'] = [f"Error: {str(task.info)}"]
+
+        save_task_status(task_id, task_type, "FAILURE")
     elif task.state == 'REVOKED':
         response['status'] = 'Task revoked.'
-        response.update({'progress': 100, 'status': 'Task revoked.', 'log_output': ['Task was cancelled.']})
-        response.update(task_info)
-        save_task_status(task_id, task_info.get('task_type', 'unknown'), "REVOKED")
-    else:
-        response['status'] = f'Unknown state: {task.state}'
-        response.update(task_info)
+        response.setdefault('progress', 100) # Typically revocation implies completion of the cancellation
+        response.setdefault('log_output', ['Task was cancelled.'])
+        save_task_status(task_id, task_type, "REVOKED")
+    elif task.state == 'PROGRESS':
+        # Status message should already be in task_info_dict from log_and_update
+        response['status'] = task_info_dict.get('status', 'Processing...')
+    else: # Covers STARTED or any other unknown Celery states
+        response['status'] = f'Task state: {task.state}'
+        response.setdefault('progress', task_info_dict.get('progress', 0)) # Use progress from meta if available
+
     return jsonify(response)
 
 @app.route('/api/cancel/<task_id>', methods=['POST'])
@@ -761,40 +774,67 @@ def cancel_task_endpoint(task_id):
     Cancels an active task (analysis or clustering).
     """
     task = AsyncResult(task_id, app=celery)
-    if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
-        task.revoke(terminate=True, signal='SIGKILL')
-        # We need to know the task_type to save it correctly
-        # For now, we'll try to fetch it from the DB or default to 'unknown'
+    task_type_from_db = 'unknown' # Default
+    
+    # Attempt to get task_type from Celery's result backend first
+    celery_task_info = task.info if isinstance(task.info, dict) else {}
+    task_type_from_celery = celery_task_info.get('task_type')
+
+    if task_type_from_celery:
+        task_type_from_db = task_type_from_celery
+    else:
+        # Fallback to DB if not in Celery meta (e.g., if task never fully started to update meta)
         conn = get_status_db()
         cur = conn.cursor()
         cur.execute("SELECT task_type FROM task_status WHERE task_id = ?", (task_id,))
         row = cur.fetchone()
-        task_type_from_db = row['task_type'] if row else 'unknown'
+        if row:
+            task_type_from_db = row['task_type']
+        conn.close() # Ensure connection is closed if opened here
+
+    if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
+        task.revoke(terminate=True, signal='SIGKILL') # Using SIGKILL for more forceful termination
         save_task_status(task_id, task_type_from_db, "REVOKED")
-        return jsonify({"message": "Task cancelled.", "task_id": task_id}), 200
+        return jsonify({"message": "Task cancellation requested.", "task_id": task_id, "task_type": task_type_from_db}), 200
     else:
-        return jsonify({"message": "Task cannot be cancelled in its current state.", "state": task.state}), 400
+        return jsonify({"message": "Task cannot be cancelled in its current state.", "state": task.state, "task_type": task_type_from_db}), 400
 
 @app.route('/api/last_task', methods=['GET'])
 def get_last_overall_task_status():
     """
     Retrieves the status of the last recorded task, regardless of type.
     """
-    last_task = get_last_task_status()
-    if last_task:
-        return jsonify(last_task), 200
+    last_task_db = get_last_task_status() # Fetches from DB: task_id, task_type, status
+    if last_task_db and last_task_db.get('task_id'):
+        # Get the detailed status from Celery for the last task ID
+        task_id = last_task_db['task_id']
+        task = AsyncResult(task_id, app=celery)
+        celery_info = task.info if isinstance(task.info, dict) else {}
+
+        # Prioritize Celery's state and info, but use DB's task_type if Celery's is missing
+        response = {
+            'task_id': task_id,
+            'state': task.state, # Celery's current state
+            'status': celery_info.get('status', last_task_db.get('status', 'Unknown')), # Celery status, fallback to DB status
+            'task_type': celery_info.get('task_type', last_task_db.get('task_type')), # Celery type, fallback to DB type
+        }
+        # Merge other details from Celery if available
+        response.update(celery_info)
+        return jsonify(response), 200
     return jsonify({"task_id": None, "task_type": None, "status": "NO_PREVIOUS_TASK"}), 200
+
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """Returns the current configuration parameters, including new ranges."""
+    # NUM_RECENT_ALBUMS is used for analysis, not min/max like in config.py comments
     return jsonify({
         "jellyfin_url": JELLYFIN_URL,
         "jellyfin_user_id": JELLYFIN_USER_ID,
         "jellyfin_token": JELLYFIN_TOKEN,
-        "num_recent_albums": NUM_RECENT_ALBUMS,
+        "num_recent_albums": NUM_RECENT_ALBUMS, # This is the one used by analysis task
         "max_distance": MAX_DISTANCE,
-        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER,
+        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER, # Used for Jellyfin API chunking
         "max_songs_per_artist": MAX_SONGS_PER_ARTIST,
         "cluster_algorithm": CLUSTER_ALGORITHM,
         "num_clusters_min": NUM_CLUSTERS_MIN,
@@ -808,8 +848,8 @@ def get_config():
         "top_n_moods": TOP_N_MOODS,
         "mood_labels": MOOD_LABELS,
         "clustering_runs": CLUSTERING_RUNS,
-        "min_songs_per_playlist": MIN_SONGS_PER_PLAYLIST, # Added
-        "max_songs_per_playlist": MAX_SONGS_PER_PLAYLIST, # Added
+        "min_songs_per_playlist": MIN_SONGS_PER_PLAYLIST, 
+        "max_songs_per_playlist": MAX_SONGS_PER_PLAYLIST, 
     })
 
 @app.route('/api/playlists', methods=['GET'])
@@ -827,4 +867,5 @@ def get_playlists():
 if __name__ == '__main__':
     init_db(DB_PATH)
     os.makedirs(TEMP_DIR, exist_ok=True)
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    # Use host='0.0.0.0' to be accessible externally, e.g., in Docker
+    app.run(debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true', host='0.0.0.0', port=int(os.getenv('FLASK_PORT', 8000)))
