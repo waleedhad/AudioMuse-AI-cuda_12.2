@@ -25,14 +25,9 @@ data:
   JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087"
   CELERY_BROKER_URL: "redis://redis-service.playlist:6379/0"
   CELERY_RESULT_BACKEND: "redis://redis-service.playlist:6379/0"
-  TEMP_DIR: "/app/temp_audio"
-  # --- UPDATED: DBs now point to /workspace ---
+  TEMP_DIR: "/workspace/temp_audio"
   DB_PATH: "/workspace/db.sqlite"
   STATUS_DB_PATH: "/workspace/status_db.sqlite"
-  NUM_RECENT_ALBUMS: "1300"
-  CLUSTER_ALGORITHM: "kmeans"
-  PCA_ENABLED: "False"
-  NUM_CLUSTERS: "10"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -140,12 +135,10 @@ spec:
             drop:
             - ALL
         volumeMounts:
-        # --- `temp_audio` uses emptyDir, but needs to be created if not mounted as volume
         - name: temp-audio-empty-dir
-          mountPath: /app/temp_audio
-        # --- `/workspace` now handles database storage ---
+          mountPath: /workspace/temp_audio
         - name: workspace-hostpath
-          mountPath: /workspace # Mounts the host path for legacy/external access including DBs
+          mountPath: /workspace
       volumes:
       - name: temp-audio-empty-dir
         emptyDir: {} # Temporary storage for downloaded audio
@@ -228,10 +221,8 @@ spec:
             drop:
             - ALL
         volumeMounts:
-        # --- `temp_audio` uses emptyDir, but needs to be created if not mounted as volume
         - name: temp-audio-empty-dir
-          mountPath: /app/temp_audio
-        # --- `/workspace` now handles database storage ---
+          mountPath: /workspace/temp_audio
         - name: workspace-hostpath
           mountPath: /workspace # Mounts the host path for legacy/external access including DBs
       volumes:

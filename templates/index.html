@@ -176,23 +176,47 @@
                         <option value="dbscan">DBSCAN</option>
                     </select>
                 </div>
-                <div id="kmeans_options">
-                    <label for="num_clusters" class="block text-gray-400 text-sm font-bold mb-2">Number of Clusters (KMeans, 0 for auto):</label>
-                    <input type="number" id="num_clusters" name="num_clusters" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div id="dbscan_options" class="hidden">
+                <div id="kmeans_options" class="grid grid-cols-2 gap-4 col-span-2">
                     <div>
-                        <label for="dbscan_eps" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Epsilon (eps):</label>
-                        <input type="number" step="0.01" id="dbscan_eps" name="dbscan_eps" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                        <label for="num_clusters_min" class="block text-gray-400 text-sm font-bold mb-2">KMeans Min Clusters:</label>
+                        <input type="number" id="num_clusters_min" name="num_clusters_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                     </div>
-                    <div class="mt-2">
-                        <label for="dbscan_min_samples" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Min Samples:</label>
-                        <input type="number" id="dbscan_min_samples" name="dbscan_min_samples" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    <div>
+                        <label for="num_clusters_max" class="block text-gray-400 text-sm font-bold mb-2">KMeans Max Clusters:</label>
+                        <input type="number" id="num_clusters_max" name="num_clusters_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    </div>
+                </div>
+                <div id="dbscan_options" class="grid grid-cols-2 gap-4 col-span-2 hidden">
+                    <div>
+                        <label for="dbscan_eps_min" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Min Epsilon (eps):</label>
+                        <input type="number" step="0.01" id="dbscan_eps_min" name="dbscan_eps_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    </div>
+                    <div>
+                        <label for="dbscan_eps_max" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Max Epsilon (eps):</label>
+                        <input type="number" step="0.01" id="dbscan_eps_max" name="dbscan_eps_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    </div>
+                    <div>
+                        <label for="dbscan_min_samples_min" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Min Samples:</label>
+                        <input type="number" id="dbscan_min_samples_min" name="dbscan_min_samples_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    </div>
+                    <div>
+                        <label for="dbscan_min_samples_max" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Max Samples:</label>
+                        <input type="number" id="dbscan_min_samples_max" name="dbscan_min_samples_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-align focus:outline-none focus:shadow-outline">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 col-span-2">
+                    <div>
+                        <label for="pca_components_min" class="block text-gray-400 text-sm font-bold mb-2">PCA Min Components (0 to disable):</label>
+                        <input type="number" id="pca_components_min" name="pca_components_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    </div>
+                    <div>
+                        <label for="pca_components_max" class="block text-gray-400 text-sm font-bold mb-2">PCA Max Components:</label>
+                        <input type="number" id="pca_components_max" name="pca_components_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                     </div>
                 </div>
                 <div>
-                    <label for="pca_components" class="block text-gray-400 text-sm font-bold mb-2">PCA Components (0 to disable):</label>
-                    <input type="number" id="pca_components" name="pca_components" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                    <label for="max_songs_per_cluster" class="block text-gray-400 text-sm font-bold mb-2">Max Songs per Cluster:</label>
+                    <input type="number" id="max_songs_per_cluster" name="max_songs_per_cluster" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                 </div>
                 <div>
                     <label for="clustering_runs" class="block text-gray-400 text-sm font-bold mb-2">Clustering Runs (for diversity):</label>
@@ -265,6 +289,9 @@
         const clusteringProgressBar = document.getElementById('clusteringProgressBar');
         const clusteringLogOutput = document.getElementById('clusteringLogOutput');
         const cancelClusteringBtn = document.getElementById('cancelClusteringBtn');
+
+        // New element for max_songs_per_cluster
+        const maxSongsPerClusterInput = document.getElementById('max_songs_per_cluster');
 
 
         let pollingInterval = null;
@@ -404,11 +431,25 @@
                 document.getElementById('top_n_moods').value = config.top_n_moods !== undefined ? config.top_n_moods : 5;
 
                 document.getElementById('clustering_method').value = config.cluster_algorithm || 'kmeans';
-                document.getElementById('num_clusters').value = config.num_clusters !== undefined ? config.num_clusters : 40;
-                document.getElementById('dbscan_eps').value = config.dbscan_eps !== undefined ? config.dbscan_eps : 0.15;
-                document.getElementById('dbscan_min_samples').value = config.dbscan_min_samples !== undefined ? config.dbscan_min_samples : 10;
-                document.getElementById('pca_components').value = config.pca_enabled ? 3 : 0;
-                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 10;
+                
+                // Set min/max values for KMeans
+                document.getElementById('num_clusters_min').value = config.num_clusters_min !== undefined ? config.num_clusters_min : 20;
+                document.getElementById('num_clusters_max').value = config.num_clusters_max !== undefined ? config.num_clusters_max : 60;
+
+                // Set min/max values for DBSCAN
+                document.getElementById('dbscan_eps_min').value = config.dbscan_eps_min !== undefined ? config.dbscan_eps_min : 0.1;
+                document.getElementById('dbscan_eps_max').value = config.dbscan_eps_max !== undefined ? config.dbscan_eps_max : 0.5;
+                document.getElementById('dbscan_min_samples_min').value = config.dbscan_min_samples_min !== undefined ? config.dbscan_min_samples_min : 5;
+                document.getElementById('dbscan_min_samples_max').value = config.dbscan_min_samples_max !== undefined ? config.dbscan_min_samples_max : 20;
+
+                // Set min/max values for PCA
+                document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
+                document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
+
+                // Set max_songs_per_cluster
+                maxSongsPerClusterInput.value = config.max_songs_per_cluster !== undefined ? config.max_songs_per_cluster : 40;
+
+                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 100;
 
                 toggleClusteringOptions();
             } catch (error) {
@@ -656,14 +697,16 @@
             const formData = new FormData(playlistForm);
             const data = Object.fromEntries(formData.entries());
 
-            data.num_clusters = parseInt(data.num_clusters, 10);
-            data.dbscan_eps = parseFloat(data.dbscan_eps);
-            data.dbscan_min_samples = parseInt(data.dbscan_min_samples, 10);
-            const pca_components = parseInt(data.pca_components, 10);
-            data.pca_enabled = pca_components > 0;
-            if (!data.pca_enabled) {
-                delete data.pca_components;
-            }
+            // Parse min/max values for parameters
+            data.num_clusters_min = parseInt(data.num_clusters_min, 10);
+            data.num_clusters_max = parseInt(data.num_clusters_max, 10);
+            data.dbscan_eps_min = parseFloat(data.dbscan_eps_min);
+            data.dbscan_eps_max = parseFloat(data.dbscan_eps_max);
+            data.dbscan_min_samples_min = parseInt(data.dbscan_min_samples_min, 10);
+            data.dbscan_min_samples_max = parseInt(data.dbscan_min_samples_max, 10);
+            data.pca_components_min = parseInt(data.pca_components_min, 10);
+            data.pca_components_max = parseInt(data.pca_components_max, 10);
+            data.max_songs_per_cluster = parseInt(data.max_songs_per_cluster, 10); // Parse new field
             data.clustering_runs = parseInt(data.clustering_runs, 10);
 
             try {

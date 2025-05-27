@@ -10,6 +10,7 @@ from celery.result import AsyncResult
 from contextlib import closing
 import json
 import time
+import random # Import random for parameter sampling
 
 # Import your existing analysis functions
 from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
@@ -21,8 +22,9 @@ from config import *
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+# Celery configuration is now read from config.py
+app.config['CELERY_BROKER_URL'] = CELERY_BROKER_URL
+app.config['CELERY_RESULT_BACKEND'] = CELERY_RESULT_BACKEND
 
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
 celery.conf.update(app.config)
@@ -181,7 +183,7 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     audio = MonoLoader(filename=file_path)()
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels, top_n_moods)
+    moods = predict_moods(file_path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, TOP_N_MOODS) # Use global paths and top_n_moods
     return tempo, key, scale, moods
 
 def track_exists(db_path, item_id):
@@ -294,11 +296,12 @@ def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
     except Exception as e:
         print(f"Failed to clean old playlists: {e}")
 
-def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, headers, playlists, cluster_centers, mood_labels):
+def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, headers, playlists, cluster_centers, mood_labels, max_songs_per_cluster):
     """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers)
     for base_name, cluster in playlists.items():
-        chunks = [cluster[i:i+MAX_SONGS_PER_CLUSTER] for i in range(0, len(cluster), MAX_SONGS_PER_CLUSTER)]
+        # Use the passed max_songs_per_cluster here
+        chunks = [cluster[i:i+max_songs_per_cluster] for i in range(0, len(cluster), max_songs_per_cluster)]
         for idx, chunk in enumerate(chunks, 1):
             playlist_name = f"{base_name}_automatic_{idx}" if len(chunks) > 1 else f"{base_name}_automatic"
             item_ids = [item_id for item_id, _, _ in chunk]
@@ -394,9 +397,10 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
         return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
 
 @celery.task(bind=True)
-def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbscan_min_samples, pca_enabled, pca_components, num_clustering_runs):
+def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster):
     """
-    Celery task to run the clustering and playlist generation process.
+    Celery task to run the clustering and playlist generation process with an
+    evolutionary approach for parameter selection.
     Updates task state with progress and log messages.
     Includes weighted diversity score calculation.
     """
@@ -409,7 +413,7 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
             'log_output': log_messages,
         })
     try:
-        log_and_update("📊 Starting playlist clustering...", 0)
+        log_and_update("📊 Starting playlist clustering with evolutionary parameter search...", 0)
         rows = get_all_tracks(DB_PATH)
         if len(rows) < 2:
             log_and_update("Not enough analyzed tracks for clustering. Please run analysis first.", 100)
@@ -423,39 +427,79 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
 
         best_diversity_score = -1.0 # Initialize with a float for comparison
         best_clustering_results = None
+        best_parameters_found = {} # To store the parameters that yielded the best score
 
         for run_idx in range(num_clustering_runs):
             progress_base = 10 + int(80 * (run_idx / num_clustering_runs)) # 10% to 90% for clustering runs
-            log_and_update(f"Running clustering iteration {run_idx + 1}/{num_clustering_runs}...", progress_base)
+            
+            # --- Parameter Sampling for each run (Evolutionary Approach) ---
+            current_num_clusters = 0
+            current_dbscan_eps = 0.0
+            current_dbscan_min_samples = 0
+            current_pca_components = 0
+            current_pca_enabled = False
+
+            if clustering_method == "kmeans":
+                # Sample num_clusters within the specified range
+                current_num_clusters = random.randint(num_clusters_min, num_clusters_max)
+                # Ensure num_clusters is not more than available tracks
+                current_num_clusters = min(current_num_clusters, len(rows))
+                if current_num_clusters == 0: # Handle case where min_clusters is 0 or range results in 0
+                     current_num_clusters = max(1, len(rows) // max_songs_per_cluster) # Fallback to auto
+                
+            elif clustering_method == "dbscan":
+                # Sample dbscan_eps within the specified range (float)
+                current_dbscan_eps = round(random.uniform(dbscan_eps_min, dbscan_eps_max), 2)
+                # Sample dbscan_min_samples within the specified range (integer)
+                current_dbscan_min_samples = random.randint(dbscan_min_samples_min, dbscan_min_samples_max)
+            
+            # Sample pca_components within the specified range
+            current_pca_components = random.randint(pca_components_min, pca_components_max)
+            current_pca_enabled = (current_pca_components > 0)
+
+            log_and_update(f"Running clustering iteration {run_idx + 1}/{num_clustering_runs} with parameters: "
+                           f"Method={clustering_method}, K={current_num_clusters}, "
+                           f"Eps={current_dbscan_eps}, MinS={current_dbscan_min_samples}, "
+                           f"PCA_Comp={current_pca_components}...", progress_base)
             
             pca_model = None
             data_for_clustering = X_scaled
 
-            if pca_enabled:
-                log_and_update(f"  Applying PCA with {pca_components} components...", progress_base + 2)
-                pca_model = PCA(n_components=pca_components)
-                X_pca = pca_model.fit_transform(X_scaled)
-                data_for_clustering = X_pca
+            if current_pca_enabled:
+                log_and_update(f"  Applying PCA with {current_pca_components} components...", progress_base + 2)
+                # Ensure PCA components don't exceed the number of features or samples
+                n_components_actual = min(current_pca_components, X_scaled.shape[1], len(rows) - 1)
+                if n_components_actual > 0:
+                    pca_model = PCA(n_components=n_components_actual)
+                    X_pca = pca_model.fit_transform(X_scaled)
+                    data_for_clustering = X_pca
+                else:
+                    log_and_update("  PCA components too low or data insufficient, PCA disabled for this run.", progress_base + 2)
+                    current_pca_enabled = False # Effectively disable PCA for this run
+                    pca_model = None
+
 
             labels = None
             cluster_centers = {}
             raw_distances = np.zeros(len(data_for_clustering))
 
             if clustering_method == "kmeans":
-                k = num_clusters if num_clusters > 0 else max(1, len(rows) // MAX_SONGS_PER_CLUSTER)
-                log_and_update(f"  Running KMeans with {min(k, len(rows))} clusters...", progress_base + 5)
-                kmeans = KMeans(n_clusters=min(k, len(rows)), random_state=None, n_init='auto')
+                # Use the sampled current_num_clusters
+                k = current_num_clusters
+                log_and_update(f"  Running KMeans with {k} clusters...", progress_base + 5)
+                kmeans = KMeans(n_clusters=k, random_state=None, n_init='auto')
                 labels = kmeans.fit_predict(data_for_clustering)
-                cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(min(k, len(rows)))}
+                cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(k)}
                 centers_for_points = kmeans.cluster_centers_[labels]
                 raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
             elif clustering_method == "dbscan":
-                log_and_update(f"  Running DBSCAN (eps={dbscan_eps}, min_samples={dbscan_min_samples})...", progress_base + 5)
-                dbscan = DBSCAN(eps=dbscan_eps, min_samples=dbscan_min_samples)
+                # Use the sampled current_dbscan_eps and current_dbscan_min_samples
+                log_and_update(f"  Running DBSCAN (eps={current_dbscan_eps}, min_samples={current_dbscan_min_samples})...", progress_base + 5)
+                dbscan = DBSCAN(eps=current_dbscan_eps, min_samples=current_dbscan_min_samples)
                 labels = dbscan.fit_predict(data_for_clustering)
                 
                 for cluster_id in set(labels):
-                    if cluster_id == -1:
+                    if cluster_id == -1: # Noise points
                         continue
                     indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
                     cluster_points = np.array([data_for_clustering[i] for i in indices])
@@ -466,15 +510,20 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
                         cluster_centers[cluster_id] = center
             else:
                 log_and_update(f"Unsupported clustering algorithm: {clustering_method}", 100)
-                self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Unsupported algorithm: {clustering_method}', 'log_output': log_messages})
-                return jsonify({"status": "error", "message": f"Unsupported clustering algorithm: {clustering_method}"}), 400
+                # Do not fail the entire task, just skip this run or log an error
+                continue # Skip to next run_idx
+
+            # Handle cases where clustering might result in no valid labels (e.g., all noise in DBSCAN)
+            if labels is None or len(set(labels) - {-1}) == 0: # No clusters found (excluding noise)
+                log_and_update(f"  Run {run_idx + 1}: No valid clusters generated for this parameter set. Skipping.", progress_base + 8)
+                continue
 
             max_dist = raw_distances.max()
             normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
             
             track_info = []
             for row, label, vec, dist in zip(rows, labels, data_for_clustering, normalized_distances):
-                if label == -1:
+                if label == -1: # Skip noise points from DBSCAN
                     continue
                 track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
 
@@ -494,7 +543,8 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
                     if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                         selected.append(t)
                         count_per_artist[author] += 1
-                    if len(selected) >= MAX_SONGS_PER_CLUSTER:
+                    # Use the passed max_songs_per_cluster here
+                    if len(selected) >= max_songs_per_cluster:
                         break
                 for t in selected:
                     item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
@@ -503,36 +553,29 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
             current_named_playlists = defaultdict(list)
             current_playlist_centroids = {}
             
-            # --- START NEW DIVERSITY SCORE LOGIC ---
             unique_predominant_mood_scores = {} # Dictionary to store the max score for each unique mood found
-            # --- END NEW DIVERSITY SCORE LOGIC ---
 
             for label, songs in filtered_clusters.items():
                 if songs:
-                    center = cluster_centers[label]
-                    name, top_scores = name_cluster(center, pca_model, pca_enabled, MOOD_LABELS)
+                    center = cluster_centers.get(label) # Use .get() in case a cluster_id from labels isn't in cluster_centers (e.g., if it was noise)
+                    if center is None:
+                        continue # Skip if no centroid found for this label
+
+                    name, top_scores = name_cluster(center, pca_model, current_pca_enabled, MOOD_LABELS)
                     
-                    # --- START NEW DIVERSITY SCORE LOGIC ---
                     if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
-                        # Find the actual mood label with the highest score from top_scores
-                        # This is the "primary predominant mood" for this specific cluster
                         predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
                         if predominant_mood_key in MOOD_LABELS:
                             current_mood_score = top_scores.get(predominant_mood_key, 0.0)
-                            # Store the highest score encountered for this specific mood label across all clusters in this run
                             unique_predominant_mood_scores[predominant_mood_key] = max(
                                 unique_predominant_mood_scores.get(predominant_mood_key, 0.0),
                                 current_mood_score
                             )
-                    # --- END NEW DIVERSITY SCORE LOGIC ---
 
                     current_named_playlists[name].extend(songs)
                     current_playlist_centroids[name] = top_scores
 
-            # --- START NEW DIVERSITY SCORE LOGIC ---
-            # Calculate the diversity score as the sum of the highest scores for each unique predominant mood
             diversity_score = sum(unique_predominant_mood_scores.values())
-            # --- END NEW DIVERSITY SCORE LOGIC ---
 
             log_and_update(f"  Run {run_idx + 1}: Weighted Diversity Score: {diversity_score:.2f}.", progress_base + 8)
 
@@ -541,8 +584,18 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
                 best_clustering_results = {
                     "named_playlists": current_named_playlists,
                     "playlist_centroids": current_playlist_centroids,
-                    "pca_model": pca_model # Store the PCA model for inverse transform in naming
+                    "pca_model": pca_model, # Store the PCA model for inverse transform in naming
+                    "parameters": { # Store the parameters that yielded this best score
+                        "clustering_method": clustering_method,
+                        "num_clusters": current_num_clusters,
+                        "dbscan_eps": current_dbscan_eps,
+                        "dbscan_min_samples": current_dbscan_min_samples,
+                        "pca_enabled": current_pca_enabled,
+                        "pca_components": current_pca_components,
+                        "max_songs_per_cluster": max_songs_per_cluster # Store this too
+                    }
                 }
+                best_parameters_found = best_clustering_results["parameters"] # Update best parameters found
 
         if not best_clustering_results:
             log_and_update("No valid clusters found after multiple runs.", 100)
@@ -550,15 +603,17 @@ def run_clustering_task(self, clustering_method, num_clusters, dbscan_eps, dbsca
             return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
 
         log_and_update(f"Applying best clustering results (Weighted Diversity Score: {best_diversity_score:.2f})...", 90)
+        log_and_update(f"Best parameters: {best_parameters_found}", 90)
         final_named_playlists = best_clustering_results["named_playlists"]
         final_playlist_centroids = best_clustering_results["playlist_centroids"]
         final_pca_model = best_clustering_results["pca_model"] # Retrieve the PCA model
+        final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
 
         log_and_update("Updating playlist database...", 95)
         update_playlist_table(DB_PATH, final_named_playlists)
         
         log_and_update("Creating/Updating playlists on Jellyfin...", 98)
-        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS)
+        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS, final_max_songs_per_cluster)
         
         log_and_update(f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}.", 100)
         return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}."}
@@ -599,20 +654,43 @@ def start_analysis():
 def start_clustering():
     """
     Starts the playlist clustering as an asynchronous Celery task.
+    Accepts parameter ranges for evolutionary search.
     Records the task ID and type in the database.
     """
     data = request.json
+
+    # Get clustering method
     clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
-    num_clusters = int(data.get('num_clusters', NUM_CLUSTERS))
-    dbscan_eps = float(data.get('dbscan_eps', DBSCAN_EPS))
-    dbscan_min_samples = int(data.get('dbscan_min_samples', DBSCAN_MIN_SAMPLES))
-    pca_components = int(data.get('pca_components', 0))
-    pca_enabled = (pca_components > 0)
+
+    # Get ranges for K-Means parameters
+    num_clusters_min = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
+    num_clusters_max = int(data.get('num_clusters_max', NUM_CLUSTERS_MAX))
+
+    # Get ranges for DBSCAN parameters
+    dbscan_eps_min = float(data.get('dbscan_eps_min', DBSCAN_EPS_MIN))
+    dbscan_eps_max = float(data.get('dbscan_eps_max', DBSCAN_EPS_MAX))
+    dbscan_min_samples_min = int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN))
+    dbscan_min_samples_max = int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX))
+
+    # Get ranges for PCA components
+    pca_components_min = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
+    pca_components_max = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
+    
+    # Get total clustering runs
     num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS))
 
+    # Get max_songs_per_cluster
+    max_songs_per_cluster = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
+
+
     task = run_clustering_task.delay(
-        clustering_method, num_clusters, dbscan_eps, dbscan_min_samples,
-        pca_enabled, pca_components, num_clustering_runs
+        clustering_method, 
+        num_clusters_min, num_clusters_max,
+        dbscan_eps_min, dbscan_eps_max,
+        dbscan_min_samples_min, dbscan_min_samples_max,
+        pca_components_min, pca_components_max,
+        num_clustering_runs,
+        max_songs_per_cluster # Pass the new parameter
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
@@ -691,20 +769,24 @@ def get_last_overall_task_status():
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
-    """Returns the current configuration parameters."""
+    """Returns the current configuration parameters, including new ranges."""
     return jsonify({
         "jellyfin_url": JELLYFIN_URL,
         "jellyfin_user_id": JELLYFIN_USER_ID,
         "jellyfin_token": JELLYFIN_TOKEN,
         "num_recent_albums": NUM_RECENT_ALBUMS,
         "max_distance": MAX_DISTANCE,
-        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER,
+        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER, # Added this
         "max_songs_per_artist": MAX_SONGS_PER_ARTIST,
         "cluster_algorithm": CLUSTER_ALGORITHM,
-        "pca_enabled": PCA_ENABLED,
-        "dbscan_eps": DBSCAN_EPS,
-        "dbscan_min_samples": DBSCAN_MIN_SAMPLES,
-        "num_clusters": NUM_CLUSTERS,
+        "num_clusters_min": NUM_CLUSTERS_MIN,
+        "num_clusters_max": NUM_CLUSTERS_MAX,
+        "dbscan_eps_min": DBSCAN_EPS_MIN,
+        "dbscan_eps_max": DBSCAN_EPS_MAX,
+        "dbscan_min_samples_min": DBSCAN_MIN_SAMPLES_MIN,
+        "dbscan_min_samples_max": DBSCAN_MIN_SAMPLES_MAX,
+        "pca_components_min": PCA_COMPONENTS_MIN,
+        "pca_components_max": PCA_COMPONENTS_MAX,
         "top_n_moods": TOP_N_MOODS,
         "mood_labels": MOOD_LABELS,
         "clustering_runs": CLUSTERING_RUNS,
