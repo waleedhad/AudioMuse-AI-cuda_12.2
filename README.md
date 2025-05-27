@@ -55,8 +55,8 @@ The **mandatory** parameter that you need to change from the example are this:
 | `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`      |
 | `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID (K8s Secret)    | *(N/A - from Secret)*               |
 | `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token (K8s Secret)  | *(N/A - from Secret)*               |
-| `CELERY_BROKER_URL`     | URL for Celery broker (your redis endpoint) | `redis://redis-service.playlist:6379/0`|
-| `CELERY_RESULT_BACKEND` | Celery result backend (your redit endpoint) | `redis://redis-service.playlist:6379/0`|
+| `CELERY_BROKER_URL`     | (Required) URL for Celery broker (your redis endpoint) | `redis://redis-service.playlist:6379/0`|
+| `CELERY_RESULT_BACKEND` | (Required) Celery result backend (your redit endpoint) | `redis://redis-service.playlist:6379/0`|
 
 This are parameter that you can leave as it is, the important things is that you mount **/workspace** container folder in a PVC or in an hostPath. This because the db with all the song analysis will be saved there.
 | Parameter               | Description                                 | Default Value                       |
