@@ -94,7 +94,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `GMM_COVARIANCE_TYPE`     | Covariance type for GMM (task uses `'full'`).                               | `full`   |
 | **PCA Ranges** |                                                                             |                    |
 | `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
-| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `10`     |
+| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
 
 
 ## ☸️ Kubernetes Deployment (K3S Example)
