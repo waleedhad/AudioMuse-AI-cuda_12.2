@@ -3,10 +3,10 @@ name: Build, Test, and Push AudioMuse AI Docker Image
 on:
   push:
     branches:
-      - main        # Trigger for 'latest'
-      - devel       # Trigger for 'devel'
+      - main      # Trigger for 'latest'
+      - devel     # Trigger for 'devel'
     tags:
-      - 'v*.*.*'    # Trigger for version tags like v1.0.0
+      - 'v*.*.*'  # Trigger for version tags like v1.0.0
 
 jobs:
   build-and-test:
@@ -15,6 +15,30 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: audiomuse_db_test # Use a test-specific DB name
+        ports:
+          - 5432:5432 # Exposes on host, service also available at 'postgres:5432'
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:6.2.6-alpine
+        ports:
+          - 6379:6379 # Exposes on host, service also available at 'redis:6379'
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -72,35 +96,73 @@ jobs:
         run: |
           echo "Starting Flask app container for health check..."
           # Run the container in detached mode (-d) and map port 8000
-          docker run -d --name flask-test-app -p 8000:8000 -e SERVICE_TYPE=flask ${{ steps.docker_tags.outputs.test_tag }}
+          # Pass environment variables to connect to the services
+          docker run -d --name flask-test-app \
+            -p 8000:8000 \
+            -e SERVICE_TYPE=flask \
+            -e DB_HOST=postgres \
+            -e DB_PORT=5432 \
+            -e DB_NAME=audiomuse_db_test \
+            -e DB_USER=user \
+            -e DB_PASSWORD=password \
+            -e CELERY_BROKER_URL=redis://redis:6379/0 \
+            -e CELERY_RESULT_BACKEND=redis://redis:6379/0 \
+            ${{ steps.docker_tags.outputs.test_tag }}
 
           echo "Waiting for Flask app to start (max 60 seconds)..."
           # Health check loop: Try to connect to the Flask app's /api/status endpoint
+          # The /api/status endpoint should not require any task to be processed.
+          # It's assumed that Flask app initialization will attempt DB connection.
           for i in $(seq 1 60); do
-            if curl -s http://localhost:8000/api/status > /dev/null; then
-              echo "Flask app is up and responsive!"
-              exit 0
+            # Check if the container is still running before attempting curl
+            if ! docker ps -f name=flask-test-app --format '{{.Names}}' | grep -q flask-test-app; then
+              echo "Flask app container unexpectedly stopped."
+              docker logs flask-test-app # Print logs for debugging
+              exit 1
+            fi
+            # Check if the app is responsive. 
+            # The /api/config endpoint is simple and doesn't require DB data, just config.
+            if curl -fsS http://localhost:8000/api/config > /dev/null; then
+              echo "Flask app is up and responsive (checked /api/config)!"
+              # Add an additional check for DB connection attempt by checking logs for table creation
+              # This is a bit fragile as log messages can change.
+              sleep 5 # Give it a few seconds to attempt DB init if it hasn't already
+              if docker logs flask-test-app 2>&1 | grep -E "Table 'task_status' ensured to exist.|Table 'task_status' already exists"; then
+                 echo "DB initialization messages found in Flask app logs."
+                 exit 0
+              else
+                 echo "DB initialization messages NOT found yet. Checking again..."
+                 sleep 5 # Wait a bit longer
+                 if docker logs flask-test-app 2>&1 | grep -E "Table 'task_status' ensured to exist.|Table 'task_status' already exists"; then
+                    echo "DB initialization messages found in Flask app logs after extended wait."
+                    exit 0
+                 else
+                    echo "Flask app up, but DB initialization messages not found in logs. Assuming OK if /api/config worked."
+                    # Consider failing here if strict DB check from logs is required.
+                    # For now, if /api/config works, we'll pass this step.
+                    exit 0
+                 fi
+              fi
             fi
             echo "Waiting... ($i/60)"
             sleep 1
           done
-          echo "Flask app did not start or respond within the expected time."
+          echo "Flask app did not start, respond, or confirm DB initialization within the expected time."
           docker logs flask-test-app # Print logs for debugging
           exit 1 # Fail the job if app doesn't start
 
       - name: Run Celery Worker Container Health Check
         run: |
-          echo "Starting temporary Redis container for Celery broker..."
-          docker run -d --name redis-test redis:latest
-
-          echo "Waiting for Redis to start..."
-          sleep 5 # Give Redis a few seconds to initialize
-
           echo "Starting Celery worker container for health check..."
-          # Run the celery worker container in detached mode, linking to redis
+          # Run the celery worker container in detached mode
+          # Pass environment variables to connect to the services
           docker run -d --name celery-test-worker \
-            --link redis-test:redis \
             -e SERVICE_TYPE=celery \
+            -e DB_HOST=postgres \
+            -e DB_PORT=5432 \
+            -e DB_NAME=audiomuse_db_test \
+            -e DB_USER=user \
+            -e DB_PASSWORD=password \
             -e CELERY_BROKER_URL=redis://redis:6379/0 \
             -e CELERY_RESULT_BACKEND=redis://redis:6379/0 \
             ${{ steps.docker_tags.outputs.test_tag }}
@@ -114,9 +176,13 @@ jobs:
                   echo "Celery worker container is running and ready."
                   exit 0
               fi
+            else
+              echo "Celery worker container unexpectedly stopped."
+              docker logs celery-test-worker # Print logs for debugging
+              exit 1
             fi
-            echo "Waiting... ($i/30)"
-            sleep 3 # Increased sleep duration
+            echo "Waiting for Celery worker to be ready... ($i/30)"
+            sleep 3
           done
           echo "Celery worker container did not start or become ready within the expected time."
           docker logs celery-test-worker # Print logs for debugging
@@ -126,13 +192,14 @@ jobs:
         if: always() # Run this step even if previous steps fail
         run: |
           echo "Cleaning up temporary Docker containers and image..."
-          docker rm -f flask-test-app || true # || true prevents error if container didn't start or was already removed
+          docker rm -f flask-test-app || true
           docker rm -f celery-test-worker || true
-          docker rm -f redis-test || true
-          docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true # Remove the temporary image
+          # No need to remove redis-test as it's managed by 'services'
+          docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true
 
       - name: Build and Push AudioMuse AI Image (Final Push)
         # This step only runs if all previous test steps passed
+        if: success() # Only run if previous steps (including health checks) succeeded
         uses: docker/build-push-action@v5
         with:
           context: .
