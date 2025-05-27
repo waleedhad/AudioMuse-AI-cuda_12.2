@@ -218,16 +218,6 @@
                     <label for="clustering_runs" class="block text-gray-400 text-sm font-bold mb-2">Clustering Runs (for diversity):</label>
                     <input type="number" id="clustering_runs" name="clustering_runs" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                 </div>
-                <div class="grid grid-cols-2 gap-4 col-span-2">
-                    <div>
-                        <label for="min_songs_per_playlist" class="block text-gray-400 text-sm font-bold mb-2">Min Songs per Playlist:</label>
-                        <input type="number" id="min_songs_per_playlist" name="min_songs_per_playlist" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="max_songs_per_playlist" class="block text-gray-400 text-sm font-bold mb-2">Max Songs per Playlist:</label>
-                        <input type="number" id="max_songs_per_playlist" name="max_songs_per_playlist" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                </div>
                 <div class="col-span-1 md:col-span-2 mt-4 text-center">
                     <button type="submit" id="generatePlaylistsBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         Generate Playlists
@@ -406,7 +396,7 @@
                     clearInterval(pollingInterval);
                     pollingInterval = null;
                     
-                    # Re-enable all relevant buttons on polling error
+                    // Re-enable all relevant buttons on polling error
                     startAnalysisBtn.disabled = false;
                     cancelAnalysisBtn.disabled = true;
                     generatePlaylistsBtn.disabled = false;
@@ -430,15 +420,14 @@
                 document.getElementById('jellyfin_url').value = config.jellyfin_url || '';
                 document.getElementById('jellyfin_user_id').value = config.jellyfin_user_id || '';
                 document.getElementById('jellyfin_token').value = config.jellyfin_token || '';
-                // Use config.num_recent_albums for the default value
                 document.getElementById('num_recent_albums').value = config.num_recent_albums !== undefined ? config.num_recent_albums : 0;
                 document.getElementById('top_n_moods').value = config.top_n_moods !== undefined ? config.top_n_moods : 5;
 
                 document.getElementById('clustering_method').value = config.cluster_algorithm || 'kmeans';
                 
                 // Set min/max values for KMeans
-                document.getElementById('num_clusters_min').value = config.num_clusters_min !== undefined ? config.num_clusters_min : 3;
-                document.getElementById('num_clusters_max').value = config.num_clusters_max !== undefined ? config.num_clusters_max : 10;
+                document.getElementById('num_clusters_min').value = config.num_clusters_min !== undefined ? config.num_clusters_min : 20;
+                document.getElementById('num_clusters_max').value = config.num_clusters_max !== undefined ? config.num_clusters_max : 60;
 
                 // Set min/max values for DBSCAN
                 document.getElementById('dbscan_eps_min').value = config.dbscan_eps_min !== undefined ? config.dbscan_eps_min : 0.1;
@@ -450,12 +439,7 @@
                 document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
                 document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
 
-                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 10;
-
-                // Set min/max songs per playlist
-                document.getElementById('min_songs_per_playlist').value = config.min_songs_per_playlist !== undefined ? config.min_songs_per_playlist : 20;
-                document.getElementById('max_songs_per_playlist').value = config.max_songs_per_playlist !== undefined ? config.max_songs_per_playlist : 40;
-
+                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 100;
 
                 toggleClusteringOptions();
             } catch (error) {
@@ -713,9 +697,6 @@
             data.pca_components_min = parseInt(data.pca_components_min, 10);
             data.pca_components_max = parseInt(data.pca_components_max, 10);
             data.clustering_runs = parseInt(data.clustering_runs, 10);
-            data.min_songs_per_playlist = parseInt(data.min_songs_per_playlist, 10); // Parse new parameter
-            data.max_songs_per_playlist = parseInt(data.max_songs_per_playlist, 10); // Parse new parameter
-
 
             try {
                 const response = await fetch(`${API_BASE_URL}/clustering/start`, {
