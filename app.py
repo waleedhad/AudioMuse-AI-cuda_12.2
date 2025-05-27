@@ -296,11 +296,12 @@ def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
     except Exception as e:
         print(f"Failed to clean old playlists: {e}")
 
-def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, headers, playlists, cluster_centers, mood_labels):
+def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, headers, playlists, cluster_centers, mood_labels, max_songs_per_cluster):
     """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers)
     for base_name, cluster in playlists.items():
-        chunks = [cluster[i:i+MAX_SONGS_PER_CLUSTER] for i in range(0, len(cluster), MAX_SONGS_PER_CLUSTER)]
+        # Use the passed max_songs_per_cluster here
+        chunks = [cluster[i:i+max_songs_per_cluster] for i in range(0, len(cluster), max_songs_per_cluster)]
         for idx, chunk in enumerate(chunks, 1):
             playlist_name = f"{base_name}_automatic_{idx}" if len(chunks) > 1 else f"{base_name}_automatic"
             item_ids = [item_id for item_id, _, _ in chunk]
@@ -396,7 +397,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
         return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
 
 @celery.task(bind=True)
-def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs):
+def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster):
     """
     Celery task to run the clustering and playlist generation process with an
     evolutionary approach for parameter selection.
@@ -444,7 +445,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                 # Ensure num_clusters is not more than available tracks
                 current_num_clusters = min(current_num_clusters, len(rows))
                 if current_num_clusters == 0: # Handle case where min_clusters is 0 or range results in 0
-                     current_num_clusters = max(1, len(rows) // MAX_SONGS_PER_CLUSTER) # Fallback to auto
+                     current_num_clusters = max(1, len(rows) // max_songs_per_cluster) # Fallback to auto
                 
             elif clustering_method == "dbscan":
                 # Sample dbscan_eps within the specified range (float)
@@ -542,7 +543,8 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                     if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                         selected.append(t)
                         count_per_artist[author] += 1
-                    if len(selected) >= MAX_SONGS_PER_CLUSTER:
+                    # Use the passed max_songs_per_cluster here
+                    if len(selected) >= max_songs_per_cluster:
                         break
                 for t in selected:
                     item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
@@ -589,7 +591,8 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                         "dbscan_eps": current_dbscan_eps,
                         "dbscan_min_samples": current_dbscan_min_samples,
                         "pca_enabled": current_pca_enabled,
-                        "pca_components": current_pca_components
+                        "pca_components": current_pca_components,
+                        "max_songs_per_cluster": max_songs_per_cluster # Store this too
                     }
                 }
                 best_parameters_found = best_clustering_results["parameters"] # Update best parameters found
@@ -604,12 +607,13 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
         final_named_playlists = best_clustering_results["named_playlists"]
         final_playlist_centroids = best_clustering_results["playlist_centroids"]
         final_pca_model = best_clustering_results["pca_model"] # Retrieve the PCA model
+        final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
 
         log_and_update("Updating playlist database...", 95)
         update_playlist_table(DB_PATH, final_named_playlists)
         
         log_and_update("Creating/Updating playlists on Jellyfin...", 98)
-        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS)
+        create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS, final_max_songs_per_cluster)
         
         log_and_update(f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}.", 100)
         return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}."}
@@ -675,13 +679,18 @@ def start_clustering():
     # Get total clustering runs
     num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS))
 
+    # Get max_songs_per_cluster
+    max_songs_per_cluster = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
+
+
     task = run_clustering_task.delay(
         clustering_method, 
         num_clusters_min, num_clusters_max,
         dbscan_eps_min, dbscan_eps_max,
         dbscan_min_samples_min, dbscan_min_samples_max,
         pca_components_min, pca_components_max,
-        num_clustering_runs
+        num_clustering_runs,
+        max_songs_per_cluster # Pass the new parameter
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
@@ -767,7 +776,7 @@ def get_config():
         "jellyfin_token": JELLYFIN_TOKEN,
         "num_recent_albums": NUM_RECENT_ALBUMS,
         "max_distance": MAX_DISTANCE,
-        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER,
+        "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER, # Added this
         "max_songs_per_artist": MAX_SONGS_PER_ARTIST,
         "cluster_algorithm": CLUSTER_ALGORITHM,
         "num_clusters_min": NUM_CLUSTERS_MIN,
