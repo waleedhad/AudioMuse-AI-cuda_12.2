@@ -300,6 +300,7 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, heade
     """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers)
     for base_name, cluster in playlists.items():
+        # MAX_SONGS_PER_CLUSTER is used here to chunk playlists if they exceed Jellyfin's practical limits
         chunks = [cluster[i:i+MAX_SONGS_PER_CLUSTER] for i in range(0, len(cluster), MAX_SONGS_PER_CLUSTER)]
         for idx, chunk in enumerate(chunks, 1):
             playlist_name = f"{base_name}_automatic_{idx}" if len(chunks) > 1 else f"{base_name}_automatic"
@@ -396,12 +397,13 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
         return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
 
 @celery.task(bind=True)
-def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs):
+def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, min_songs_per_playlist, max_songs_per_playlist):
     """
     Celery task to run the clustering and playlist generation process with an
     evolutionary approach for parameter selection.
     Updates task state with progress and log messages.
     Includes weighted diversity score calculation.
+    Now includes min/max songs per playlist for evolutionary search.
     """
     log_messages = []
     def log_and_update(message, progress):
@@ -437,14 +439,19 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             current_dbscan_min_samples = 0
             current_pca_components = 0
             current_pca_enabled = False
+            
+            # Sample playlist song limits
+            # Ensure min_songs_per_playlist_sampled is <= max_songs_per_playlist_sampled
+            min_songs_per_playlist_sampled = random.randint(min_songs_per_playlist, max_songs_per_playlist)
+            max_songs_per_playlist_sampled = random.randint(min_songs_per_playlist_sampled, max_songs_per_playlist)
 
             if clustering_method == "kmeans":
                 # Sample num_clusters within the specified range
                 current_num_clusters = random.randint(num_clusters_min, num_clusters_max)
                 # Ensure num_clusters is not more than available tracks
                 current_num_clusters = min(current_num_clusters, len(rows))
-                if current_num_clusters == 0: # Handle case where min_clusters is 0 or range results in 0
-                     current_num_clusters = max(1, len(rows) // MAX_SONGS_PER_CLUSTER) # Fallback to auto
+                if current_num_clusters == 0: # Fallback if range is bad or no tracks
+                     current_num_clusters = max(1, len(rows) // max_songs_per_playlist_sampled) if max_songs_per_playlist_sampled > 0 else 1
                 
             elif clustering_method == "dbscan":
                 # Sample dbscan_eps within the specified range (float)
@@ -459,7 +466,8 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             log_and_update(f"Running clustering iteration {run_idx + 1}/{num_clustering_runs} with parameters: "
                            f"Method={clustering_method}, K={current_num_clusters}, "
                            f"Eps={current_dbscan_eps}, MinS={current_dbscan_min_samples}, "
-                           f"PCA_Comp={current_pca_components}...", progress_base)
+                           f"PCA_Comp={current_pca_components}, "
+                           f"Playlist_Min={min_songs_per_playlist_sampled}, Playlist_Max={max_songs_per_playlist_sampled}...", progress_base)
             
             pca_model = None
             data_for_clustering = X_scaled
@@ -486,6 +494,13 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                 # Use the sampled current_num_clusters
                 k = current_num_clusters
                 log_and_update(f"  Running KMeans with {k} clusters...", progress_base + 5)
+                # Handle case where k might be 0 or 1, which KMeans doesn't like
+                if k < 2 and len(rows) >= 2: # If k is too small but we have enough data, default to 2
+                    k = 2
+                elif k < 1 and len(rows) < 2: # If not enough data, skip
+                    log_and_update("  Not enough tracks for KMeans clustering with K>=2. Skipping this run.", progress_base + 5)
+                    continue
+
                 kmeans = KMeans(n_clusters=k, random_state=None, n_init='auto')
                 labels = kmeans.fit_predict(data_for_clustering)
                 cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(k)}
@@ -530,6 +545,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             for cluster_id in set(labels):
                 if cluster_id == -1:
                     continue
+                # Filter by MAX_DISTANCE and sort by distance
                 cluster_tracks = [t for t in track_info if t["label"] == cluster_id and t["distance"] <= MAX_DISTANCE]
                 if not cluster_tracks:
                     continue
@@ -542,11 +558,15 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                     if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                         selected.append(t)
                         count_per_artist[author] += 1
-                    if len(selected) >= MAX_SONGS_PER_CLUSTER:
+                    # Apply MAX_SONGS_PER_PLAYLIST (sampled value) as an upper limit for selection
+                    if len(selected) >= max_songs_per_playlist_sampled:
                         break
-                for t in selected:
-                    item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
-                    filtered_clusters[cluster_id].append((item_id, title, author))
+                
+                # After selection, check if the number of songs meets the minimum requirement
+                if len(selected) >= min_songs_per_playlist_sampled:
+                    for t in selected:
+                        item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
+                        filtered_clusters[cluster_id].append((item_id, title, author))
 
             current_named_playlists = defaultdict(list)
             current_playlist_centroids = {}
@@ -589,7 +609,9 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                         "dbscan_eps": current_dbscan_eps,
                         "dbscan_min_samples": current_dbscan_min_samples,
                         "pca_enabled": current_pca_enabled,
-                        "pca_components": current_pca_components
+                        "pca_components": current_pca_components,
+                        "min_songs_per_playlist": min_songs_per_playlist_sampled,
+                        "max_songs_per_playlist": max_songs_per_playlist_sampled
                     }
                 }
                 best_parameters_found = best_clustering_results["parameters"] # Update best parameters found
@@ -650,7 +672,7 @@ def start_analysis():
 def start_clustering():
     """
     Starts the playlist clustering as an asynchronous Celery task.
-    Accepts parameter ranges for evolutionary search.
+    Accepts parameter ranges for evolutionary search, including min/max songs per playlist.
     Records the task ID and type in the database.
     """
     data = request.json
@@ -675,13 +697,18 @@ def start_clustering():
     # Get total clustering runs
     num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS))
 
+    # Get min/max songs per playlist
+    min_songs_per_playlist = int(data.get('min_songs_per_playlist', MIN_SONGS_PER_PLAYLIST))
+    max_songs_per_playlist = int(data.get('max_songs_per_playlist', MAX_SONGS_PER_PLAYLIST))
+
     task = run_clustering_task.delay(
         clustering_method, 
         num_clusters_min, num_clusters_max,
         dbscan_eps_min, dbscan_eps_max,
         dbscan_min_samples_min, dbscan_min_samples_max,
         pca_components_min, pca_components_max,
-        num_clustering_runs
+        num_clustering_runs,
+        min_songs_per_playlist, max_songs_per_playlist # Pass new parameters
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
@@ -781,6 +808,8 @@ def get_config():
         "top_n_moods": TOP_N_MOODS,
         "mood_labels": MOOD_LABELS,
         "clustering_runs": CLUSTERING_RUNS,
+        "min_songs_per_playlist": MIN_SONGS_PER_PLAYLIST, # Added
+        "max_songs_per_playlist": MAX_SONGS_PER_PLAYLIST, # Added
     })
 
 @app.route('/api/playlists', methods=['GET'])
