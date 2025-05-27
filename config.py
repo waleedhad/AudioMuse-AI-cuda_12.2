@@ -9,10 +9,25 @@ JELLYFIN_TOKEN = os.getenv("JELLYFIN_TOKEN", "e0b8c325bc1b426c81922b90c0aa2ff1")
 # Other variables come from the audiomuse-ai-config ConfigMap
 JELLYFIN_URL = os.getenv("JELLYFIN_URL", "http://jellyfin.192.168.3.131.nip.io:8087")
 TEMP_DIR = os.getenv("TEMP_DIR", "/workspace/temp_audio") # Now explicitly using /app/temp_audio as default for emptyDir
-DB_PATH = os.getenv("DB_PATH", "/workspace/db.sqlite") # Default to /app if env var not found (local dev fallback)
-STATUS_DB_PATH = os.getenv("STATUS_DB_PATH", "/workspace/status_db.sqlite") # Ensure status DB path is also from env var
 
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
+
+# --- PostgreSQL Database Constants ---
+# These will be set as environment variables in the Kubernetes deployment
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_NAME = os.getenv("DB_NAME", "audiomuse_db")
+DB_USER = os.getenv("DB_USER", "user")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
+DB_PORT = os.getenv("DB_PORT", "5432")
+
+# Construct the PostgreSQL connection URL
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# Define table names as constants
+STATUS_DB_TABLE_NAME = os.getenv("STATUS_DB_TABLE_NAME", "task_status")
+SCORE_DB_TABLE_NAME = os.getenv("SCORE_DB_TABLE_NAME", "score")
+PLAYLIST_DB_TABLE_NAME = os.getenv("PLAYLIST_DB_TABLE_NAME", "playlist")
+
 
 # --- General Constants (Read from Environment Variables where applicable) ---
 MAX_DISTANCE = 0.5
@@ -73,8 +88,14 @@ print(f"DEBUG: JELLYFIN_USER_ID: {JELLYFIN_USER_ID}")
 print(f"DEBUG: JELLYFIN_URL: {JELLYFIN_URL}")
 print(f"DEBUG: JELLYFIN_TOKEN: {'***hidden***' if JELLYFIN_TOKEN else 'None'}")
 print(f"DEBUG: TEMP_DIR: {TEMP_DIR}")
-print(f"DEBUG: DB_PATH: {DB_PATH}")
-print(f"DEBUG: STATUS_DB_PATH: {STATUS_DB_PATH}")
+print(f"DEBUG: DB_HOST: {DB_HOST}")
+print(f"DEBUG: DB_NAME: {DB_NAME}")
+print(f"DEBUG: DB_USER: {DB_USER}")
+print(f"DEBUG: DB_PORT: {DB_PORT}")
+print(f"DEBUG: DATABASE_URL: {'***hidden***' if DB_PASSWORD else DATABASE_URL}") # Hide password
+print(f"DEBUG: STATUS_DB_TABLE_NAME: {STATUS_DB_TABLE_NAME}")
+print(f"DEBUG: SCORE_DB_TABLE_NAME: {SCORE_DB_TABLE_NAME}")
+print(f"DEBUG: PLAYLIST_DB_TABLE_NAME: {PLAYLIST_DB_TABLE_NAME}")
 print(f"DEBUG: NUM_RECENT_ALBUMS: {NUM_RECENT_ALBUMS}")
 print(f"DEBUG: CLUSTER_ALGORITHM: {CLUSTER_ALGORITHM}")
 print(f"DEBUG: NUM_CLUSTERS_MIN: {NUM_CLUSTERS_MIN}")
