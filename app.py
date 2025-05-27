@@ -1,25 +1,27 @@
 import os
 import shutil
-import sqlite3
+import psycopg2
+from psycopg2 import sql
+from psycopg2.extras import RealDictCursor # For dictionary-like row access
 import requests
 from collections import defaultdict
 import numpy as np
 from flask import Flask, jsonify, request, render_template, g
-from celery import Celery
+from celery import Celery, group, chord
 from celery.result import AsyncResult
 from contextlib import closing
 import json
 import time
-import random # Import random for parameter sampling
+import random
 
 # Import your existing analysis functions
 from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
-from sklearn.mixture import GaussianMixture # Import GaussianMixture
+from sklearn.mixture import GaussianMixture
 
 # Your existing config - assuming this is from config.py and sets global variables
-from config import *
+from config import * # This will now include PostgreSQL connection details
 
 # --- Flask App Setup ---
 app = Flask(__name__)
@@ -29,69 +31,137 @@ app.config['CELERY_RESULT_BACKEND'] = CELERY_RESULT_BACKEND
 
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
 celery.conf.update(app.config)
+celery.conf.task_track_started = True # Important for tracking sub-task states
 
-# --- Status DB Setup ---
-def init_status_db():
+# --- Database Connection Management ---
+def get_db_connection():
     """
-    Initializes the SQLite database for storing task statuses.
-    This table now includes a 'task_type' column to differentiate between
-    analysis and clustering tasks.
+    Establishes a new PostgreSQL database connection.
     """
-    with closing(sqlite3.connect(STATUS_DB_PATH)) as conn:
-        with closing(conn.cursor()) as cur:
-            cur.execute('''CREATE TABLE IF NOT EXISTS task_status (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT UNIQUE,
-                task_type TEXT, -- 'analysis' or 'clustering'
-                status TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )''')
-            conn.commit()
+    if 'db_conn' not in g:
+        try:
+            g.db_conn = psycopg2.connect(DATABASE_URL)
+            g.db_conn.autocommit = False # Manage transactions manually
+        except psycopg2.Error as e:
+            print(f"Database connection failed: {e}")
+            raise
+    return g.db_conn
 
-with app.app_context():
-    init_status_db()
-
-def get_status_db():
+def get_db_cursor(conn):
     """
-    Provides a connection to the status database.
-    Ensures the connection is per-request and closed automatically.
+    Provides a cursor for the database connection, using RealDictCursor for dict-like rows.
     """
-    if 'status_db' not in g:
-        g.status_db = sqlite3.connect(STATUS_DB_PATH)
-        g.status_db.row_factory = sqlite3.Row
-    return g.status_db
+    return conn.cursor(cursor_factory=RealDictCursor)
 
 @app.teardown_appcontext
-def close_status_db(exception):
+def close_db_connection(exception):
     """
     Closes the database connection at the end of the request.
     """
-    status_db = g.pop('status_db', None)
-    if status_db is not None:
-        status_db.close()
+    db_conn = g.pop('db_conn', None)
+    if db_conn is not None:
+        db_conn.close()
+
+# --- DB Initialization Functions ---
+def init_status_db():
+    """
+    Initializes the PostgreSQL database table for storing task statuses.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
+                    id SERIAL PRIMARY KEY,
+                    task_id TEXT UNIQUE NOT NULL,
+                    task_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """).format(sql.Identifier(STATUS_DB_TABLE_NAME)))
+        conn.commit()
+        print(f"Table '{STATUS_DB_TABLE_NAME}' ensured to exist.")
+    except psycopg2.Error as e:
+        print(f"Error initializing status database table: {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+def init_main_db():
+    """
+    Initializes the main application database tables for scores and playlists.
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        with conn.cursor() as cur:
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
+                    item_id TEXT PRIMARY KEY,
+                    title TEXT,
+                    author TEXT,
+                    tempo REAL,
+                    key TEXT,
+                    scale TEXT,
+                    mood_vector TEXT
+                )
+            """).format(sql.Identifier(SCORE_DB_TABLE_NAME)))
+            cur.execute(sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
+                    playlist TEXT,
+                    item_id TEXT,
+                    title TEXT,
+                    author TEXT
+                )
+            """).format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)))
+        conn.commit()
+        print(f"Tables '{SCORE_DB_TABLE_NAME}' and '{PLAYLIST_DB_TABLE_NAME}' ensured to exist.")
+    except psycopg2.Error as e:
+        print(f"Error initializing main database tables: {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+# Ensure DB tables are initialized when the app starts
+with app.app_context():
+    init_status_db()
+    init_main_db()
 
 def save_task_status(task_id, task_type, status="PENDING"):
     """
     Saves or updates the status of a given task in the database.
     Includes the task type.
     """
-    conn = get_status_db()
-    cur = conn.cursor()
-    cur.execute("INSERT OR REPLACE INTO task_status (task_id, task_type, status) VALUES (?, ?, ?)",
-                (task_id, task_type, status))
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("""
+            INSERT INTO {} (task_id, task_type, status)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (task_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                timestamp = CURRENT_TIMESTAMP
+        """).format(sql.Identifier(STATUS_DB_TABLE_NAME)),
+        (task_id, task_type, status))
     conn.commit()
 
 def get_last_task_status():
     """
     Retrieves the status of the most recent task (analysis or clustering).
     """
-    conn = get_status_db()
-    cur = conn.cursor()
-    cur.execute("SELECT task_id, task_type, status FROM task_status ORDER BY timestamp DESC LIMIT 1")
-    row = cur.fetchone()
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("SELECT task_id, task_type, status FROM {} ORDER BY timestamp DESC LIMIT 1").format(sql.Identifier(STATUS_DB_TABLE_NAME)))
+        row = cur.fetchone()
     return dict(row) if row else None
 
-# --- Existing Script Functions (No Global Mutation) ---
+# --- Helper Functions (largely unchanged but adapted for PostgreSQL) ---
 
 def clean_temp(temp_dir):
     """Cleans up the temporary directory."""
@@ -106,19 +176,6 @@ def clean_temp(temp_dir):
         except Exception as e:
             print(f"Warning: Could not remove {file_path} from {temp_dir}: {e}")
 
-def init_db(db_path):
-    """Initializes the main application database for scores and playlists."""
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS score (
-            item_id TEXT PRIMARY KEY, title TEXT, author TEXT,
-            tempo REAL, key TEXT, scale TEXT, mood_vector TEXT
-        )''')
-        cur.execute('''CREATE TABLE IF NOT EXISTS playlist (
-            playlist TEXT, item_id TEXT, title TEXT, author TEXT
-        )''')
-        conn.commit()
-
 def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
     """Fetches recent albums from Jellyfin."""
     url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
@@ -126,7 +183,7 @@ def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
         "IncludeItemTypes": "MusicAlbum",
         "SortBy": "DateCreated",
         "SortOrder": "Descending",
-        "Limit": limit,
+        "Limit": limit if limit > 0 else None, # Handle 0 for all albums
         "Recursive": True,
     }
     try:
@@ -151,7 +208,8 @@ def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
 
 def download_track(jellyfin_url, headers, temp_dir, item):
     """Downloads a track from Jellyfin to a temporary directory."""
-    filename = f"{item['Name'].replace('/', '_')}-{item.get('AlbumArtist', 'Unknown')}.mp3"
+    # Use item ID in filename to ensure uniqueness across different albums/artists
+    filename = f"{item['Id']}_{item['Name'].replace('/', '_')}-{item.get('AlbumArtist', 'Unknown')}.mp3"
     path = os.path.join(temp_dir, filename)
     try:
         r = requests.get(f"{jellyfin_url}/Items/{item['Id']}/Download", headers=headers, timeout=120)
@@ -163,7 +221,7 @@ def download_track(jellyfin_url, headers, temp_dir, item):
         print(f"ERROR: download_track {item['Name']}: {e}")
         return None
 
-def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels, top_n_moods):
+def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods_count):
     """Predicts moods for an audio file using pre-trained models."""
     audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
     embedding_model = TensorflowPredictMusiCNN(
@@ -176,63 +234,68 @@ def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_l
         output="PartitionedCall"
     )
     predictions = model(embeddings)[0]
-    results = dict(zip(mood_labels, predictions))
-    return {label: float(score) for label, score in sorted(results.items(), key=lambda x: -x[1])[:top_n_moods]}
+    results = dict(zip(mood_labels_list, predictions))
+    return {label: float(score) for label, score in sorted(results.items(), key=lambda x: -x[1])[:top_n_moods_count]}
 
-def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels, top_n_moods):
+def analyze_track_audio(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods_count):
     """Analyzes a single track for tempo, key, scale, and moods."""
     audio = MonoLoader(filename=file_path)()
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(file_path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, TOP_N_MOODS) # Use global paths and top_n_moods
+    moods = predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods_count)
     return tempo, key, scale, moods
 
-def track_exists(db_path, item_id):
+def track_exists_in_db(item_id):
     """Checks if a track's analysis already exists in the database."""
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM score WHERE item_id=?", (item_id,))
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("SELECT * FROM {} WHERE item_id = %s").format(sql.Identifier(SCORE_DB_TABLE_NAME)), (item_id,))
         row = cur.fetchone()
     return row
 
-def save_track_analysis(db_path, item_id, title, author, tempo, key, scale, moods):
+def save_track_analysis_to_db(item_id, title, author, tempo, key, scale, moods):
     """Saves the analysis results for a track to the database."""
-    mood_str = ','.join(f"{k}:{v:.3f}" for k, v in moods.items())
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute("INSERT OR IGNORE INTO score VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (item_id, title, author, tempo, key, scale, mood_str))
-        conn.commit()
+    mood_str = json.dumps(moods) # Store moods as JSON string
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("""
+            INSERT INTO {} (item_id, title, author, tempo, key, scale, mood_vector)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (item_id) DO NOTHING; -- Only insert if not exists
+        """).format(sql.Identifier(SCORE_DB_TABLE_NAME)),
+        (item_id, title, author, tempo, key, scale, mood_str))
+    conn.commit()
 
-def score_vector(row, mood_labels):
+def score_vector(row, mood_labels_list):
     """Converts a database row into a numerical feature vector for clustering."""
-    tempo = float(row[3]) if row[3] is not None else 0.0
-    mood_str = row[6] or ""
+    tempo = float(row['tempo']) if row['tempo'] is not None else 0.0
+    mood_str = row['mood_vector'] or "{}" # Ensure it's a valid JSON string or empty dict
+    
+    # Parse mood_vector from JSON string
+    try:
+        moods_dict = json.loads(mood_str)
+    except json.JSONDecodeError:
+        moods_dict = {} # Fallback to empty dict if parsing fails
+
     tempo_norm = (tempo - 40) / (200 - 40)
     tempo_norm = np.clip(tempo_norm, 0.0, 1.0)
-    mood_scores = np.zeros(len(mood_labels))
-    if mood_str:
-        for pair in mood_str.split(","):
-            if ":" not in pair:
-                continue
-            label, score = pair.split(":")
-            if label in mood_labels:
-                try:
-                    mood_scores[mood_labels.index(label)] = float(score)
-                except ValueError:
-                    continue
+    mood_scores = np.zeros(len(mood_labels_list))
+    if moods_dict:
+        for label, score in moods_dict.items():
+            if label in mood_labels_list:
+                mood_scores[mood_labels_list.index(label)] = float(score)
     full_vector = [tempo_norm] + list(mood_scores)
     return full_vector
 
-def get_all_tracks(db_path):
+def get_all_tracks_from_db():
     """Retrieves all analyzed tracks from the database."""
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM score")
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("SELECT item_id, title, author, tempo, key, scale, mood_vector FROM {}").format(sql.Identifier(SCORE_DB_TABLE_NAME)))
         rows = cur.fetchall()
     return rows
 
-def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
+def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_list):
     """
     Generates a human-readable name for a cluster based on its centroid's
     tempo and predominant moods. Also returns top mood scores for diversity calculation.
@@ -262,26 +325,27 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels):
     else:
         top_indices = np.argsort(mood_values)[::-1][:3] # Get top 3 moods
 
-    mood_names = [mood_labels[i] for i in top_indices if i < len(mood_labels)]
+    mood_names = [mood_labels_list[i] for i in top_indices if i < len(mood_labels_list)]
     mood_part = "_".join(mood_names).title() if mood_names else "Mixed"
     full_name = f"{mood_part}_{tempo_label}"
     
-    top_mood_scores = {mood_labels[i]: mood_values[i] for i in top_indices if i < len(mood_labels)}
+    top_mood_scores = {mood_labels_list[i]: mood_values[i] for i in top_indices if i < len(mood_labels_list)}
     extra_info = {"tempo": round(tempo_norm, 2)}
     
     return full_name, {**top_mood_scores, **extra_info}
 
-def update_playlist_table(db_path, playlists):
+def update_playlist_table_in_db(playlists):
     """Updates the playlist table in the database with new playlist data."""
-    with sqlite3.connect(db_path) as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM playlist") # Clear existing playlists
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("DELETE FROM {}").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME))) # Clear existing playlists
         for name, cluster in playlists.items():
             for item_id, title, author in cluster:
-                cur.execute("INSERT INTO playlist VALUES (?, ?, ?, ?)", (name, item_id, title, author))
-        conn.commit()
+                cur.execute(sql.SQL("INSERT INTO {} (playlist, item_id, title, author) VALUES (%s, %s, %s, %s)").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)),
+                            (name, item_id, title, author))
+    conn.commit()
 
-def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
+def delete_old_automatic_playlists_from_jellyfin(jellyfin_url, jellyfin_user_id, headers):
     """Deletes old automatically generated playlists from Jellyfin."""
     url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
     params = {"IncludeItemTypes": "Playlist", "Recursive": True}
@@ -297,360 +361,541 @@ def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
     except Exception as e:
         print(f"Failed to clean old playlists: {e}")
 
-def create_or_update_playlists_on_jellyfin(jellyfin_url, jellyfin_user_id, headers, playlists, cluster_centers, mood_labels, max_songs_per_cluster):
+def create_or_update_playlists_on_jellyfin(jellyfin_url_val, jellyfin_user_id_val, headers_val, playlists_val, cluster_centers_val, mood_labels_list, max_songs_val):
     """Creates or updates playlists on Jellyfin based on clustering results."""
-    delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers)
-    for base_name, cluster in playlists.items():
-        # Use the passed max_songs_per_cluster here
-        chunks = [cluster[i:i+max_songs_per_cluster] for i in range(0, len(cluster), max_songs_per_cluster)]
+    delete_old_automatic_playlists_from_jellyfin(jellyfin_url_val, jellyfin_user_id_val, headers_val)
+    for base_name, cluster in playlists_val.items():
+        # Use the passed max_songs_val here
+        chunks = [cluster[i:i+max_songs_val] for i in range(0, len(cluster), max_songs_val)]
         for idx, chunk in enumerate(chunks, 1):
             playlist_name = f"{base_name}_automatic_{idx}" if len(chunks) > 1 else f"{base_name}_automatic"
             item_ids = [item_id for item_id, _, _ in chunk]
             if not item_ids:
                 continue
-            body = {"Name": playlist_name, "Ids": item_ids, "UserId": jellyfin_user_id}
+            body = {"Name": playlist_name, "Ids": item_ids, "UserId": jellyfin_user_id_val}
             try:
-                r = requests.post(f"{jellyfin_url}/Playlists", headers=headers, json=body, timeout=30)
+                r = requests.post(f"{jellyfin_url_val}/Playlists", headers=headers_val, json=body, timeout=30)
                 if r.ok:
-                    centroid_info = cluster_centers.get(base_name, {})
-                    top_moods = {k: v for k, v in centroid_info.items() if k in mood_labels}
-                    extra_info = {k: v for k, v in centroid_info.items() if k not in mood_labels}
+                    centroid_info = cluster_centers_val.get(base_name, {})
+                    top_moods = {k: v for k, v in centroid_info.items() if k in mood_labels_list}
+                    extra_info = {k: v for k, v in centroid_info.items() if k not in mood_labels_list}
                     centroid_str = ", ".join(f"{k}:{v:.2f}" for k, v in top_moods.items())
                     extras_str = ", ".join(f"{k}:{v:.2f}" for k, v in extra_info.items())
                     print(f"✅ Created playlist {playlist_name} with {len(item_ids)} tracks (Centroid: {centroid_str} | {extras_str})")
             except Exception as e:
                 print(f"Exception creating {playlist_name}: {e}")
 
-# --- Celery Task Definitions ---
+# --- Individual Celery Tasks ---
+
+@celery.task
+def analyze_album_task(album_details, jellyfin_url_val, jellyfin_user_id_val, jellyfin_token_val, top_n_moods_val, temp_dir_base, embedding_path, prediction_path, mood_labels_list_val):
+    """
+    Celery task to analyze all tracks in a single album.
+    It creates a unique temporary directory for its downloads and cleans it up.
+    Returns a tuple: (album_name, number_of_tracks_analyzed, number_of_tracks_failed, list_of_errors)
+    """
+    album_id = album_details['Id']
+    album_name = album_details['Name']
+    headers = {"X-Emby-Token": jellyfin_token_val}
+    
+    # Create a unique temp directory for this task to avoid conflicts with other parallel tasks
+    # Use a combination of album ID and a random number for high uniqueness
+    task_temp_dir = os.path.join(temp_dir_base, f"album_{album_id}_{random.randint(1000,9999)}")
+    os.makedirs(task_temp_dir, exist_ok=True)
+
+    tracks_analyzed_count = 0 # Tracks that were either analyzed or skipped because they already exist
+    tracks_failed_count = 0
+    error_messages = []
+    
+    print(f"🎵 Processing Album: {album_name}")
+    tracks = get_tracks_from_album(jellyfin_url_val, jellyfin_user_id_val, headers, album_id)
+    if not tracks:
+        print(f"   ⚠️ No tracks found for album: {album_name}")
+        shutil.rmtree(task_temp_dir) # Clean up temp dir
+        return (album_name, 0, 0, ["No tracks found"])
+
+    for item in tracks:
+        track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
+        print(f"   🎶 Analyzing track: {track_name_full}")
+        if track_exists_in_db(item['Id']): # No longer passing db_path
+            print(f"     ⏭️ Skipping '{track_name_full}' (already analyzed)")
+            tracks_analyzed_count +=1 # Count as analyzed if it already exists
+            continue
+        
+        path = download_track(jellyfin_url_val, headers, task_temp_dir, item)
+        if not path:
+            print(f"     ❌ Failed to download '{track_name_full}'. Skipping.")
+            tracks_failed_count += 1
+            error_messages.append(f"Download failed for {track_name_full}")
+            continue
+        try:
+            analysis_start_time = time.time()
+            tempo, key, scale, moods = analyze_track_audio(path, embedding_path, prediction_path, mood_labels_list_val, top_n_moods_val)
+            analysis_duration = time.time() - analysis_start_time
+            save_track_analysis_to_db(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods) # No longer passing db_path
+            print(f"     ✅ Analyzed '{track_name_full}' in {analysis_duration:.2f}s. Moods: {', '.join(f'{k}:{v:.2f}' for k,v in moods.items())}")
+            tracks_analyzed_count += 1
+        except Exception as e:
+            print(f"     ❌ Error analyzing '{track_name_full}': {e}")
+            tracks_failed_count += 1
+            error_messages.append(f"Analysis error for {track_name_full}: {str(e)}")
+        finally:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as cleanup_e:
+                    print(f"WARNING: Failed to clean up temp file {path}: {cleanup_e}")
+    
+    # Ensure the unique temporary directory for this album is removed
+    shutil.rmtree(task_temp_dir) 
+    return (album_name, tracks_analyzed_count, tracks_failed_count, error_messages)
+
+@celery.task
+def run_single_clustering_iteration_task(run_idx, X_scaled_data, rows_data, mood_labels_list,
+                                         clustering_method_val, num_clusters_min_val, num_clusters_max_val,
+                                         dbscan_eps_min_val, dbscan_eps_max_val,
+                                         dbscan_min_samples_min_val, dbscan_min_samples_max_val,
+                                         gmm_n_components_min_val, gmm_n_components_max_val,
+                                         pca_components_min_val, pca_components_max_val,
+                                         max_songs_per_cluster_val, current_max_songs_per_artist):
+    """
+    Performs a single clustering iteration with randomly sampled parameters.
+    This task is designed to be run in parallel by multiple Celery workers.
+    Returns a dictionary with the diversity score, parameters used, and clustering results.
+    """
+    current_num_clusters = 0
+    current_dbscan_eps = 0.0
+    current_dbscan_min_samples = 0
+    current_gmm_n_components = 0
+    
+    # Sample PCA components for this run
+    current_pca_components = random.randint(pca_components_min_val, pca_components_max_val)
+    current_pca_enabled = (current_pca_components > 0)
+    
+    params_used = {
+        "clustering_method": clustering_method_val,
+        "pca_components": current_pca_components,
+        "pca_enabled": current_pca_enabled,
+        "max_songs_per_cluster": max_songs_per_cluster_val,
+        "run_index": run_idx
+    }
+
+    # Sample clustering-specific parameters
+    if clustering_method_val == "kmeans":
+        current_num_clusters = random.randint(num_clusters_min_val, num_clusters_max_val)
+        # Ensure num_clusters is not more than available tracks
+        current_num_clusters = min(current_num_clusters, len(rows_data))
+        if current_num_clusters == 0: # Handle case where min_clusters is 0 or range results in 0
+             current_num_clusters = max(1, len(rows_data) // max_songs_per_cluster_val if max_songs_per_cluster_val > 0 else 1) # Fallback to auto
+        params_used["num_clusters"] = current_num_clusters
+    elif clustering_method_val == "dbscan":
+        current_dbscan_eps = round(random.uniform(dbscan_eps_min_val, dbscan_eps_max_val), 2)
+        current_dbscan_min_samples = random.randint(dbscan_min_samples_min_val, dbscan_min_samples_max_val)
+        params_used["dbscan_eps"] = current_dbscan_eps
+        params_used["dbscan_min_samples"] = current_dbscan_min_samples
+    elif clustering_method_val == "gmm":
+        current_gmm_n_components = random.randint(gmm_n_components_min_val, gmm_n_components_max_val)
+        current_gmm_n_components = min(current_gmm_n_components, len(rows_data))
+        if current_gmm_n_components == 0:
+            current_gmm_n_components = max(1, len(rows_data) // max_songs_per_cluster_val if max_songs_per_cluster_val > 0 else 1)
+        params_used["gmm_n_components"] = current_gmm_n_components
+    
+    print(f"Cluster Run {run_idx}: Params: {params_used}")
+
+    pca_model_instance = None
+    data_for_clustering_run = np.array(X_scaled_data) # Convert list back to numpy array
+
+    if current_pca_enabled:
+        # Ensure PCA components don't exceed the number of features or samples
+        n_components_actual = min(current_pca_components, data_for_clustering_run.shape[1], len(rows_data) - 1)
+        if n_components_actual > 0:
+            pca_model_instance = PCA(n_components=n_components_actual)
+            X_pca = pca_model_instance.fit_transform(data_for_clustering_run)
+            data_for_clustering_run = X_pca
+        else:
+            # If PCA cannot be applied (e.g., n_components_actual is 0), effectively disable it for this run
+            current_pca_enabled = False
+            params_used["pca_enabled"] = False # Update params if PCA was disabled
+
+    labels = None
+    cluster_centers_map = {}
+    raw_distances_arr = np.zeros(len(data_for_clustering_run))
+
+    try:
+        if clustering_method_val == "kmeans":
+            kmeans = KMeans(n_clusters=current_num_clusters, random_state=None, n_init='auto')
+            labels = kmeans.fit_predict(data_for_clustering_run)
+            cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(current_num_clusters)}
+            centers_for_points = kmeans.cluster_centers_[labels]
+            raw_distances_arr = np.linalg.norm(data_for_clustering_run - centers_for_points, axis=1)
+        elif clustering_method_val == "dbscan":
+            dbscan = DBSCAN(eps=current_dbscan_eps, min_samples=current_dbscan_min_samples)
+            labels = dbscan.fit_predict(data_for_clustering_run)
+            
+            for cluster_id_val in set(labels):
+                if cluster_id_val == -1: # Noise points
+                    continue
+                indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id_val]
+                cluster_points = np.array([data_for_clustering_run[i] for i in indices])
+                if len(cluster_points) > 0:
+                    center = cluster_points.mean(axis=0)
+                    for i in indices:
+                        raw_distances_arr[i] = np.linalg.norm(data_for_clustering_run[i] - center)
+                    cluster_centers_map[cluster_id_val] = center
+        elif clustering_method_val == "gmm":
+            gmm = GaussianMixture(n_components=current_gmm_n_components, covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=200) # Reduced max_iter for speed
+            gmm.fit(data_for_clustering_run)
+            labels = gmm.predict(data_for_clustering_run)
+            
+            for i in range(current_gmm_n_components):
+                cluster_centers_map[i] = gmm.means_[i]
+            
+            # Calculate distances to assigned component means
+            centers_for_points = gmm.means_[labels]
+            raw_distances_arr = np.linalg.norm(data_for_clustering_run - centers_for_points, axis=1)
+
+        else:
+            # Return an error dictionary if clustering method is unsupported
+            return {'score': -1.0, 'params': params_used, 'playlists': {}, 'centroids': {}, 'pca_model_components': None, 'pca_model_mean': None, 'error': 'Unsupported clustering method'}
+
+        # Handle cases where clustering might result in no valid labels (e.g., all noise in DBSCAN)
+        if labels is None or len(set(labels) - {-1}) == 0: # No clusters found (excluding noise)
+             return {'score': -1.0, 'params': params_used, 'playlists': {}, 'centroids': {}, 'pca_model_components': None, 'pca_model_mean': None, 'error': 'No valid clusters generated for this parameter set.'}
+    except Exception as e:
+        print(f"Error during clustering iteration {run_idx} with params {params_used}: {e}")
+        return {'score': -1.0, 'params': params_used, 'playlists': {}, 'centroids': {}, 'pca_model_components': None, 'pca_model_mean': None, 'error': str(e)}
+
+
+    max_dist_val = raw_distances_arr.max()
+    normalized_distances = raw_distances_arr / max_dist_val if max_dist_val > 0 else raw_distances_arr
+    
+    track_info_list = []
+    # Reconstruct track info from original rows_data and current clustering results
+    for row_item, label_item, vec_item, dist_item in zip(rows_data, labels, data_for_clustering_run, normalized_distances):
+        if label_item == -1: # Skip noise points from DBSCAN
+            continue
+        track_info_list.append({"row": row_item, "label": label_item, "vector": vec_item, "distance": dist_item})
+
+    filtered_clusters_map = defaultdict(list)
+    for cluster_id_val in set(labels):
+        if cluster_id_val == -1:
+            continue
+        cluster_tracks_list = [t for t in track_info_list if t["label"] == cluster_id_val and t["distance"] <= MAX_DISTANCE]
+        if not cluster_tracks_list:
+            continue
+        cluster_tracks_list.sort(key=lambda x: x["distance"])
+        
+        count_per_artist = defaultdict(int)
+        selected_tracks = []
+        for t in cluster_tracks_list:
+            author = t["row"]["author"] # Access by key from RealDictRow
+            if count_per_artist[author] < current_max_songs_per_artist:
+                selected_tracks.append(t)
+                count_per_artist[author] += 1
+            # Use the passed max_songs_per_cluster_val here
+            if len(selected_tracks) >= max_songs_per_cluster_val:
+                break
+        for t in selected_tracks:
+            item_id = t["row"]["item_id"] # Access by key from RealDictRow
+            title = t["row"]["title"]
+            author = t["row"]["author"]
+            filtered_clusters_map[cluster_id_val].append((item_id, title, author))
+
+    current_named_playlists_map = defaultdict(list)
+    current_playlist_centroids_map = {}
+    
+    unique_predominant_mood_scores_map = {} # Dictionary to store the max score for each unique mood found
+
+    # Name clusters and calculate diversity score
+    for label_item, songs_list in filtered_clusters_map.items():
+        if songs_list:
+            center = cluster_centers_map.get(label_item) # Use .get() in case a cluster_id from labels isn't in cluster_centers (e.g., if it was noise)
+            if center is None:
+                continue # Skip if no centroid found for this label
+
+            # Reconstruct a dummy PCA model if PCA was enabled for this run to use in name_cluster
+            temp_pca_model = None
+            if current_pca_enabled and pca_model_instance:
+                temp_pca_model = PCA(n_components=pca_model_instance.n_components_)
+                temp_pca_model.components_ = pca_model_instance.components_
+                temp_pca_model.mean_ = pca_model_instance.mean_
+                # If you need to set explained_variance_, etc., you'd need to pass them too.
+                # For just inverse_transform, components_ and mean_ are typically sufficient.
+
+            name, top_scores = name_cluster(center, temp_pca_model, current_pca_enabled, mood_labels_list)
+            
+            if top_scores and any(mood in mood_labels_list for mood in top_scores.keys()):
+                predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in mood_labels_list else -1)
+                if predominant_mood_key in mood_labels_list:
+                    current_mood_score = top_scores.get(predominant_mood_key, 0.0)
+                    unique_predominant_mood_scores_map[predominant_mood_key] = max(
+                        unique_predominant_mood_scores_map.get(predominant_mood_key, 0.0),
+                        current_mood_score
+                    )
+
+            current_named_playlists_map[name].extend(songs_list)
+            current_playlist_centroids_map[name] = top_scores
+    
+    diversity_score_val = sum(unique_predominant_mood_scores_map.values())
+    
+    # Serialize PCA model components and mean for return (if PCA was used)
+    pca_components_data = pca_model_instance.components_.tolist() if pca_model_instance and hasattr(pca_model_instance, 'components_') else None
+    pca_mean_data = pca_model_instance.mean_.tolist() if pca_model_instance and hasattr(pca_model_instance, 'mean_') else None
+
+    return {
+        'score': float(diversity_score_val), 
+        'params': params_used,
+        'playlists': dict(current_named_playlists_map), # Convert defaultdict to dict for serialization
+        'centroids': current_playlist_centroids_map,
+        'pca_model_components': pca_components_data,
+        'pca_model_mean': pca_mean_data
+    }
+
+# --- Main Celery Tasks (Coordinators) ---
 
 @celery.task(bind=True)
-def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods):
+def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums_val, top_n_moods_val):
     """
-    Celery task to run the music analysis process.
-    Updates task state with progress and log messages.
+    Main Celery task to coordinate the analysis of multiple albums in parallel.
+    It dispatches individual `analyze_album_task` for each album.
     """
+    task_id = self.request.id
+    save_task_status(task_id, "analysis", "STARTED")
+    log_messages = ["🚀 Starting mood-based analysis orchestration..."]
+    self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Fetching album list...', 'log_output': log_messages, 'processed_albums': 0, 'total_albums': 0, 'task_type': 'analysis'})
+    
     headers = {"X-Emby-Token": jellyfin_token}
-    log_messages = []
-    def log_and_update(message, progress, current_album=None, current_album_idx=0, total_albums=0):
-        log_messages.append(message)
-        self.update_state(state='PROGRESS', meta={
-            'progress': progress,
-            'status': message,
-            'log_output': log_messages,
-            'current_album': current_album,
-            'current_album_idx': current_album_idx,
-            'total_albums': total_albums
-        })
+    
     try:
-        log_and_update("🚀 Starting mood-based analysis and playlist generation...", 0)
-        clean_temp(TEMP_DIR)
-        init_db(DB_PATH) # Ensure DB is initialized before analysis
-        albums = get_recent_albums(jellyfin_url, jellyfin_user_id, headers, num_recent_albums)
+        clean_temp(TEMP_DIR) # Clean up the main temp directory once before starting
+        # init_main_db() # DB initialization is now handled at app startup
+        albums = get_recent_albums(jellyfin_url, jellyfin_user_id, headers, num_recent_albums_val)
+        
         if not albums:
-            log_and_update("⚠️ No new albums to analyze. Proceeding with existing data.", 10)
-        else:
-            total_albums = len(albums)
-            analysis_start_progress = 5
-            analysis_end_progress = 85
-            for idx, album in enumerate(albums, 1):
-                album_progress_base = analysis_start_progress + int((analysis_end_progress - analysis_start_progress) * ((idx - 1) / total_albums))
-                log_and_update(f"🎵 Processing Album: {album['Name']} ({idx}/{total_albums})", album_progress_base, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album['Id'])
-                if not tracks:
-                    log_and_update(f"   ⚠️ No tracks found for album: {album['Name']}", album_progress_base, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                    continue
-                total_tracks_in_album = len(tracks)
-                for track_idx, item in enumerate(tracks, 1):
-                    track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
-                    track_progress_within_album = int((analysis_end_progress - analysis_start_progress) * (1 / total_albums) * (track_idx / total_tracks_in_album))
-                    current_overall_progress = album_progress_base + track_progress_within_album
-                    log_and_update(f"   🎶 Analyzing track: {track_name_full} ({track_idx}/{total_tracks_in_album})", current_overall_progress, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                    if track_exists(DB_PATH, item['Id']):
-                        log_and_update(f"     ⏭️ Skipping '{track_name_full}' (already analyzed)", current_overall_progress, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                        continue
-                    path = download_track(jellyfin_url, headers, TEMP_DIR, item)
-                    if not path:
-                        log_and_update(f"     ❌ Failed to download '{track_name_full}'. Skipping.", current_overall_progress, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                        continue
-                    try:
-                        analysis_start_time = time.time()
-                        tempo, key, scale, moods = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, top_n_moods)
-                        analysis_duration = time.time() - analysis_start_time
-                        save_track_analysis(DB_PATH, item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
-                        log_and_update(f"     ✅ Analyzed '{track_name_full}' in {analysis_duration:.2f}s. Moods: {', '.join(f'{k}:{v:.2f}' for k,v in moods.items())}", current_overall_progress, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                    except Exception as e:
-                        log_and_update(f"     ❌ Error analyzing '{track_name_full}': {e}", current_overall_progress, current_album=album['Name'], current_album_idx=idx, total_albums=total_albums)
-                    finally:
-                        if path and os.path.exists(path):
-                            try:
-                                os.remove(path)
-                            except Exception as cleanup_e:
-                                print(f"WARNING: Failed to clean up temp file {path}: {cleanup_e}")
-            clean_temp(TEMP_DIR)
-        log_and_update("Analysis phase complete.", 90)
-        return {"status": "SUCCESS", "message": "Analysis and playlist generation complete!"}
+            log_messages.append("⚠️ No new albums to analyze. Analysis complete.")
+            self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'No new albums to analyze.', 'log_output': log_messages, 'processed_albums': 0, 'total_albums': 0, 'task_type': 'analysis'})
+            save_task_status(task_id, "analysis", "SUCCESS")
+            return {"status": "SUCCESS", "message": "No new albums to analyze."}
+
+        total_albums_count = len(albums)
+        log_messages.append(f"Found {total_albums_count} albums to process.")
+        self.update_state(state='PROGRESS', meta={'progress': 5, 'status': f'Dispatching {total_albums_count} album analysis tasks...', 'log_output': log_messages, 'processed_albums': 0, 'total_albums': total_albums_count, 'task_type': 'analysis'})
+
+        # Create a group of sub-tasks, one for each album
+        analysis_subtasks = [
+            analyze_album_task.s(
+                album, jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods_val,
+                TEMP_DIR, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS
+            ) for album in albums
+        ]
+        group_task = group(analysis_subtasks)
+        group_result = group_task.apply_async()
+        
+        # Monitor group progress
+        processed_count = 0
+        while not group_result.ready():
+            completed_count = group_result.completed_count()
+            if completed_count > processed_count : # Update only if there's a change
+                processed_count = completed_count
+                # Progress from 5% to 95% for album processing
+                progress = 5 + int(90 * (processed_count / total_albums_count))
+                log_messages.append(f"Processed {processed_count}/{total_albums_count} albums...")
+                # Keep log_messages from growing too large in meta for frequent updates
+                short_log = log_messages[-5:] if len(log_messages) > 5 else log_messages
+                self.update_state(state='PROGRESS', meta={
+                    'progress': progress, 
+                    'status': f'Analyzing albums: {processed_count}/{total_albums_count} complete.',
+                    'log_output': short_log + [f"...See Celery worker logs for full details of task {task_id}..." ],
+                    'processed_albums': processed_count, 
+                    'total_albums': total_albums_count,
+                    'task_type': 'analysis'
+                })
+            time.sleep(5) # Poll every 5 seconds
+
+        all_results = group_result.get(timeout=300) # Wait for all results with a timeout
+        
+        final_analyzed_count = 0
+        final_failed_count = 0
+        aggregated_errors = []
+        for res_tuple in all_results:
+            if isinstance(res_tuple, tuple) and len(res_tuple) == 4:
+                album_n, analyzed_c, failed_c, errors_list = res_tuple
+                final_analyzed_count += analyzed_c
+                final_failed_count += failed_c
+                if errors_list:
+                    aggregated_errors.extend(f"Album '{album_n}': {e}" for e in errors_list)
+            else: # Handle unexpected result format from subtask (e.g., if subtask failed before returning tuple)
+                final_failed_count +=1 # Assume one album failed to report properly
+                aggregated_errors.append(f"Unknown album processing issue for one task: {str(res_tuple)}")
+
+
+        log_messages.append(f"Analysis complete. Total tracks analyzed (incl. skips): {final_analyzed_count}. Total tracks failed: {final_failed_count}.")
+        if aggregated_errors:
+            log_messages.append("Summary of errors during analysis:")
+            log_messages.extend(aggregated_errors[:10]) # Log first 10 errors
+            if len(aggregated_errors) > 10:
+                log_messages.append(f"...and {len(aggregated_errors) - 10} more errors. Check worker logs.")
+        
+        final_status_message = f"Analysis complete. Processed {total_albums_count} albums."
+        if final_failed_count > 0 :
+            final_status_message += f" Encountered {final_failed_count} track processing failures."
+
+        self.update_state(state='SUCCESS', meta={
+            'progress': 100, 
+            'status': final_status_message,
+            'log_output': log_messages[-10:], # Send last 10 log messages
+            'processed_albums': total_albums_count, 
+            'total_albums': total_albums_count,
+            'task_type': 'analysis'
+        })
+        save_task_status(task_id, "analysis", "SUCCESS")
+        return {"status": "SUCCESS", "message": final_status_message, "details": {"analyzed": final_analyzed_count, "failed": final_failed_count, "errors": aggregated_errors}}
+
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        print(f"FATAL ERROR: Analysis failed: {e}\n{error_traceback}")
-        log_and_update(f"❌ Analysis failed: {e}", 100)
-        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Analysis failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"]})
-        return {"status": "FAILURE", "message": f"Analysis failed: {e}"}
+        log_messages.append(f"❌ Analysis orchestration failed: {e}")
+        self.update_state(state='FAILURE', meta={
+            'progress': 100, 
+            'status': f'Analysis orchestration failed: {e}', 
+            'log_output': log_messages + [f"Error Traceback: {error_traceback}"],
+            'task_type': 'analysis'
+            })
+        save_task_status(task_id, "analysis", "FAILURE")
+        return {"status": "FAILURE", "message": f"Analysis orchestration failed: {e}"}
+
 
 @celery.task(bind=True)
-def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, gmm_n_components_min, gmm_n_components_max):
+def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max,
+                        dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max,
+                        gmm_n_components_min, gmm_n_components_max,
+                        pca_components_min, pca_components_max,
+                        num_clustering_runs, max_songs_per_cluster, current_max_songs_per_artist=MAX_SONGS_PER_ARTIST):
     """
-    Celery task to run the clustering and playlist generation process with an
-    evolutionary approach for parameter selection.
-    Updates task state with progress and log messages.
-    Includes weighted diversity score calculation.
+    Main Celery task to coordinate multiple clustering iterations in parallel.
+    It dispatches individual `run_single_clustering_iteration_task` for each run.
     """
-    log_messages = []
-    def log_and_update(message, progress):
-        log_messages.append(message)
-        self.update_state(state='PROGRESS', meta={
-            'progress': progress,
-            'status': message,
-            'log_output': log_messages,
-        })
+    task_id = self.request.id
+    save_task_status(task_id, "clustering", "STARTED")
+    log_messages = ["📊 Starting playlist clustering orchestration with parallel iterations..."]
+    self.update_state(state='STARTED', meta={'progress': 0, 'status': 'Preparing for clustering...', 'log_output': log_messages, 'iterations_done': 0, 'total_iterations': num_clustering_runs, 'task_type': 'clustering'})
+
     try:
-        log_and_update("📊 Starting playlist clustering with evolutionary parameter search...", 0)
-        rows = get_all_tracks(DB_PATH)
-        if len(rows) < 2:
-            log_and_update("Not enough analyzed tracks for clustering. Please run analysis first.", 100)
-            self.update_state(state='FAILURE', meta={'progress': 100, 'status': 'Not enough tracks for clustering', 'log_output': log_messages})
+        rows = get_all_tracks_from_db() # No longer passing db_path
+        if len(rows) < 2: # Need at least 2 tracks to form a cluster or run PCA
+            log_messages.append("Not enough analyzed tracks for clustering. Please run analysis first.")
+            self.update_state(state='FAILURE', meta={'progress': 100, 'status': 'Not enough tracks', 'log_output': log_messages, 'task_type': 'clustering'})
+            save_task_status(task_id, "clustering", "FAILURE")
             return {"status": "FAILURE", "message": "Not enough analyzed tracks for clustering."}
-        
-        log_and_update(f"Fetched {len(rows)} tracks for clustering.", 5)
-        
+
+        log_messages.append(f"Fetched {len(rows)} tracks for clustering.")
         X_original = [score_vector(row, MOOD_LABELS) for row in rows]
-        X_scaled = np.array(X_original)
+        X_scaled_np = np.array(X_original)
+        
+        # Convert numpy array to list for Celery task argument compatibility
+        X_scaled_list = X_scaled_np.tolist() 
 
-        best_diversity_score = -1.0 # Initialize with a float for comparison
-        best_clustering_results = None
-        best_parameters_found = {} # To store the parameters that yielded the best score
+        self.update_state(state='PROGRESS', meta={'progress': 5, 'status': f'Dispatching {num_clustering_runs} clustering iterations...', 'log_output': log_messages, 'iterations_done': 0, 'total_iterations': num_clustering_runs, 'task_type': 'clustering'})
 
-        for run_idx in range(num_clustering_runs):
-            progress_base = 10 + int(80 * (run_idx / num_clustering_runs)) # 10% to 90% for clustering runs
-            
-            # --- Parameter Sampling for each run (Evolutionary Approach) ---
-            current_num_clusters = 0
-            current_dbscan_eps = 0.0
-            current_dbscan_min_samples = 0
-            current_gmm_n_components = 0 # New GMM parameter
-            current_pca_components = 0
-            current_pca_enabled = False
+        # Create a group of sub-tasks, one for each clustering run
+        iteration_subtasks = [
+            run_single_clustering_iteration_task.s(
+                i, X_scaled_list, rows, MOOD_LABELS, # Pass MOOD_LABELS directly
+                clustering_method, num_clusters_min, num_clusters_max,
+                dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max,
+                gmm_n_components_min, gmm_n_components_max,
+                pca_components_min, pca_components_max,
+                max_songs_per_cluster, current_max_songs_per_artist
+            ) for i in range(num_clustering_runs)
+        ]
+        
+        group_task = group(iteration_subtasks)
+        group_result = group_task.apply_async()
 
-            if clustering_method == "kmeans":
-                # Sample num_clusters within the specified range
-                current_num_clusters = random.randint(num_clusters_min, num_clusters_max)
-                # Ensure num_clusters is not more than available tracks
-                current_num_clusters = min(current_num_clusters, len(rows))
-                if current_num_clusters == 0: # Handle case where min_clusters is 0 or range results in 0
-                     current_num_clusters = max(1, len(rows) // max_songs_per_cluster) # Fallback to auto
-                
-            elif clustering_method == "dbscan":
-                # Sample dbscan_eps within the specified range (float)
-                current_dbscan_eps = round(random.uniform(dbscan_eps_min, dbscan_eps_max), 2)
-                # Sample dbscan_min_samples within the specified range (integer)
-                current_dbscan_min_samples = random.randint(dbscan_min_samples_min, dbscan_min_samples_max)
-            
-            elif clustering_method == "gmm": # New GMM parameter sampling
-                current_gmm_n_components = random.randint(gmm_n_components_min, gmm_n_components_max)
-                current_gmm_n_components = min(current_gmm_n_components, len(rows))
-                if current_gmm_n_components == 0:
-                    current_gmm_n_components = max(1, len(rows) // max_songs_per_cluster)
+        iterations_completed_count = 0
+        while not group_result.ready():
+            current_completed = group_result.completed_count()
+            if current_completed > iterations_completed_count:
+                iterations_completed_count = current_completed
+                # Progress from 5% to 90% for clustering iterations
+                progress = 5 + int(85 * (iterations_completed_count / num_clustering_runs))
+                log_messages.append(f"Clustering iterations completed: {iterations_completed_count}/{num_clustering_runs}")
+                self.update_state(state='PROGRESS', meta={
+                    'progress': progress, 
+                    'status': f'Running clustering: {iterations_completed_count}/{num_clustering_runs} iterations done.',
+                    'log_output': log_messages[-5:] + [f"...See Celery worker logs for full details of task {task_id}..." ], # Keep log short
+                    'iterations_done': iterations_completed_count, 
+                    'total_iterations': num_clustering_runs,
+                    'task_type': 'clustering'
+                })
+            time.sleep(3) # Poll every 3 seconds
 
-            # Sample pca_components within the specified range
-            current_pca_components = random.randint(pca_components_min, pca_components_max)
-            current_pca_enabled = (current_pca_components > 0)
+        all_iteration_results = group_result.get(timeout=600) # Increased timeout for many iterations
 
-            log_and_update(f"Running clustering iteration {run_idx + 1}/{num_clustering_runs} with parameters: "
-                           f"Method={clustering_method}, K={current_num_clusters}, "
-                           f"Eps={current_dbscan_eps}, MinS={current_dbscan_min_samples}, "
-                           f"GMM_Comp={current_gmm_n_components}, " # Log GMM components
-                           f"PCA_Comp={current_pca_components}...", progress_base)
-            
-            pca_model = None
-            data_for_clustering = X_scaled
-
-            if current_pca_enabled:
-                log_and_update(f"  Applying PCA with {current_pca_components} components...", progress_base + 2)
-                # Ensure PCA components don't exceed the number of features or samples
-                n_components_actual = min(current_pca_components, X_scaled.shape[1], len(rows) - 1)
-                if n_components_actual > 0:
-                    pca_model = PCA(n_components=n_components_actual)
-                    X_pca = pca_model.fit_transform(X_scaled)
-                    data_for_clustering = X_pca
-                else:
-                    log_and_update("  PCA components too low or data insufficient, PCA disabled for this run.", progress_base + 2)
-                    current_pca_enabled = False # Effectively disable PCA for this run
-                    pca_model = None
-
-
-            labels = None
-            cluster_centers = {}
-            raw_distances = np.zeros(len(data_for_clustering))
-
-            if clustering_method == "kmeans":
-                # Use the sampled current_num_clusters
-                k = current_num_clusters
-                log_and_update(f"  Running KMeans with {k} clusters...", progress_base + 5)
-                kmeans = KMeans(n_clusters=k, random_state=None, n_init='auto')
-                labels = kmeans.fit_predict(data_for_clustering)
-                cluster_centers = {i: kmeans.cluster_centers_[i] for i in range(k)}
-                centers_for_points = kmeans.cluster_centers_[labels]
-                raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-            elif clustering_method == "dbscan":
-                # Use the sampled current_dbscan_eps and current_dbscan_min_samples
-                log_and_update(f"  Running DBSCAN (eps={current_dbscan_eps}, min_samples={current_dbscan_min_samples})...", progress_base + 5)
-                dbscan = DBSCAN(eps=current_dbscan_eps, min_samples=current_dbscan_min_samples)
-                labels = dbscan.fit_predict(data_for_clustering)
-                
-                for cluster_id in set(labels):
-                    if cluster_id == -1: # Noise points
-                        continue
-                    indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
-                    cluster_points = np.array([data_for_clustering[i] for i in indices])
-                    if len(cluster_points) > 0:
-                        center = cluster_points.mean(axis=0)
-                        for i in indices:
-                            raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
-                        cluster_centers[cluster_id] = center
-            elif clustering_method == "gmm": # GMM clustering logic
-                log_and_update(f"  Running GMM with {current_gmm_n_components} components...", progress_base + 5)
-                gmm = GaussianMixture(n_components=current_gmm_n_components, covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
-                gmm.fit(data_for_clustering)
-                labels = gmm.predict(data_for_clustering)
-                
-                for i in range(current_gmm_n_components):
-                    cluster_centers[i] = gmm.means_[i]
-                
-                # Calculate distances to assigned component means
-                centers_for_points = gmm.means_[labels]
-                raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-
+        best_diversity_score = -1.0
+        best_result_package = None
+        
+        for res in all_iteration_results:
+            if isinstance(res, dict) and 'score' in res and 'params' in res:
+                if res.get('error'):
+                    print(f"Clustering iteration {res['params'].get('run_index', '')} failed or had an issue: {res['error']}")
+                    continue # Skip iterations that had errors
+                if res['score'] > best_diversity_score:
+                    best_diversity_score = res['score']
+                    best_result_package = res
             else:
-                log_and_update(f"Unsupported clustering algorithm: {clustering_method}", 100)
-                # Do not fail the entire task, just skip this run or log an error
-                continue # Skip to next run_idx
+                print(f"Warning: Received malformed result from a clustering subtask: {res}")
 
-            # Handle cases where clustering might result in no valid labels (e.g., all noise in DBSCAN)
-            if labels is None or len(set(labels) - {-1}) == 0: # No clusters found (excluding noise)
-                log_and_update(f"  Run {run_idx + 1}: No valid clusters generated for this parameter set. Skipping.", progress_base + 8)
-                continue
 
-            max_dist = raw_distances.max()
-            normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-            
-            track_info = []
-            for row, label, vec, dist in zip(rows, labels, data_for_clustering, normalized_distances):
-                if label == -1: # Skip noise points from DBSCAN
-                    continue
-                track_info.append({"row": row, "label": label, "vector": vec, "distance": dist})
-
-            filtered_clusters = defaultdict(list)
-            for cluster_id in set(labels):
-                if cluster_id == -1:
-                    continue
-                cluster_tracks = [t for t in track_info if t["label"] == cluster_id and t["distance"] <= MAX_DISTANCE]
-                if not cluster_tracks:
-                    continue
-                cluster_tracks.sort(key=lambda x: x["distance"])
-                
-                count_per_artist = defaultdict(int)
-                selected = []
-                for t in cluster_tracks:
-                    author = t["row"][2]
-                    if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
-                        selected.append(t)
-                        count_per_artist[author] += 1
-                    # Use the passed max_songs_per_cluster here
-                    if len(selected) >= max_songs_per_cluster:
-                        break
-                for t in selected:
-                    item_id, title, author = t["row"][0], t["row"][1], t["row"][2]
-                    filtered_clusters[cluster_id].append((item_id, title, author))
-
-            current_named_playlists = defaultdict(list)
-            current_playlist_centroids = {}
-            
-            unique_predominant_mood_scores = {} # Dictionary to store the max score for each unique mood found
-
-            for label, songs in filtered_clusters.items():
-                if songs:
-                    center = cluster_centers.get(label) # Use .get() in case a cluster_id from labels isn't in cluster_centers (e.g., if it was noise)
-                    if center is None:
-                        continue # Skip if no centroid found for this label
-
-                    name, top_scores = name_cluster(center, pca_model, current_pca_enabled, MOOD_LABELS)
-                    
-                    if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
-                        predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
-                        if predominant_mood_key in MOOD_LABELS:
-                            current_mood_score = top_scores.get(predominant_mood_key, 0.0)
-                            unique_predominant_mood_scores[predominant_mood_key] = max(
-                                unique_predominant_mood_scores.get(predominant_mood_key, 0.0),
-                                current_mood_score
-                            )
-
-                    current_named_playlists[name].extend(songs)
-                    current_playlist_centroids[name] = top_scores
-
-            diversity_score = sum(unique_predominant_mood_scores.values())
-
-            log_and_update(f"  Run {run_idx + 1}: Weighted Diversity Score: {diversity_score:.2f}.", progress_base + 8)
-
-            if diversity_score > best_diversity_score:
-                best_diversity_score = diversity_score
-                best_clustering_results = {
-                    "named_playlists": current_named_playlists,
-                    "playlist_centroids": current_playlist_centroids,
-                    "pca_model": pca_model, # Store the PCA model for inverse transform in naming
-                    "parameters": { # Store the parameters that yielded this best score
-                        "clustering_method": clustering_method,
-                        "num_clusters": current_num_clusters,
-                        "dbscan_eps": current_dbscan_eps,
-                        "dbscan_min_samples": current_dbscan_min_samples,
-                        "gmm_n_components": current_gmm_n_components, # Store GMM components
-                        "pca_enabled": current_pca_enabled,
-                        "pca_components": current_pca_components,
-                        "max_songs_per_cluster": max_songs_per_cluster # Store this too
-                    }
-                }
-                best_parameters_found = best_clustering_results["parameters"] # Update best parameters found
-
-        if not best_clustering_results:
-            log_and_update("No valid clusters found after multiple runs.", 100)
-            self.update_state(state='FAILURE', meta={'progress': 100, 'status': 'No valid clusters found', 'log_output': log_messages})
+        if not best_result_package or best_diversity_score < 0: # Check if any valid result was found
+            log_messages.append("No valid clustering results found after all iterations.")
+            self.update_state(state='FAILURE', meta={'progress': 100, 'status': 'No valid clusters from iterations', 'log_output': log_messages, 'task_type': 'clustering'})
+            save_task_status(task_id, "clustering", "FAILURE")
             return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
 
-        log_and_update(f"Applying best clustering results (Weighted Diversity Score: {best_diversity_score:.2f})...", 90)
-        log_and_update(f"Best parameters: {best_parameters_found}", 90)
-        final_named_playlists = best_clustering_results["named_playlists"]
-        final_playlist_centroids = best_clustering_results["playlist_centroids"]
-        final_pca_model = best_clustering_results["pca_model"] # Retrieve the PCA model
-        final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
+        log_messages.append(f"Best clustering iteration found with score: {best_diversity_score:.2f}. Parameters: {best_result_package['params']}")
+        self.update_state(state='PROGRESS', meta={'progress': 95, 'status': 'Finalizing best playlists...', 'log_output': log_messages, 'iterations_done': num_clustering_runs, 'total_iterations': num_clustering_runs, 'task_type': 'clustering'})
 
-        log_and_update("Updating playlist database...", 95)
-        update_playlist_table(DB_PATH, final_named_playlists)
+        final_named_playlists = best_result_package['playlists']
+        final_playlist_centroids = best_result_package['centroids']
         
-        log_and_update("Creating/Updating playlists on Jellyfin...", 98)
+        # Reconstruct PCA model from serialized components if it was used in the best run
+        final_pca_model = None
+        if best_result_package['params'].get('pca_enabled') and best_result_package.get('pca_model_components') is not None:
+            final_pca_model = PCA(n_components=len(best_result_package['pca_model_components']))
+            final_pca_model.components_ = np.array(best_result_package['pca_model_components'])
+            if best_result_package.get('pca_model_mean') is not None:
+                final_pca_model.mean_ = np.array(best_result_package['pca_model_mean'])
+            else:
+                # If mean is not provided, set to zeros or handle as per PCA implementation
+                final_pca_model.mean_ = np.zeros(final_pca_model.components_.shape[1])
+
+        # Use the max_songs_per_cluster from the best parameters for Jellyfin update
+        final_max_songs_per_cluster = best_result_package['params']['max_songs_per_cluster']
+
+        log_messages.append("Updating playlist database...")
+        update_playlist_table_in_db(final_named_playlists) # No longer passing db_path
+        
+        log_messages.append("Creating/Updating playlists on Jellyfin...")
+        # Global JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN are used here as per original design
         create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS, final_max_songs_per_cluster)
         
-        log_and_update(f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}.", 100)
-        return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}."}
+        final_message = f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}."
+        log_messages.append(final_message)
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': final_message, 'log_output': log_messages[-10:], 'task_type': 'clustering'})
+        save_task_status(task_id, "clustering", "SUCCESS")
+        return {"status": "SUCCESS", "message": final_message, "best_score": best_diversity_score, "best_params": best_result_package['params']}
 
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        print(f"FATAL ERROR: Clustering failed: {e}\n{error_traceback}")
-        log_and_update(f"❌ Clustering failed: {e}", 100)
-        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"]})
-        return {"status": "FAILURE", "message": f"Clustering failed: {e}"}
+        log_messages.append(f"❌ Clustering orchestration failed: {e}")
+        self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'clustering'})
+        save_task_status(task_id, "clustering", "FAILURE")
+        return {"status": "FAILURE", "message": f"Clustering orchestration failed: {e}"}
 
 
-# --- API Endpoints ---
+# --- API Endpoints (largely unchanged in signature, but call new main tasks) ---
 
 @app.route('/')
 def index():
@@ -664,13 +909,15 @@ def start_analysis():
     Records the task ID and type in the database.
     """
     data = request.json or {}
-    jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
-    jellyfin_user_id = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
-    jellyfin_token = data.get('jellyfin_token', JELLYFIN_TOKEN)
-    num_recent_albums = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS))
-    top_n_moods = int(data.get('top_n_moods', TOP_N_MOODS))
-    task = run_analysis_task.delay(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods)
-    save_task_status(task.id, "analysis", "PENDING")
+    jellyfin_url_req = data.get('jellyfin_url', JELLYFIN_URL)
+    jellyfin_user_id_req = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
+    jellyfin_token_req = data.get('jellyfin_token', JELLYFIN_TOKEN)
+    num_recent_albums_req = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS))
+    top_n_moods_req = int(data.get('top_n_moods', TOP_N_MOODS))
+    
+    # Call the main analysis task (coordinator)
+    task = run_analysis_task.delay(jellyfin_url_req, jellyfin_user_id_req, jellyfin_token_req, num_recent_albums_req, top_n_moods_req)
+    save_task_status(task.id, "analysis", "PENDING") # Initial status
     return jsonify({"task_id": task.id, "task_type": "analysis", "status": "PENDING"}), 202
 
 @app.route('/api/clustering/start', methods=['POST'])
@@ -681,44 +928,31 @@ def start_clustering():
     Records the task ID and type in the database.
     """
     data = request.json
-
-    # Get clustering method
-    clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
-
-    # Get ranges for K-Means parameters
-    num_clusters_min = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
-    num_clusters_max = int(data.get('num_clusters_max', NUM_CLUSTERS_MAX))
-
-    # Get ranges for DBSCAN parameters
-    dbscan_eps_min = float(data.get('dbscan_eps_min', DBSCAN_EPS_MIN))
-    dbscan_eps_max = float(data.get('dbscan_eps_max', DBSCAN_EPS_MAX))
-    dbscan_min_samples_min = int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN))
-    dbscan_min_samples_max = int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX))
-
-    # Get ranges for GMM parameters
-    gmm_n_components_min = int(data.get('gmm_n_components_min', GMM_N_COMPONENTS_MIN))
-    gmm_n_components_max = int(data.get('gmm_n_components_max', GMM_N_COMPONENTS_MAX))
-
-    # Get ranges for PCA components
-    pca_components_min = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
-    pca_components_max = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
+    clustering_method_req = data.get('clustering_method', CLUSTER_ALGORITHM)
+    num_clusters_min_req = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
+    num_clusters_max_req = int(data.get('num_clusters_max', NUM_CLUSTERS_MAX))
+    dbscan_eps_min_req = float(data.get('dbscan_eps_min', DBSCAN_EPS_MIN))
+    dbscan_eps_max_req = float(data.get('dbscan_eps_max', DBSCAN_EPS_MAX))
+    dbscan_min_samples_min_req = int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN))
+    dbscan_min_samples_max_req = int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX))
+    gmm_n_components_min_req = int(data.get('gmm_n_components_min', GMM_N_COMPONENTS_MIN))
+    gmm_n_components_max_req = int(data.get('gmm_n_components_max', GMM_N_COMPONENTS_MAX))
+    pca_components_min_req = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
+    pca_components_max_req = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
+    num_clustering_runs_req = int(data.get('clustering_runs', CLUSTERING_RUNS))
+    max_songs_per_cluster_req = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
     
-    # Get total clustering runs
-    num_clustering_runs = int(data.get('clustering_runs', CLUSTERING_RUNS))
-
-    # Get max_songs_per_cluster
-    max_songs_per_cluster = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
-
-
+    # Call the main clustering task (coordinator)
     task = run_clustering_task.delay(
-        clustering_method, 
-        num_clusters_min, num_clusters_max,
-        dbscan_eps_min, dbscan_eps_max,
-        dbscan_min_samples_min, dbscan_min_samples_max,
-        pca_components_min, pca_components_max,
-        num_clustering_runs,
-        max_songs_per_cluster,
-        gmm_n_components_min, gmm_n_components_max # Pass new GMM parameters
+        clustering_method_req, 
+        num_clusters_min_req, num_clusters_max_req,
+        dbscan_eps_min_req, dbscan_eps_max_req,
+        dbscan_min_samples_min_req, dbscan_min_samples_max_req,
+        gmm_n_components_min_req, gmm_n_components_max_req,
+        pca_components_min_req, pca_components_max_req,
+        num_clustering_runs_req,
+        max_songs_per_cluster_req
+        # MAX_SONGS_PER_ARTIST is currently from global config, can be passed if needed
     )
     save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
@@ -728,60 +962,102 @@ def start_clustering():
 def get_task_status_endpoint(task_id):
     """
     Retrieves the status of any task (analysis or clustering).
+    This endpoint is updated to reflect the progress of coordinator tasks
+    which now manage sub-tasks.
     """
     task = AsyncResult(task_id, app=celery)
     response = {
         'task_id': task.id,
-        'state': task.state,
-        'status': 'Processing...'
+        'state': task.state, # Native Celery state (PENDING, STARTED, PROGRESS, SUCCESS, FAILURE, REVOKED)
+        'status': 'Processing...', # Custom status message for UI
+        'log_output': [],
+        'progress': 0,
     }
     task_info = task.info if isinstance(task.info, dict) else {}
+
+    # Populate default fields based on task type, if known early
+    if 'task_type' in task_info:
+        response['task_type'] = task_info['task_type']
+        if task_info['task_type'] == 'analysis':
+            # These fields are for the frontend's specific progress display for analysis
+            response.update({'processed_albums': 0, 'total_albums': 0, 'current_album_progress': '0/0', 'currentAlbumName': 'N/A'})
+        elif task_info['task_type'] == 'clustering':
+            response.update({'iterations_done': 0, 'total_iterations': 0})
+    
+    # Override with actual task info from Celery meta
+    response.update(task_info)
+
+    # Update custom status message based on Celery state and task_info
     if task.state == 'PENDING':
         response['status'] = 'Task is pending or not yet started.'
-        response.update({'progress': 0, 'status': 'Initializing...', 'log_output': ['Task pending...']})
-        # Add specific meta for analysis if it's an analysis task
-        if task_info.get('task_type') == 'analysis':
-            response.update({'current_album': 'N/A', 'current_album_idx': 0, 'total_albums': 0})
-        response.update(task_info) # Overwrite with actual task_info if available
+        if not response.get('log_output'): response['log_output'] = ['Task pending...']
+    elif task.state == 'STARTED': # A custom state I added for main tasks
+        response['status'] = task_info.get('status', 'Task has started...')
     elif task.state == 'PROGRESS':
-        response.update(task_info)
+        response['status'] = task_info.get('status', 'Task in progress...')
     elif task.state == 'SUCCESS':
-        response['status'] = 'Task complete!'
-        response.update({'progress': 100, 'status': 'Task complete!', 'log_output': []})
-        response.update(task_info)
+        response['status'] = task_info.get('status', 'Task complete!')
+        response['progress'] = 100
         save_task_status(task_id, task_info.get('task_type', 'unknown'), "SUCCESS")
     elif task.state == 'FAILURE':
-        response['status'] = str(task.info)
-        response.update({'progress': 100, 'status': 'Task failed!', 'log_output': [str(task.info)]})
-        response.update(task_info)
+        response['status'] = task_info.get('status', str(task.info)) # task.info might be an exception
+        response['progress'] = 100
         save_task_status(task_id, task_info.get('task_type', 'unknown'), "FAILURE")
     elif task.state == 'REVOKED':
-        response['status'] = 'Task revoked.'
-        response.update({'progress': 100, 'status': 'Task revoked.', 'log_output': ['Task was cancelled.']})
-        response.update(task_info)
+        response['status'] = 'Task revoked/cancelled.'
+        response['progress'] = 100
         save_task_status(task_id, task_info.get('task_type', 'unknown'), "REVOKED")
-    else:
-        response['status'] = f'Unknown state: {task.state}'
-        response.update(task_info)
+    else: # Other Celery states like RETRY
+        response['status'] = f'Task state: {task.state}'
+        if not response.get('log_output'): response['log_output'] = [f'Current state: {task.state}']
+
+    # For frontend compatibility with analysis progress bars (if it expects these specific fields)
+    if response.get('task_type') == 'analysis':
+        # Map new 'processed_albums' and 'total_albums' to old frontend fields
+        response['currentAlbumName'] = task_info.get('current_album', 'N/A') # This might not be updated by new task
+        response['currentAlbumProgress'] = f"{task_info.get('processed_albums',0)}/{task_info.get('total_albums',0)}"
+        response['current_album_idx'] = task_info.get('processed_albums', 0) # For progress bar
+        response['total_albums'] = task_info.get('total_albums', 0) # For progress bar
+
     return jsonify(response)
 
 @app.route('/api/cancel/<task_id>', methods=['POST'])
 def cancel_task_endpoint(task_id):
     """
     Cancels an active task (analysis or clustering).
+    This will attempt to revoke the main coordinator task.
+    For tasks that use Celery `group` or `chord`, revoking the parent task
+    might not immediately terminate all child tasks, especially if they are
+    already running on different workers. This is a best-effort cancellation.
     """
     task = AsyncResult(task_id, app=celery)
-    if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
-        task.revoke(terminate=True, signal='SIGKILL')
-        # We need to know the task_type to save it correctly
-        # For now, we'll try to fetch it from the DB or default to 'unknown'
-        conn = get_status_db()
-        cur = conn.cursor()
-        cur.execute("SELECT task_type FROM task_status WHERE task_id = ?", (task_id,))
+    
+    # Attempt to find task_type from status DB for logging the cancellation
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("SELECT task_type FROM {} WHERE task_id = %s").format(sql.Identifier(STATUS_DB_TABLE_NAME)), (task_id,))
         row = cur.fetchone()
-        task_type_from_db = row['task_type'] if row else 'unknown'
+    task_type_from_db = row['task_type'] if row else 'unknown'
+
+    if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
+        # Revoke the main task forcefully.
+        task.revoke(terminate=True, signal='SIGKILL') # SIGKILL is forceful termination
+
+        # Attempt to revoke children tasks if the main task was a group/chord.
+        # This is a best-effort approach as Celery's distributed cancellation can be complex.
+        try:
+            # If the task.result is a GroupResult, it might have children
+            if task.result and hasattr(task.result, 'revoke'): 
+                 task.result.revoke(terminate=True, signal='SIGKILL')
+            # If it's a chord, the header (group) and body (callback) might have children
+            elif task.children: 
+                for child_task_res in task.children:
+                    child_task_res.revoke(terminate=True, signal='SIGKILL')
+        except Exception as e:
+            print(f"Error trying to revoke children of task {task_id}: {e}")
+
         save_task_status(task_id, task_type_from_db, "REVOKED")
-        return jsonify({"message": "Task cancelled.", "task_id": task_id}), 200
+        return jsonify({"message": "Task cancellation requested.", "task_id": task_id}), 200
     else:
         return jsonify({"message": "Task cannot be cancelled in its current state.", "state": task.state}), 400
 
@@ -825,16 +1101,19 @@ def get_config():
 @app.route('/api/playlists', methods=['GET'])
 def get_playlists():
     """Retrieves all saved playlists from the database."""
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT playlist, item_id, title, author FROM playlist ORDER BY playlist, title")
+    conn = get_db_connection()
+    with get_db_cursor(conn) as cur:
+        cur.execute(sql.SQL("SELECT playlist, item_id, title, author FROM {} ORDER BY playlist, title").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)))
         rows = cur.fetchall()
-    playlists = defaultdict(list)
-    for playlist, item_id, title, author in rows:
-        playlists[playlist].append({"item_id": item_id, "title": title, "author": author})
-    return jsonify(dict(playlists)), 200
+    playlists_data = defaultdict(list)
+    for row in rows:
+        playlists_data[row['playlist']].append({"item_id": row['item_id'], "title": row['title'], "author": row['author']})
+    return jsonify(dict(playlists_data)), 200
 
 if __name__ == '__main__':
-    init_db(DB_PATH)
-    os.makedirs(TEMP_DIR, exist_ok=True)
+    # DB initialization is now handled at app startup via init_status_db() and init_main_db()
+    os.makedirs(TEMP_DIR, exist_ok=True) # Ensure temp dir exists
+    # For development, you can run Flask's dev server.
+    # For production, use a proper WSGI server like Gunicorn.
+    # Example: gunicorn -w 4 -k gevent --bind 0.0.0.0:8000 app:app
     app.run(debug=True, host='0.0.0.0', port=8000)
