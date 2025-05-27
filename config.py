@@ -19,7 +19,11 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 40 # This is a hard limit for chunking playlists for Jellyfin, not the desired playlist size
 MAX_SONGS_PER_ARTIST = 3
-NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
+
+# Changed NUM_RECENT_ALBUMS to MIN_RECENT_ALBUMS and added MAX_RECENT_ALBUMS
+MIN_RECENT_ALBUMS = int(os.getenv("MIN_RECENT_ALBUMS", "40")) # Min recent albums to fetch
+MAX_RECENT_ALBUMS = int(os.getenv("MAX_RECENT_ALBUMS", "60")) # Max recent albums to fetch
+
 
 # --- Algorithm Choose Constant (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.getenv("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan or kmeans
@@ -28,19 +32,19 @@ CLUSTER_ALGORITHM = os.getenv("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan o
 # Default ranges for DBSCAN parameters
 DBSCAN_EPS_MIN = float(os.getenv("DBSCAN_EPS_MIN", "0.1"))
 DBSCAN_EPS_MAX = float(os.getenv("DBSCAN_EPS_MAX", "0.5"))
-DBSCAN_MIN_SAMPLES_MIN = int(os.getenv("DBSCAN_MIN_SAMPLES_MIN", "5"))
-DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20"))
+DBSCAN_MIN_SAMPLES_MIN = int(os.getenv("DBSCAN_MIN_SAMPLES_MIN", "5")) # Changed default
+DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20")) # Changed default
 
 # --- KMEANS and DBSCAN (PCA Components) ---
 PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA initially
 PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "10")) # Max components for PCA
 
 # --- KMEANS Only Constants (Ranges for Evolutionary Approach) ---
-NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "3"))
-NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "10"))
+NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "10")) # Changed default
+NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "50")) # Changed default
 
 # --- Evolutionary Clustering Runs ---
-CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "10")) # Number of clustering runs for evolutionary approach
+CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "1000")) # Changed default
 
 # --- Playlist Song Number Constraints (User Configurable) ---
 MIN_SONGS_PER_PLAYLIST = int(os.getenv("MIN_SONGS_PER_PLAYLIST", "20"))
@@ -78,7 +82,8 @@ print(f"DEBUG: JELLYFIN_TOKEN: {'***hidden***' if JELLYFIN_TOKEN else 'None'}")
 print(f"DEBUG: TEMP_DIR: {TEMP_DIR}")
 print(f"DEBUG: DB_PATH: {DB_PATH}")
 print(f"DEBUG: STATUS_DB_PATH: {STATUS_DB_PATH}")
-print(f"DEBUG: NUM_RECENT_ALBUMS: {NUM_RECENT_ALBUMS}")
+print(f"DEBUG: MIN_RECENT_ALBUMS: {MIN_RECENT_ALBUMS}") # Updated debug print
+print(f"DEBUG: MAX_RECENT_ALBUMS: {MAX_RECENT_ALBUMS}") # New debug print
 print(f"DEBUG: CLUSTER_ALGORITHM: {CLUSTER_ALGORITHM}")
 print(f"DEBUG: NUM_CLUSTERS_MIN: {NUM_CLUSTERS_MIN}")
 print(f"DEBUG: NUM_CLUSTERS_MAX: {NUM_CLUSTERS_MAX}")
