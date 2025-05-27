@@ -201,7 +201,7 @@
                     </div>
                     <div>
                         <label for="dbscan_min_samples_max" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Max Samples:</label>
-                        <input type="number" id="dbscan_min_samples_max" name="dbscan_min_samples_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
+                        <input type="number" id="dbscan_min_samples_max" name="dbscan_min_samples_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-align focus:outline-none focus:shadow-outline">
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4 col-span-2">
@@ -213,6 +213,10 @@
                         <label for="pca_components_max" class="block text-gray-400 text-sm font-bold mb-2">PCA Max Components:</label>
                         <input type="number" id="pca_components_max" name="pca_components_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                     </div>
+                </div>
+                <div>
+                    <label for="max_songs_per_cluster" class="block text-gray-400 text-sm font-bold mb-2">Max Songs per Cluster:</label>
+                    <input type="number" id="max_songs_per_cluster" name="max_songs_per_cluster" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
                 </div>
                 <div>
                     <label for="clustering_runs" class="block text-gray-400 text-sm font-bold mb-2">Clustering Runs (for diversity):</label>
@@ -285,6 +289,9 @@
         const clusteringProgressBar = document.getElementById('clusteringProgressBar');
         const clusteringLogOutput = document.getElementById('clusteringLogOutput');
         const cancelClusteringBtn = document.getElementById('cancelClusteringBtn');
+
+        // New element for max_songs_per_cluster
+        const maxSongsPerClusterInput = document.getElementById('max_songs_per_cluster');
 
 
         let pollingInterval = null;
@@ -438,6 +445,9 @@
                 // Set min/max values for PCA
                 document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
                 document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
+
+                // Set max_songs_per_cluster
+                maxSongsPerClusterInput.value = config.max_songs_per_cluster !== undefined ? config.max_songs_per_cluster : 40;
 
                 document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 100;
 
@@ -696,6 +706,7 @@
             data.dbscan_min_samples_max = parseInt(data.dbscan_min_samples_max, 10);
             data.pca_components_min = parseInt(data.pca_components_min, 10);
             data.pca_components_max = parseInt(data.pca_components_max, 10);
+            data.max_songs_per_cluster = parseInt(data.max_songs_per_cluster, 10); // Parse new field
             data.clustering_runs = parseInt(data.clustering_runs, 10);
 
             try {
