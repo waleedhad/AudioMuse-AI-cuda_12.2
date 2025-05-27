@@ -406,7 +406,7 @@
                     clearInterval(pollingInterval);
                     pollingInterval = null;
                     
-                    // Re-enable all relevant buttons on polling error
+                    # Re-enable all relevant buttons on polling error
                     startAnalysisBtn.disabled = false;
                     cancelAnalysisBtn.disabled = true;
                     generatePlaylistsBtn.disabled = false;
@@ -430,6 +430,7 @@
                 document.getElementById('jellyfin_url').value = config.jellyfin_url || '';
                 document.getElementById('jellyfin_user_id').value = config.jellyfin_user_id || '';
                 document.getElementById('jellyfin_token').value = config.jellyfin_token || '';
+                // Use config.num_recent_albums for the default value
                 document.getElementById('num_recent_albums').value = config.num_recent_albums !== undefined ? config.num_recent_albums : 0;
                 document.getElementById('top_n_moods').value = config.top_n_moods !== undefined ? config.top_n_moods : 5;
 
