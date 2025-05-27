@@ -21,7 +21,7 @@ MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000")) # Convert to int
 
 # --- Algorithm Choose Constant (Read from Environment Variables) ---
-CLUSTER_ALGORITHM = os.getenv("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan or kmeans
+CLUSTER_ALGORITHM = os.getenv("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
 
 # --- DBSCAN Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for DBSCAN parameters
@@ -35,6 +35,12 @@ DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20"))
 # Default ranges for KMeans parameters
 NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "20"))
 NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "60"))
+
+# --- GMM Only Constants (Ranges for Evolutionary Approach) ---
+# Default ranges for GMM parameters
+GMM_N_COMPONENTS_MIN = int(os.getenv("GMM_N_COMPONENTS_MIN", "20"))
+GMM_N_COMPONENTS_MAX = int(os.getenv("GMM_N_COMPONENTS_MAX", "60"))
+GMM_COVARIANCE_TYPE = os.getenv("GMM_COVARIANCE_TYPE", "full") # 'full', 'tied', 'diag', 'spherical'
 
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
@@ -77,6 +83,9 @@ print(f"DEBUG: DBSCAN_EPS_MIN: {DBSCAN_EPS_MIN}")
 print(f"DEBUG: DBSCAN_EPS_MAX: {DBSCAN_EPS_MAX}")
 print(f"DEBUG: DBSCAN_MIN_SAMPLES_MIN: {DBSCAN_MIN_SAMPLES_MIN}")
 print(f"DEBUG: DBSCAN_MIN_SAMPLES_MAX: {DBSCAN_MIN_SAMPLES_MAX}")
+print(f"DEBUG: GMM_N_COMPONENTS_MIN: {GMM_N_COMPONENTS_MIN}")
+print(f"DEBUG: GMM_N_COMPONENTS_MAX: {GMM_N_COMPONENTS_MAX}")
+print(f"DEBUG: GMM_COVARIANCE_TYPE: {GMM_COVARIANCE_TYPE}")
 print(f"DEBUG: PCA_COMPONENTS_MIN: {PCA_COMPONENTS_MIN}")
 print(f"DEBUG: PCA_COMPONENTS_MAX: {PCA_COMPONENTS_MAX}")
 print(f"DEBUG: CLUSTERING_RUNS: {CLUSTERING_RUNS}")
