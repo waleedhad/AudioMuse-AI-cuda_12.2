@@ -114,61 +114,61 @@ jobs:
           docker logs flask-test-app # Print logs for debugging
           exit 1 # Fail the job if app doesn't start
 
-      - name: Run Celery Worker Container Health Check
+      - name: Run RQ Worker Container Health Check
         run: |
-          echo "Starting temporary Redis container for Celery broker..."
+          echo "Starting temporary Redis container for RQ worker..."
           docker run -d --name redis-test redis:latest
 
           echo "Waiting for Redis to start..."
           sleep 5 # Give Redis a few seconds to initialize
 
-          echo "Starting temporary PostgreSQL container for Celery test..."
-          docker run -d --name postgres-celery-test \
+          echo "Starting temporary PostgreSQL container for RQ worker test..."
+          docker run -d --name postgres-rq-test \
             -e POSTGRES_USER=testuser \
             -e POSTGRES_PASSWORD=testpass \
             -e POSTGRES_DB=testdb \
             postgres:15-alpine
 
-          echo "Waiting for PostgreSQL (Celery test) to start..."
+          echo "Waiting for PostgreSQL (RQ worker test) to start..."
           for i in $(seq 1 30); do
-            if docker exec postgres-celery-test pg_isready -U testuser -d testdb -q; then
-              echo "PostgreSQL (Celery test) is ready."
+            if docker exec postgres-rq-test pg_isready -U testuser -d testdb -q; then
+              echo "PostgreSQL (RQ worker test) is ready."
               break
             fi
-            echo "Waiting for PostgreSQL (Celery test)... ($i/30)"
+            echo "Waiting for PostgreSQL (RQ worker test)... ($i/30)"
             sleep 2
             if [ $i -eq 30 ]; then
-              echo "PostgreSQL (Celery test) did not become ready in time."
-              docker logs postgres-celery-test
+              echo "PostgreSQL (RQ worker test) did not become ready in time."
+              docker logs postgres-rq-test
               exit 1
             fi
           done
 
-          echo "Starting Celery worker container for health check..."
-          # Run the celery worker container in detached mode, linking to redis
-          docker run -d --name celery-test-worker \
-            --link redis-test:redis --link postgres-celery-test:postgres \
-            -e SERVICE_TYPE=celery \
-            -e CELERY_BROKER_URL=redis://redis:6379/0 \
-            -e CELERY_RESULT_BACKEND=redis://redis:6379/0 \
+          echo "Starting RQ worker container for health check..."
+          # Run the RQ worker container in detached mode, linking to redis and postgres
+          docker run -d --name rq-test-worker \
+            --link redis-test:redis --link postgres-rq-test:postgres \
+            -e SERVICE_TYPE=worker \
+            -e REDIS_URL=redis://redis:6379/0 \
             -e DATABASE_URL=postgresql://testuser:testpass@postgres:5432/testdb \
             ${{ steps.docker_tags.outputs.test_tag }}
 
-          echo "Waiting for Celery worker to start (max 90 seconds)..."
-          # Check if the Celery worker container is running and if its logs indicate it's "ready"
+          echo "Waiting for RQ worker to start (max 90 seconds)..."
+          # Check if the RQ worker container is running and if its logs indicate it's "Listening"
           for i in $(seq 1 30); do
-            if docker ps -f name=celery-test-worker --format '{{.Status}}' | grep -q 'Up'; then
-              # Look for the "ready." log message which indicates full startup
-              if docker logs celery-test-worker 2>&1 | grep -q "ready."; then
-                  echo "Celery worker container is running and ready."
+            if docker ps -f name=rq-test-worker --format '{{.Status}}' | grep -q 'Up'; then
+              # Look for the "Listening on" log message which indicates RQ worker startup
+              # RQ worker logs typically include "Listening on <queue_name>..."
+              if docker logs rq-test-worker 2>&1 | grep -q "Listening on"; then
+                  echo "RQ worker container is running and listening."
                   exit 0
               fi
             fi
             echo "Waiting... ($i/30)"
             sleep 3 # Increased sleep duration
           done
-          echo "Celery worker container did not start or become ready within the expected time."
-          docker logs celery-test-worker # Print logs for debugging
+          echo "RQ worker container did not start or become ready within the expected time."
+          docker logs rq-test-worker # Print logs for debugging
           exit 1 # Fail the job
 
       - name: Clean up Docker containers and temporary image
@@ -176,10 +176,10 @@ jobs:
         run: |
           echo "Cleaning up temporary Docker containers and image..."
           docker rm -f flask-test-app || true
-          docker rm -f celery-test-worker || true
+          docker rm -f rq-test-worker || true
           docker rm -f redis-test || true
           docker rm -f postgres-flask-test || true
-          docker rm -f postgres-celery-test || true
+          docker rm -f postgres-rq-test || true
           docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true # Remove the temporary image
 
       - name: Build and Push AudioMuse AI Image (Final Push)
