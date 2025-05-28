@@ -15,13 +15,7 @@ import time
 import random
 from urllib.parse import urljoin # Added for robust URL joining
 
-# Import your existing analysis functions
-from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
-from sklearn.cluster import KMeans, DBSCAN
-from sklearn.decomposition import PCA
-from sklearn.mixture import GaussianMixture
-
-# Your existing config - assuming this is from config.py and sets global variables
+# Import your existing config - assuming this is from config.py and sets global variables
 from config import *
 
 # --- Flask App Setup ---
@@ -32,6 +26,13 @@ celery = Celery(app.name)
 celery.conf.broker_url = CELERY_BROKER_URL
 celery.conf.result_backend = CELERY_RESULT_BACKEND
 celery.conf.task_track_started = True
+
+# Explicitly set serializers to 'json' for robustness
+celery.conf.task_serializer = 'json'
+celery.conf.result_serializer = 'json'
+celery.conf.accept_content = ['json']
+celery.conf.timezone = 'UTC' # Good practice to define timezone
+celery.conf.enable_utc = True # Good practice for UTC
 
 # --- Database Connection Management ---
 def get_db_connection():
@@ -97,7 +98,7 @@ def init_status_db():
 def init_main_db():
     """
     Initializes the main application database tables for scores and playlists.
-    This function should be called within an application context or a standalone script.
+    This function should be called within an Flask application context or a standalone script.
     """
     conn = None
     try:
@@ -184,9 +185,24 @@ def clean_temp(temp_dir):
 def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
     """Fetches recent albums from Jellyfin."""
     # Ensure jellyfin_url has a trailing slash for robust joining
-    base_url_with_slash = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
-    # Construct path segments carefully
-    path = f"Users/{jellyfin_user_id.strip('/')}/Items"
+    base_url_with_slash = jellyfin_url.rstrip('/') + '/'
+    # Ensure jellyfin_user_id is not empty and strip any leading/trailing slashes
+    user_id_path = jellyfin_user_id.strip('/') if jellyfin_user_id else ''
+    
+    # Construct path segments carefully. If user_id_path is empty, it will be "Users//Items"
+    # To avoid this, we can conditionally build the path.
+    if user_id_path:
+        path = f"Users/{user_id_path}/Items"
+    else:
+        # If user ID is truly optional or unknown, adjust path.
+        # For Jellyfin, User ID is usually required for user-specific items.
+        # If it's empty, it might mean fetching all items, but the API path might differ.
+        # Assuming for now that jellyfin_user_id should NOT be empty.
+        # If it can be empty and means 'all users', the path might be /Items
+        # For now, let's assume it's always provided and valid.
+        print("WARNING: jellyfin_user_id is empty. This might lead to API issues.")
+        path = "Users/Items" # Fallback, but might not be correct for Jellyfin API
+
     full_url = urljoin(base_url_with_slash, path)
 
     params = {
@@ -207,8 +223,15 @@ def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
 
 def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
     """Fetches tracks belonging to a specific album from Jellyfin."""
-    base_url_with_slash = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
-    path = f"Users/{jellyfin_user_id.strip('/')}/Items"
+    base_url_with_slash = jellyfin_url.rstrip('/') + '/'
+    user_id_path = jellyfin_user_id.strip('/') if jellyfin_user_id else ''
+    
+    if user_id_path:
+        path = f"Users/{user_id_path}/Items"
+    else:
+        print("WARNING: jellyfin_user_id is empty in get_tracks_from_album. This might lead to API issues.")
+        path = "Users/Items" # Fallback
+
     full_url = urljoin(base_url_with_slash, path)
 
     params = {"ParentId": album_id, "IncludeItemTypes": "Audio"}
@@ -226,7 +249,7 @@ def download_track(jellyfin_url, headers, temp_dir, item):
     filename = f"{item['Id']}_{item['Name'].replace('/', '_')}-{item.get('AlbumArtist', 'Unknown')}.mp3"
     path = os.path.join(temp_dir, filename)
     
-    base_url_with_slash = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
+    base_url_with_slash = jellyfin_url.rstrip('/') + '/'
     download_path = f"Items/{item['Id']}/Download"
     full_download_url = urljoin(base_url_with_slash, download_path)
 
@@ -358,7 +381,7 @@ def update_playlist_table_in_db(playlists):
     conn.commit()
 
 def delete_old_automatic_playlists_from_jellyfin(jellyfin_url, jellyfin_user_id, headers):
-    url_base = jellyfin_url if jellyfin_url.endswith('/') else jellyfin_url + '/'
+    url_base = jellyfin_url.rstrip('/') + '/'
     path = f"Users/{jellyfin_user_id.strip('/')}/Items"
     full_url = urljoin(url_base, path)
     params = {"IncludeItemTypes": "Playlist", "Recursive": True}
@@ -377,7 +400,7 @@ def delete_old_automatic_playlists_from_jellyfin(jellyfin_url, jellyfin_user_id,
 
 def create_or_update_playlists_on_jellyfin(jellyfin_url_val, jellyfin_user_id_val, headers_val, playlists_val, cluster_centers_val, mood_labels_list, max_songs_val):
     delete_old_automatic_playlists_from_jellyfin(jellyfin_url_val, jellyfin_user_id_val, headers_val)
-    url_base = jellyfin_url_val if jellyfin_url_val.endswith('/') else jellyfin_url_val + '/'
+    url_base = jellyfin_url_val.rstrip('/') + '/'
     playlist_creation_url = urljoin(url_base, "Playlists")
 
     for base_name, cluster in playlists_val.items():
@@ -855,7 +878,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             log_messages.append(final_message)
             self.update_state(state='SUCCESS', meta={'progress': 100, 'status': final_message, 'log_output': log_messages[-10:], 'task_type': 'clustering'})
             save_task_status(task_id, "clustering", "SUCCESS")
-            return {"status": "SUCCESS", "message": final_message, "best_score": best_diversity_score, "best_params": best_result_package['params']}
+            return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}."}
 
         except Exception as e:
             import traceback
@@ -863,7 +886,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             log_messages.append(f"❌ Clustering orchestration failed: {e}")
             self.update_state(state='FAILURE', meta={'progress': 100, 'status': f'Clustering failed: {e}', 'log_output': log_messages + [f"Error Traceback: {error_traceback}"], 'task_type': 'clustering'})
             save_task_status(task_id, "clustering", "FAILURE")
-            return {"status": "FAILURE", "message": f"Clustering orchestration failed: {e}"}
+            return {"status": "FAILURE", "message": f"Clustering failed: {e}"}
 
 
 # --- API Endpoints ---
@@ -877,14 +900,12 @@ def start_analysis():
     data = request.json or {}
     jellyfin_url_req = data.get('jellyfin_url', JELLYFIN_URL)
     jellyfin_user_id_req = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
-    jellyfin_token_req = data.get('jellyfin_token', JELLYFIN_TOKEN)
+    jellyfin_token_req = data.get('jellyfin_token', JELLYFIN_TOKEN) # Frontend sends this, but backend uses its own from env
     num_recent_albums_req = int(data.get('num_recent_albums', NUM_RECENT_ALBUMS))
     top_n_moods_req = int(data.get('top_n_moods', TOP_N_MOODS))
     
-    task = run_analysis_task.delay(jellyfin_url_req, jellyfin_user_id_req, jellyfin_token_req, num_recent_albums_req, top_n_moods_req)
-    # save_task_status is called inside the task now, no need to call here if we want STARTED status from task
-    # For PENDING status from API immediately:
-    with app.app_context(): # Need app context for DB ops here if not in task
+    task = run_analysis_task.delay(jellyfin_url_req, jellyfin_user_id_req, JELLYFIN_TOKEN, num_recent_albums_req, top_n_moods_req) # Use JELLYFIN_TOKEN from config (env)
+    with app.app_context(): 
         save_task_status(task.id, "analysis", "PENDING") 
     return jsonify({"task_id": task.id, "task_type": "analysis", "status": "PENDING"}), 202
 
@@ -915,7 +936,7 @@ def start_clustering():
         num_clustering_runs_req,
         max_songs_per_cluster_req
     )
-    with app.app_context(): # Need app context for DB ops here if not in task
+    with app.app_context(): 
       save_task_status(task.id, "clustering", "PENDING")
     return jsonify({"task_id": task.id, "task_type": "clustering", "status": "PENDING"}), 202
 
@@ -1003,7 +1024,7 @@ def cancel_task_endpoint(task_id):
 
 @app.route('/api/last_task', methods=['GET'])
 def get_last_overall_task_status():
-    with app.app_context(): # Ensure app context for get_last_task_status
+    with app.app_context(): 
         last_task = get_last_task_status()
     if last_task:
         return jsonify(last_task), 200
@@ -1011,10 +1032,14 @@ def get_last_overall_task_status():
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
+    """
+    Returns the current configuration parameters, including new ranges.
+    Jellyfin token is masked for security.
+    """
     return jsonify({
         "jellyfin_url": JELLYFIN_URL,
         "jellyfin_user_id": JELLYFIN_USER_ID,
-        "jellyfin_token": JELLYFIN_TOKEN,
+        "jellyfin_token": "********" if JELLYFIN_TOKEN else "", # Mask the token for security
         "num_recent_albums": NUM_RECENT_ALBUMS,
         "max_distance": MAX_DISTANCE,
         "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER,
@@ -1037,7 +1062,7 @@ def get_config():
 
 @app.route('/api/playlists', methods=['GET'])
 def get_playlists():
-    with app.app_context(): # Ensure app context for DB operations
+    with app.app_context(): 
         conn = get_db_connection()
         with get_db_cursor(conn) as cur:
             cur.execute(sql.SQL("SELECT playlist, item_id, title, author FROM {} ORDER BY playlist, title").format(sql.Identifier(PLAYLIST_DB_TABLE_NAME)))
