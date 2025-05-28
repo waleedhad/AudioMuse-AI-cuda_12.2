@@ -928,7 +928,8 @@ def revoke_task_and_children(task_id, task_type_hint=None):
     revoked_count = 0
     task = AsyncResult(task_id, app=celery)
     if task.state in ['PENDING', 'STARTED', 'PROGRESS']:
-        task.revoke(terminate=True, signal='SIGKILL')
+        # Changed to not use terminate=True as thread pool doesn't support it
+        task.revoke() 
         revoked_count += 1
         db_task_info = get_task_info_from_db(task_id)
         task_type = db_task_info.get('task_type') if db_task_info else task_type_hint
@@ -946,7 +947,8 @@ def revoke_task_and_children(task_id, task_type_hint=None):
         child_task_id = child_task_row['task_id']
         child_celery_task = AsyncResult(child_task_id, app=celery)
         if child_celery_task.state in ['PENDING', 'STARTED', 'PROGRESS']:
-            child_celery_task.revoke(terminate=True, signal='SIGKILL')
+            # Changed to not use terminate=True
+            child_celery_task.revoke()
             revoked_count +=1
             child_db_info = get_task_info_from_db(child_task_id)
             child_task_type = child_db_info.get('task_type') if child_db_info else 'unknown_child'
