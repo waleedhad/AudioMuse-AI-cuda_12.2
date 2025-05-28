@@ -182,7 +182,7 @@ spec:
     spec:
       securityContext:
         runAsUser: 0 # Or a non-root user if your image supports it
-        runAsGroup: 0
+        runAsGroup: 0 # Added fsGroup for consistency if needed by volumes
         fsGroup: 0
       containers:
       - name: flask-app
@@ -247,7 +247,7 @@ metadata:
     app: audiomuse-ai
     component: celery
 spec:
-  replicas: 1 # Scale as needed for parallel processing
+  replicas: 2 # Scale as needed for parallel processing
   selector:
     matchLabels:
       app: audiomuse-ai
