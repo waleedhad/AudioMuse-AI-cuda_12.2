@@ -3,10 +3,10 @@ name: Build, Test, and Push AudioMuse AI Docker Image
 on:
   push:
     branches:
-      - main      # Trigger for 'latest'
-      - devel     # Trigger for 'devel'
+      - main        # Trigger for 'latest'
+      - devel       # Trigger for 'devel'
     tags:
-      - 'v*.*.*'  # Trigger for version tags like v1.0.0
+      - 'v*.*.*'    # Trigger for version tags like v1.0.0
 
 jobs:
   build-and-test:
@@ -15,33 +15,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-
-    # Define services that will run alongside the job steps
-    # These services will be accessible via 'localhost' at their mapped ports
-    # when using --network host in docker run commands within steps.
-    services:
-      postgres:
-        image: postgres:13 # Use an appropriate PostgreSQL version
-        env:
-          POSTGRES_USER: user # Match your config.py or test config
-          POSTGRES_PASSWORD: password # Match your config.py or test config
-          POSTGRES_DB: audiomuse_db_test # Use a test-specific DB name
-        ports:
-          - 5432:5432 # Map port 5432 of the service container to port 5432 on the host (runner)
-        options: >- # Health check for PostgreSQL to wait until it's ready
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:6.2.6-alpine # Using a specific stable version
-        ports:
-          - 6379:6379 # Map port 6379 of the service container to port 6379 on the host (runner)
-        options: >- # Health check for Redis
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -97,69 +70,88 @@ jobs:
 
       - name: Run Flask App Container Health Check
         run: |
+          echo "Starting temporary PostgreSQL container for Flask test..."
+          docker run -d --name postgres-flask-test \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            postgres:15-alpine
+
+          echo "Waiting for PostgreSQL (Flask test) to start..."
+          for i in $(seq 1 30); do
+            if docker exec postgres-flask-test pg_isready -U testuser -d testdb -q; then
+              echo "PostgreSQL (Flask test) is ready."
+              break
+            fi
+            echo "Waiting for PostgreSQL (Flask test)... ($i/30)"
+            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "PostgreSQL (Flask test) did not become ready in time."
+              docker logs postgres-flask-test
+              exit 1
+            fi
+          done
+
           echo "Starting Flask app container for health check..."
           # Run the container in detached mode (-d) and map port 8000
-          # Use --network host to allow access to services running on the host (runner)
-          # DB_HOST and CELERY_BROKER_URL/CELERY_RESULT_BACKEND now point to localhost
-          docker run -d --name flask-test-app -p 8000:8000 --network host \
+          docker run -d --name flask-test-app -p 8000:8000 \
+            --link postgres-flask-test:postgres \
             -e SERVICE_TYPE=flask \
-            -e DB_HOST=localhost \
-            -e DB_PORT=5432 \
-            -e DB_NAME=audiomuse_db_test \
-            -e DB_USER=user \
-            -e DB_PASSWORD=password \
-            -e CELERY_BROKER_URL=redis://localhost:6379/0 \
-            -e CELERY_RESULT_BACKEND=redis://localhost:6379/0 \
+            -e DATABASE_URL=postgresql://testuser:testpass@postgres:5432/testdb \
             ${{ steps.docker_tags.outputs.test_tag }}
 
           echo "Waiting for Flask app to start (max 60 seconds)..."
-          # Health check loop: Try to connect to the Flask app's /api/config endpoint
-          # and check logs for database initialization messages.
+          # Health check loop: Try to connect to the Flask app's /api/last_task endpoint
           for i in $(seq 1 60); do
-            # Check if the container is still running
-            if ! docker ps -f name=flask-test-app --format '{{.Names}}' | grep -q flask-test-app; then
-              echo "Flask app container unexpectedly stopped."
-              docker logs flask-test-app # Print logs for debugging
-              exit 1
-            fi
-            
-            # Check if the app is responsive via its /api/config endpoint
-            if curl -fsS http://localhost:8000/api/config > /dev/null; then
-              echo "Flask app is up and responsive (checked /api/config)!"
-              # Give it a few more seconds for DB initialization logs to appear
-              sleep 5 
-              if docker logs flask-test-app 2>&1 | grep -E "Table 'task_status' ensured to exist.|Table 'task_status' already exists"; then
-                 echo "DB initialization messages found in Flask app logs. Flask app check passed."
-                 exit 0
-              else
-                 echo "DB initialization messages NOT found yet. This might be okay if /api/config works."
-                 # If /api/config works, we'll consider it a pass for now, but log the missing DB init message.
-                 # If strict DB init log check is critical, uncomment the 'exit 1' below.
-                 # exit 1 
-                 exit 0 # Proceed if app is responsive, even if specific DB init log isn't seen immediately
-              fi
+            if curl -sf http://localhost:8000/api/last_task > /dev/null; then
+              echo "Flask app is up and responsive!"
+              exit 0
             fi
             echo "Waiting... ($i/60)"
             sleep 1
           done
-          echo "Flask app did not start, respond, or confirm DB initialization within the expected time."
+          echo "Flask app did not start or respond with a successful status on /api/last_task within the expected time."
           docker logs flask-test-app # Print logs for debugging
           exit 1 # Fail the job if app doesn't start
 
       - name: Run Celery Worker Container Health Check
         run: |
+          echo "Starting temporary Redis container for Celery broker..."
+          docker run -d --name redis-test redis:latest
+
+          echo "Waiting for Redis to start..."
+          sleep 5 # Give Redis a few seconds to initialize
+
+          echo "Starting temporary PostgreSQL container for Celery test..."
+          docker run -d --name postgres-celery-test \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            postgres:15-alpine
+
+          echo "Waiting for PostgreSQL (Celery test) to start..."
+          for i in $(seq 1 30); do
+            if docker exec postgres-celery-test pg_isready -U testuser -d testdb -q; then
+              echo "PostgreSQL (Celery test) is ready."
+              break
+            fi
+            echo "Waiting for PostgreSQL (Celery test)... ($i/30)"
+            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "PostgreSQL (Celery test) did not become ready in time."
+              docker logs postgres-celery-test
+              exit 1
+            fi
+          done
+
           echo "Starting Celery worker container for health check..."
-          # Run the celery worker container in detached mode
-          # Use --network host to allow access to services running on the host (runner)
-          docker run -d --name celery-test-worker --network host \
+          # Run the celery worker container in detached mode, linking to redis
+          docker run -d --name celery-test-worker \
+            --link redis-test:redis --link postgres-celery-test:postgres \
             -e SERVICE_TYPE=celery \
-            -e DB_HOST=localhost \
-            -e DB_PORT=5432 \
-            -e DB_NAME=audiomuse_db_test \
-            -e DB_USER=user \
-            -e DB_PASSWORD=password \
-            -e CELERY_BROKER_URL=redis://localhost:6379/0 \
-            -e CELERY_RESULT_BACKEND=redis://localhost:6379/0 \
+            -e CELERY_BROKER_URL=redis://redis:6379/0 \
+            -e CELERY_RESULT_BACKEND=redis://redis:6379/0 \
+            -e DATABASE_URL=postgresql://testuser:testpass@postgres:5432/testdb \
             ${{ steps.docker_tags.outputs.test_tag }}
 
           echo "Waiting for Celery worker to start (max 90 seconds)..."
@@ -171,13 +163,9 @@ jobs:
                   echo "Celery worker container is running and ready."
                   exit 0
               fi
-            else
-              echo "Celery worker container unexpectedly stopped."
-              docker logs celery-test-worker # Print logs for debugging
-              exit 1
             fi
-            echo "Waiting for Celery worker to be ready... ($i/30)"
-            sleep 3
+            echo "Waiting... ($i/30)"
+            sleep 3 # Increased sleep duration
           done
           echo "Celery worker container did not start or become ready within the expected time."
           docker logs celery-test-worker # Print logs for debugging
@@ -187,14 +175,15 @@ jobs:
         if: always() # Run this step even if previous steps fail
         run: |
           echo "Cleaning up temporary Docker containers and image..."
-          docker rm -f flask-test-app || true # || true prevents error if container didn't start or was already removed
+          docker rm -f flask-test-app || true
           docker rm -f celery-test-worker || true
-          # Redis and Postgres are managed by the 'services' block and cleaned up automatically by GitHub Actions.
+          docker rm -f redis-test || true
+          docker rm -f postgres-flask-test || true
+          docker rm -f postgres-celery-test || true
           docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true # Remove the temporary image
 
       - name: Build and Push AudioMuse AI Image (Final Push)
         # This step only runs if all previous test steps passed
-        if: success() # Only run if previous steps (including health checks) succeeded
         uses: docker/build-push-action@v5
         with:
           context: .

@@ -17,17 +17,27 @@ stringData:
   api_token: "e0b8c325bc1b426c81922b90c0aa2ff1" # Your Jellyfin API Token
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: playlist
+type: Opaque
+stringData:
+  POSTGRES_USER: "audiomuse" # As used in app.py
+  POSTGRES_PASSWORD: "audiomusepassword" # As used in app.py
+  POSTGRES_DB: "audiomusedb" # As used in app.py
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: audiomuse-ai-config
   namespace: playlist
 data:
   JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087"
+  DATABASE_URL: "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb"
   CELERY_BROKER_URL: "redis://redis-service.playlist:6379/0"
   CELERY_RESULT_BACKEND: "redis://redis-service.playlist:6379/0"
-  TEMP_DIR: "/workspace/temp_audio"
-  DB_PATH: "/workspace/db.sqlite"
-  STATUS_DB_PATH: "/workspace/status_db.sqlite"
+  TEMP_DIR: "/app/temp_audio" # Updated to match code changes
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -78,6 +88,77 @@ spec:
     app: redis
     tier: backend
   type: ClusterIP # Internal service only
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: playlist
+spec:
+  accessModes:
+    - ReadWriteOnce # Suitable for a single PostgreSQL instance
+  resources:
+    requests:
+      storage: 5Gi # Adjust storage size as needed
+  # storageClassName: "your-storage-class" # Uncomment and specify if you have a specific storage class
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+  namespace: playlist
+  labels:
+    app: postgres
+    tier: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+      tier: database
+  template:
+    metadata:
+      labels:
+        app: postgres
+        tier: database
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine # Using PostgreSQL 15
+        imagePullPolicy: "IfNotPresent"
+        ports:
+        - containerPort: 5432
+        envFrom:
+        - secretRef:
+            name: postgres-credentials
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service # Service name used in DATABASE_URL
+  namespace: playlist
+spec:
+  selector:
+    app: postgres
+  ports:
+  - protocol: TCP
+    port: 5432 # Default PostgreSQL port
+    targetPort: 5432
+  type: ClusterIP # Internal service
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -135,17 +216,11 @@ spec:
             drop:
             - ALL
         volumeMounts:
-        - name: temp-audio-empty-dir
-          mountPath: /workspace/temp_audio
-        - name: workspace-hostpath
-          mountPath: /workspace
+        - name: app-temp-audio # Renamed for clarity and consistency
+          mountPath: /app/temp_audio # Mount path matches TEMP_DIR
       volumes:
-      - name: temp-audio-empty-dir
+      - name: app-temp-audio # Renamed for clarity and consistency
         emptyDir: {} # Temporary storage for downloaded audio
-      - name: workspace-hostpath
-        hostPath:
-          path: /mnt/workspace # Your host path - Databases will live here
-          type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
@@ -221,14 +296,8 @@ spec:
             drop:
             - ALL
         volumeMounts:
-        - name: temp-audio-empty-dir
-          mountPath: /workspace/temp_audio
-        - name: workspace-hostpath
-          mountPath: /workspace # Mounts the host path for legacy/external access including DBs
+        - name: app-temp-audio # Renamed for clarity and consistency
+          mountPath: /app/temp_audio # Mount path matches TEMP_DIR
       volumes:
-      - name: temp-audio-empty-dir
+      - name: app-temp-audio # Renamed for clarity and consistency
         emptyDir: {}
-      - name: workspace-hostpath
-        hostPath:
-          path: "/mnt/workspace" # Your host path - Databases will live here
-          type: DirectoryOrCreate

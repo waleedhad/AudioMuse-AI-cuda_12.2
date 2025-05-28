@@ -1,4 +1,4 @@
-from app import celery, init_db, clean_temp, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, NUM_RECENT_ALBUMS, TOP_N_MOODS # Import everything needed by the task
+from app import celery  # Import only the celery instance
 import os
 
 # You might need to adjust the path if essentia models are not directly accessible
