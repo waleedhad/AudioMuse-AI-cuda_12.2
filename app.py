@@ -478,7 +478,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             if details_extra:
                 current_details.update(details_extra)
             self.update_state(state='PROGRESS', meta={'progress': progress, 'status': message, 'details': current_details})
-            save_task_status(task_id, "main_analysis", "PROGRESS", progress=progress, details=current_details)
+            save_task_status(current_task_id, "main_analysis", "PROGRESS", progress=progress, details=current_details)
 
         try:
             log_and_update_main_analysis("🚀 Starting main analysis process...", 0)
