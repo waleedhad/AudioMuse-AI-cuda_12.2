@@ -160,8 +160,8 @@ def update_playlist_table(playlists): # Removed db_path
         cur.close()
 
 # --- Import Task Functions ---
-# Import after app and db utils are defined to avoid circular imports if tasks need them
-from tasks import run_analysis_task, run_clustering_task
+# Imports are moved into the respective endpoint functions to avoid circular dependencies
+# from tasks import run_analysis_task, run_clustering_task
 # analyze_album_task and run_single_clustering_iteration_task are called by other tasks, not directly by API
 
 # --- API Endpoints ---
@@ -172,6 +172,9 @@ def index():
 
 @app.route('/api/analysis/start', methods=['POST'])
 def start_analysis_endpoint():
+    # Import task function here to break circular dependency
+    from tasks import run_analysis_task
+
     data = request.json or {}
     jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
     jellyfin_user_id = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
@@ -192,6 +195,9 @@ def start_analysis_endpoint():
 
 @app.route('/api/clustering/start', methods=['POST'])
 def start_clustering_endpoint():
+    # Import task function here to break circular dependency
+    from tasks import run_clustering_task
+
     data = request.json
     clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
     num_clusters_min_val = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
