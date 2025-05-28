@@ -1,34 +1,74 @@
+# /home/guido/Music/AudioMuse-AI/rq_worker.py
 import os
-import redis
-from rq import Connection, Worker, Queue
+import sys
 
-# Ensure model paths are set for the worker environment
-# These should match the paths accessible by your worker instances.
-os.environ["EMBEDDING_MODEL_PATH"] = os.environ.get("EMBEDDING_MODEL_PATH", "/app/msd-musicnn-1.pb")
-os.environ["PREDICTION_MODEL_PATH"] = os.environ.get("PREDICTION_MODEL_PATH", "/app/msd-msd-musicnn-1.pb")
+# Ensure the /app directory (where app.py and tasks.py are) is in the Python path
+# This is important if rq_worker.py is in the root and app.py/tasks.py are in /app
+# In your Docker setup, PYTHONPATH already includes /app, but this is good for local dev too.
+sys.path.append(os.path.dirname(os.path.abspath(__file__))) # Adds the current directory
+# If app.py is in a subdirectory like 'app_module' relative to rq_worker.py, you'd adjust:
+# sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app_module'))
 
-# Import the Flask app instance (for app context in tasks)
-# This is crucial because tasks in tasks.py use `with app.app_context():`
-from app import app
+# Import Worker from rq
+from rq import Worker
 
-# Import task functions from the tasks.py file
-from tasks import analyze_album_task, run_analysis_task, run_single_clustering_iteration_task, run_clustering_task
+# Import the redis_conn, rq_queue (which is the 'default' queue),
+# and the Flask app instance from your main app.py.
+# This ensures the worker uses the same Redis connection, queue configuration,
+# and application context as your Flask app.
+try:
+    from app import app, redis_conn, rq_queue
+except ImportError as e:
+    print(f"Error importing from app.py: {e}")
+    print("Please ensure app.py is in the Python path and does not have top-level errors.")
+    sys.exit(1)
 
-listen_queues = ['default']  # Specify the queues this worker will listen to
-
-# Get Redis URL from environment or use a default
-redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+# The queues the worker will listen on.
+# We use rq_queue directly, which is already configured with redis_conn.
+# You can add more queues here if you define them in app.py, e.g., high_priority_queue
+queues_to_listen = [rq_queue]
 
 if __name__ == '__main__':
-    redis_conn = redis.from_url(redis_url)
-    with Connection(redis_conn):
-        # The tasks are imported from tasks.py, RQ will find them by their names
-        # when they are enqueued.
-        # The 'app' instance is available in the global scope of this worker
-        # process, so tasks.py can import and use it for app_context.
-        worker = Worker(
-            queues=[Queue(name, connection=redis_conn) for name in listen_queues],
-            connection=redis_conn
-        )
-        # worker.work(with_scheduler=True) # Uncomment if you plan to use RQ Scheduler
-        worker.work()
+    # The redis_conn is already initialized when imported from app.py.
+    # The queues_to_listen are already configured with this connection.
+
+    print(f"RQ Worker starting. Listening on queues: {[q.name for q in queues_to_listen]}")
+    print(f"Using Redis connection: {redis_conn.connection_pool.connection_kwargs}")
+
+    # Create a worker instance, explicitly passing the connection.
+    # The 'app' object is passed to `with app.app_context():` within the tasks themselves
+    # if they need it. RQ's default job execution doesn't automatically push an app context.
+    # Tasks should be designed to handle this, e.g., by calling `with app.app_context():`
+    # or by using functions from app.py that manage their own context.
+    worker = Worker(
+        queues_to_listen,
+        connection=redis_conn
+        # default_timeout=3600, # Optional: set a default timeout for jobs
+        # log_job_description=True # Optional: logs job descriptions
+    )
+
+    # Start the worker.
+    # You can set logging_level for more verbose output.
+    # Common levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    logging_level = os.getenv("RQ_LOGGING_LEVEL", "INFO").upper()
+    print(f"RQ Worker logging level set to: {logging_level}")
+
+    try:
+        # The `with app.app_context():` here is generally NOT how RQ workers are run.
+        # RQ jobs are executed in separate processes. If a job needs app context,
+        # the job function itself should establish it.
+        # However, if there's any setup *for the worker process itself* that needs app context,
+        # it could be done here, but it's uncommon.
+        # For tasks needing app context (like DB access), they should handle it internally:
+        #
+        # In tasks.py:
+        # from app import app, get_db
+        # def my_task():
+        #     with app.app_context():
+        #         db = get_db()
+        #         # ... do work ...
+
+        worker.work(logging_level=logging_level)
+    except Exception as e:
+        print(f"RQ Worker failed to start or encountered an error: {e}")
+        sys.exit(1)
