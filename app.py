@@ -19,6 +19,7 @@ from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, Ten
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture # Import GaussianMixture
+from celery.exceptions import SoftTimeLimitExceeded # Import SoftTimeLimitExceeded
 from celery import current_task # Import current_task
 # Your existing config - assuming this is from config.py and sets global variables
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, MAX_DISTANCE, \
@@ -383,7 +384,7 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     print(f"Task {task_id} ({sender.name}) finished with state {state}.")
 
 
-# --- Celery Task Definitions ---
+# --- Celery Task Definitions (with soft_time_limit where appropriate) ---
 
 @celery.task(bind=True)
 def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, parent_task_id):
@@ -397,6 +398,7 @@ def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_i
         headers = {"X-Emby-Token": jellyfin_token}
         log_messages = []
         tracks_analyzed_count = 0
+        current_progress_val = 0 # Initialize for the scope
 
         def log_and_update_album_task(message, progress, current_track_name=None, task_state='PROGRESS'):
             log_messages.append(message)
@@ -410,6 +412,7 @@ def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_i
 
         try:
             log_and_update_album_task(f"Fetching tracks for album: {album_name}", 5)
+            current_progress_val = 5
             tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id)
             if not tracks:
                 log_and_update_album_task(f"No tracks found for album: {album_name}", 100, task_state='SUCCESS')
@@ -467,34 +470,37 @@ def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_i
             import traceback
             error_traceback = traceback.format_exc()
             # Determine current progress before potential failure for logging
-            current_progress_on_failure = 0 
-            if 'current_progress_val' in locals():
-                current_progress_on_failure = current_progress_val
-            elif log_messages: # Try to get progress from last log message if possible
-                try:
-                    last_log_details = json.loads(log_messages[-1].get('details', '{}'))
-                    current_progress_on_failure = last_log_details.get('progress', 0)
-                except: pass # Ignore if parsing fails
+            # current_progress_on_failure = 0 # This was the old way, current_progress_val is better
+            # if 'current_progress_val' in locals():
+            #     current_progress_on_failure = current_progress_val
+            # elif log_messages: # Try to get progress from last log message if possible
+            #     try: # This is too complex and error prone, rely on current_progress_val
+            #         last_log_details = json.loads(log_messages[-1].get('details', '{}'))
+            #         current_progress_on_failure = last_log_details.get('progress', 0)
+            #     except: pass # Ignore if parsing fails
 
-            log_and_update_album_task(f"Failed to analyze album '{album_name}': {e}", current_progress_on_failure, task_state='FAILURE')
+            log_and_update_album_task(f"Failed to analyze album '{album_name}': {e}", current_progress_val, task_state='FAILURE')
             print(f"ERROR: Album analysis {album_id} failed: {e}\n{error_traceback}")
             raise # Re-raise to mark task as FAILED in Celery
 
-@celery.task(bind=True)
+@celery.task(bind=True, soft_time_limit=3600) # Example: 1 hour soft time limit for the whole analysis
 def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods):
     """Main Celery task to orchestrate the analysis of multiple albums."""
     with app.app_context(): # Ensure Flask application context
         current_task_id = self.request.id
         task_result_checker = AsyncResult(current_task_id, app=celery) if current_task_id else None
+        # Ensure current_progress is initialized before the try block
+        # so it's available in the except SoftTimeLimitExceeded block
+        current_progress = 0 
         save_task_status(current_task_id, "main_analysis", "STARTED", progress=0, details={"message": "Fetching albums..."})
 
         headers = {"X-Emby-Token": jellyfin_token}
         log_messages = []
-        current_progress = 0 # Initialize current_progress for the scope
+        # current_progress = 0 # Initialize current_progress for the scope - moved up
 
-        def log_and_update_main_analysis(message, progress, details_extra=None, task_state='PROGRESS'):
+        def log_and_update_main_analysis(message, progress_val, details_extra=None, task_state='PROGRESS'): # Renamed progress to progress_val
             nonlocal current_progress # Allow modification of outer scope variable
-            current_progress = progress # Keep track of the latest progress
+            current_progress = progress_val # Keep track of the latest progress
             log_messages.append(message)
             print(f"[MainAnalysisTask-{current_task_id}] {message}") # Celery container log
             current_details = {"log": log_messages, "overall_status": message}
@@ -502,10 +508,10 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 current_details.update(details_extra)
             
             if task_state != 'PROGRESS':
-                self.update_state(state=task_state, meta={'progress': progress, 'status': message, 'details': current_details})
+                self.update_state(state=task_state, meta={'progress': progress_val, 'status': message, 'details': current_details})
             else:
-                self.update_state(state='PROGRESS', meta={'progress': progress, 'status': message, 'details': current_details})
-            save_task_status(current_task_id, "main_analysis", task_state, progress=progress, details=current_details)
+                self.update_state(state='PROGRESS', meta={'progress': progress_val, 'status': message, 'details': current_details})
+            save_task_status(current_task_id, "main_analysis", task_state, progress=progress_val, details=current_details)
 
         try:
             log_and_update_main_analysis("🚀 Starting main analysis process...", 0)
@@ -540,7 +546,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 album_task_ids.append(album_task.id)
 
             log_and_update_main_analysis(f"Launched {total_albums} album analysis tasks.", 10, 
-                             details={"message": f"Launched {total_albums} album analysis tasks.", "album_task_ids": album_task_ids})
+                             details_extra={"message": f"Launched {total_albums} album analysis tasks.", "album_task_ids": album_task_ids})
 
             while not all(t.ready() for t in album_tasks_group):
                 completed_count = sum(1 for t in album_tasks_group if t.ready())
@@ -554,7 +560,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 log_and_update_main_analysis(
                     f"Processing albums: {completed_count}/{total_albums} completed.",
                     progress_while_waiting,
-                    {"albums_completed": completed_count, "total_albums": total_albums, "album_task_ids": album_task_ids}
+                    details_extra={"albums_completed": completed_count, "total_albums": total_albums, "album_task_ids": album_task_ids}
                 )
                 time.sleep(5) 
 
@@ -570,7 +576,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                     failed_albums += 1
             
             final_message = f"Main analysis complete. Successful albums: {successful_albums}, Failed albums: {failed_albums}. Total tracks analyzed: {total_tracks_analyzed_all_albums}."
-            log_and_update_main_analysis(final_message, 100, {"albums_completed": successful_albums, "albums_failed": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}, task_state='SUCCESS')
+            log_and_update_main_analysis(final_message, 100, details_extra={"albums_completed": successful_albums, "albums_failed": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}, task_state='SUCCESS')
             clean_temp(TEMP_DIR)
             return {"status": "SUCCESS", "message": final_message, "successful_albums": successful_albums, "failed_albums": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}
 
@@ -579,10 +585,16 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             error_traceback = traceback.format_exc()
             print(f"FATAL ERROR: Analysis failed: {e}\n{error_traceback}")
             # Use the last known 'current_progress' for logging failure
-            log_and_update_main_analysis(f"❌ Main analysis failed: {e}", current_progress, {"error": str(e)}, task_state='FAILURE')
+            log_and_update_main_analysis(f"❌ Main analysis failed: {e}", current_progress, details_extra={"error": str(e)}, task_state='FAILURE')
+            raise
+        except SoftTimeLimitExceeded:
+            print(f"SOFT TIME LIMIT EXCEEDED for main analysis task {current_task_id}")
+            log_and_update_main_analysis(f"Main analysis task {current_task_id} exceeded soft time limit.", current_progress, task_state='FAILURE') # Or REVOKED
+            # No need to raise here, Celery handles it by setting state to FAILURE if not caught,
+            # but we are updating our DB.
             raise 
 
-@celery.task(bind=True)
+@celery.task(bind=True, soft_time_limit=1800) # Example: 30 minutes soft time limit for a single clustering run
 def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clustering_method_config, pca_config, max_songs_per_cluster, parent_task_id):
     """Celery task for a single clustering iteration with specific parameters."""
     with app.app_context(): # Ensure Flask application context
@@ -590,8 +602,11 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
         task_result_checker = AsyncResult(current_task_id, app=celery) if current_task_id else None
         log_messages_iter = []
         initial_details = {"run_id": run_id, "params": clustering_method_config, "log": log_messages_iter}
+        current_progress_single_run = 0 # Initialize progress for this task
         
-        def log_and_update_single_run(message, progress, details_extra=None, task_state='PROGRESS'):
+        def log_and_update_single_run(message, progress_val, details_extra=None, task_state='PROGRESS'): # Renamed progress to progress_val
+            nonlocal current_progress_single_run
+            current_progress_single_run = progress_val
             log_messages_iter.append(message)
             print(f"[SingleClusteringRun-{current_task_id}] Run {run_id}: {message}")
             current_run_details = {"run_id": run_id, "log": log_messages_iter, "params": clustering_method_config}
@@ -600,138 +615,148 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
             
             # Update Celery's state for the sub-task
             if task_state != 'PROGRESS':
-                 self.update_state(state=task_state, meta={'progress': progress, 'status': message, 'details': current_run_details})
+                 self.update_state(state=task_state, meta={'progress': progress_val, 'status': message, 'details': current_run_details})
             else:
-                 self.update_state(state='PROGRESS', meta={'progress': progress, 'status': message, 'details': current_run_details})
-            save_task_status(current_task_id, "single_clustering_run", task_state, parent_task_id=parent_task_id, sub_type_identifier=str(run_id), progress=progress, details=current_run_details)
+                 self.update_state(state='PROGRESS', meta={'progress': progress_val, 'status': message, 'details': current_run_details})
+            save_task_status(current_task_id, "single_clustering_run", task_state, parent_task_id=parent_task_id, sub_type_identifier=str(run_id), progress=progress_val, details=current_run_details)
 
-        log_and_update_single_run(f"Starting with method {clustering_method_config['method']}, params: {clustering_method_config['params']}, PCA: {pca_config}", 0)
+        try:
+            log_and_update_single_run(f"Starting with method {clustering_method_config['method']}, params: {clustering_method_config['params']}, PCA: {pca_config}", 0) # Initial progress 0
+            # current_progress_single_run = 0 # Ensure it's defined for the try block - already done above
 
-        all_tracks_data = json.loads(all_tracks_data_json) 
-        if task_result_checker and task_result_checker.state == 'REVOKED':
-            log_and_update_single_run("Task revoked at start.", 0, task_state='REVOKED')
-            return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
-        
-        rows = [type('DictRow', (), item)() for item in all_tracks_data] 
-        X_original = [score_vector(row, MOOD_LABELS) for row in rows]
-        X_scaled = np.array(X_original)
-        data_for_clustering = X_scaled
-        pca_model = None
-        n_components_actual = 0 # Initialize
-
-        if pca_config["enabled"]:
+            all_tracks_data = json.loads(all_tracks_data_json)
             if task_result_checker and task_result_checker.state == 'REVOKED':
-                log_and_update_single_run("Task revoked before PCA.", 20, task_state='REVOKED')
+                log_and_update_single_run("Task revoked at start.", 0, task_state='REVOKED') # Progress 0
                 return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
-            
-            n_components_actual = min(pca_config["components"], X_scaled.shape[1], len(rows) -1 if len(rows) >1 else 1)
-            if n_components_actual > 0:
-                pca_model = PCA(n_components=n_components_actual)
-                data_for_clustering = pca_model.fit_transform(X_scaled)
-            else:
-                pca_config["enabled"] = False 
-        log_and_update_single_run(f"PCA {'enabled with ' + str(n_components_actual) + ' components' if pca_config['enabled'] else 'disabled'}.", 25)
 
-        labels = None
-        cluster_centers_map = {} 
-        raw_distances = np.zeros(len(data_for_clustering))
+            rows = [type('DictRow', (), item)() for item in all_tracks_data]
+            X_original = [score_vector(row, MOOD_LABELS) for row in rows]
+            X_scaled = np.array(X_original)
+            data_for_clustering = X_scaled
+            pca_model = None
+            n_components_actual = 0 # Initialize
 
-        method = clustering_method_config["method"]
-        params = clustering_method_config["params"]
+            if pca_config["enabled"]:
+                if task_result_checker and task_result_checker.state == 'REVOKED':
+                    log_and_update_single_run("Task revoked before PCA.", 20, task_state='REVOKED') # Progress 20
+                    return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
 
-        if task_result_checker and task_result_checker.state == 'REVOKED':
-            log_and_update_single_run("Task revoked before clustering method execution.", 30, task_state='REVOKED')
-            return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
-        
-        if method == "kmeans":
-            kmeans = KMeans(n_clusters=params["n_clusters"], random_state=None, n_init='auto')
-            labels = kmeans.fit_predict(data_for_clustering)
-            cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(params["n_clusters"])}
-            centers_for_points = kmeans.cluster_centers_[labels]
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-        elif method == "dbscan":
-            dbscan = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
-            labels = dbscan.fit_predict(data_for_clustering)
-            for cluster_id in set(labels):
-                if cluster_id == -1: continue
-                indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
-                cluster_points = np.array([data_for_clustering[i] for i in indices])
-                if len(cluster_points) > 0:
-                    center = cluster_points.mean(axis=0)
-                    for i in indices: raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
-                    cluster_centers_map[cluster_id] = center
-        elif method == "gmm":
-            gmm = GaussianMixture(n_components=params["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
-            gmm.fit(data_for_clustering)
-            labels = gmm.predict(data_for_clustering)
-            log_and_update_single_run(f"GMM fitting complete. Found {len(set(labels))} clusters (incl. noise if applicable).", 45)
-            cluster_centers_map = {i: gmm.means_[i] for i in range(params["n_components"])}
-            centers_for_points = gmm.means_[labels]
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-        log_and_update_single_run("Clustering algorithm applied.", 50)
+                n_components_actual = min(pca_config["components"], X_scaled.shape[1], len(rows) -1 if len(rows) >1 else 1)
+                if n_components_actual > 0:
+                    pca_model = PCA(n_components=n_components_actual)
+                    data_for_clustering = pca_model.fit_transform(X_scaled)
+                else:
+                    pca_config["enabled"] = False
+            log_and_update_single_run(f"PCA {'enabled with ' + str(n_components_actual) + ' components' if pca_config['enabled'] else 'disabled'}.", 25)
+            # current_progress_single_run = 25 # Updated by log_and_update_single_run
 
-        if labels is None or len(set(labels) - {-1}) == 0:
-            log_and_update_single_run("No valid clusters found.", 100, {"diversity_score": -1}, task_state='SUCCESS')
-            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_components": None, "parameters": clustering_method_config}
+            labels = None
+            cluster_centers_map = {}
+            raw_distances = np.zeros(len(data_for_clustering))
 
-        max_dist = raw_distances.max()
-        normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
+            method = clustering_method_config["method"]
+            params = clustering_method_config["params"]
 
-        track_info_list = [{"row": rows[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(rows))]
+            if task_result_checker and task_result_checker.state == 'REVOKED':
+                log_and_update_single_run("Task revoked before clustering method execution.", 30, task_state='REVOKED') # Progress 30
+                return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
 
-        filtered_clusters = defaultdict(list)
-        for cluster_id_val in set(labels):
-            if cluster_id_val == -1: continue
-            cluster_tracks_list = [t for t in track_info_list if t["label"] == cluster_id_val and t["distance"] <= MAX_DISTANCE]
-            if not cluster_tracks_list: continue
-            cluster_tracks_list.sort(key=lambda x: x["distance"])
-            
-            count_per_artist = defaultdict(int)
-            selected_tracks = []
-            for t_item in cluster_tracks_list:
-                author = t_item["row"].author 
-                if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
-                    selected_tracks.append(t_item)
-                    count_per_artist[author] += 1
-                if len(selected_tracks) >= max_songs_per_cluster: break
-            for t_item in selected_tracks:
-                item_id, title, author = t_item["row"].item_id, t_item["row"].title, t_item["row"].author
-                filtered_clusters[cluster_id_val].append((item_id, title, author))
-        log_and_update_single_run("Tracks filtered into clusters.", 65)
+            if method == "kmeans":
+                kmeans = KMeans(n_clusters=params["n_clusters"], random_state=None, n_init='auto')
+                labels = kmeans.fit_predict(data_for_clustering)
+                cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(params["n_clusters"])}
+                centers_for_points = kmeans.cluster_centers_[labels]
+                raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            elif method == "dbscan":
+                dbscan = DBSCAN(eps=params["eps"], min_samples=params["min_samples"])
+                labels = dbscan.fit_predict(data_for_clustering)
+                for cluster_id in set(labels):
+                    if cluster_id == -1: continue
+                    indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id]
+                    cluster_points = np.array([data_for_clustering[i] for i in indices])
+                    if len(cluster_points) > 0:
+                        center = cluster_points.mean(axis=0)
+                        for i in indices: raw_distances[i] = np.linalg.norm(data_for_clustering[i] - center)
+                        cluster_centers_map[cluster_id] = center
+            elif method == "gmm":
+                gmm = GaussianMixture(n_components=params["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
+                gmm.fit(data_for_clustering)
+                labels = gmm.predict(data_for_clustering)
+                log_and_update_single_run(f"GMM fitting complete. Found {len(set(labels))} clusters (incl. noise if applicable).", 45) # Progress 45
+                cluster_centers_map = {i: gmm.means_[i] for i in range(params["n_components"])}
+                centers_for_points = gmm.means_[labels]
+                raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            log_and_update_single_run("Clustering algorithm applied.", 50) # Progress 50
+            # current_progress_single_run = 50 # Updated by log_and_update_single_run
 
-        current_named_playlists = defaultdict(list)
-        current_playlist_centroids = {}
-        unique_predominant_mood_scores = {}
+            if labels is None or len(set(labels) - {-1}) == 0:
+                log_and_update_single_run("No valid clusters found.", 100, details_extra={"diversity_score": -1}, task_state='SUCCESS')
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_components": None, "parameters": clustering_method_config}
 
-        for label_val, songs_list in filtered_clusters.items():
-            if songs_list:
-                center_val = cluster_centers_map.get(label_val)
-                if center_val is None: continue
-                name, top_scores = name_cluster(center_val, pca_model, pca_config["enabled"], MOOD_LABELS)
-                if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
-                    predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
-                    if predominant_mood_key in MOOD_LABELS:
-                        current_mood_score = top_scores.get(predominant_mood_key, 0.0)
-                        unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score)
-                current_named_playlists[name].extend(songs_list)
-                current_playlist_centroids[name] = top_scores
+            max_dist = raw_distances.max()
+            normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
 
-        diversity_score = sum(unique_predominant_mood_scores.values())
-        log_and_update_single_run(f"Named {len(current_named_playlists)} playlists. Diversity score: {diversity_score:.2f}", 75)
-        
-        pca_model_details = {"n_components": pca_model.n_components_, "mean": pca_model.mean_.tolist()} if pca_model else None
+            track_info_list = [{"row": rows[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(rows))]
 
-        result = {
-            "diversity_score": float(diversity_score),
-            "named_playlists": dict(current_named_playlists), 
-            "playlist_centroids": current_playlist_centroids,
-            "pca_model_details": pca_model_details, 
-            "parameters": {"clustering_method_config": clustering_method_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster}
-        }
-        log_and_update_single_run("Iteration complete.", 100, {"diversity_score": diversity_score, "final_result": result}, task_state='SUCCESS')
-        return result
+            filtered_clusters = defaultdict(list)
+            for cluster_id_val in set(labels):
+                if cluster_id_val == -1: continue
+                cluster_tracks_list = [t for t in track_info_list if t["label"] == cluster_id_val and t["distance"] <= MAX_DISTANCE]
+                if not cluster_tracks_list: continue
+                cluster_tracks_list.sort(key=lambda x: x["distance"])
 
-@celery.task(bind=True)
+                count_per_artist = defaultdict(int)
+                selected_tracks = []
+                for t_item in cluster_tracks_list:
+                    author = t_item["row"].author
+                    if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
+                        selected_tracks.append(t_item)
+                        count_per_artist[author] += 1
+                    if len(selected_tracks) >= max_songs_per_cluster: break
+                for t_item in selected_tracks:
+                    item_id, title, author = t_item["row"].item_id, t_item["row"].title, t_item["row"].author
+                    filtered_clusters[cluster_id_val].append((item_id, title, author))
+            log_and_update_single_run("Tracks filtered into clusters.", 65) # Progress 65
+            # current_progress_single_run = 65 # Updated by log_and_update_single_run
+
+            current_named_playlists = defaultdict(list)
+            current_playlist_centroids = {}
+            unique_predominant_mood_scores = {}
+
+            for label_val, songs_list in filtered_clusters.items():
+                if songs_list:
+                    center_val = cluster_centers_map.get(label_val)
+                    if center_val is None: continue
+                    name, top_scores = name_cluster(center_val, pca_model, pca_config["enabled"], MOOD_LABELS)
+                    if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
+                        predominant_mood_key = max(top_scores, key=lambda k: top_scores[k] if k in MOOD_LABELS else -1)
+                        if predominant_mood_key in MOOD_LABELS:
+                            current_mood_score = top_scores.get(predominant_mood_key, 0.0)
+                            unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score)
+                    current_named_playlists[name].extend(songs_list)
+                    current_playlist_centroids[name] = top_scores
+
+            diversity_score = sum(unique_predominant_mood_scores.values())
+            log_and_update_single_run(f"Named {len(current_named_playlists)} playlists. Diversity score: {diversity_score:.2f}", 75) # Progress 75
+            # current_progress_single_run = 75 # Updated by log_and_update_single_run
+
+            pca_model_details = {"n_components": pca_model.n_components_, "mean": pca_model.mean_.tolist()} if pca_model else None
+
+            result = {
+                "diversity_score": float(diversity_score),
+                "named_playlists": dict(current_named_playlists),
+                "playlist_centroids": current_playlist_centroids,
+                "pca_model_details": pca_model_details,
+                "parameters": {"clustering_method_config": clustering_method_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster}
+            }
+            log_and_update_single_run("Iteration complete.", 100, details_extra={"diversity_score": diversity_score, "final_result": result}, task_state='SUCCESS')
+            return result
+        except SoftTimeLimitExceeded:
+            print(f"SOFT TIME LIMIT EXCEEDED for single clustering run {current_task_id} (Run ID: {run_id})")
+            log_and_update_single_run(f"Single clustering run {run_id} exceeded soft time limit.", current_progress_single_run, task_state='FAILURE') # Or REVOKED
+            raise
+
+@celery.task(bind=True, soft_time_limit=7200) # Example: 2 hours soft time limit for the whole clustering
 def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, gmm_n_components_min, gmm_n_components_max):
     """
     Celery task to run the clustering and playlist generation process with an
@@ -747,9 +772,9 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
         log_messages = []
         current_progress = 0 # Initialize current_progress for the scope
 
-        def log_and_update_main_clustering(message, progress, details_extra=None, task_state='PROGRESS'):
+        def log_and_update_main_clustering(message, progress_val, details_extra=None, task_state='PROGRESS'): # Renamed progress to progress_val
             nonlocal current_progress
-            current_progress = progress
+            current_progress = progress_val
             log_messages.append(message)
             print(f"[MainClusteringTask-{current_task_id}] {message}") # Celery container log
             current_details = {"log": log_messages, "overall_status": message}
@@ -757,16 +782,16 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                 current_details.update(details_extra)
             
             if task_state != 'PROGRESS':
-                 self.update_state(state=task_state, meta={'progress': progress, 'status': message, 'details': current_details})
+                 self.update_state(state=task_state, meta={'progress': progress_val, 'status': message, 'details': current_details})
             else:
-                 self.update_state(state='PROGRESS', meta={'progress': progress, 'status': message, 'details': current_details})
-            save_task_status(current_task_id, "main_clustering", task_state, progress=progress, details=current_details)
+                 self.update_state(state='PROGRESS', meta={'progress': progress_val, 'status': message, 'details': current_details})
+            save_task_status(current_task_id, "main_clustering", task_state, progress=progress_val, details=current_details)
 
         try:
             log_and_update_main_clustering("📊 Starting main clustering process with evolutionary parameter search...", 0)
             rows = get_all_tracks(None) # db_path not needed
             if len(rows) < 2:
-                log_and_update_main_clustering("Not enough analyzed tracks for clustering.", 100, {"error": "Insufficient data"}, task_state='FAILURE')
+                log_and_update_main_clustering("Not enough analyzed tracks for clustering.", 100, details_extra={"error": "Insufficient data"}, task_state='FAILURE')
                 return {"status": "FAILURE", "message": "Not enough analyzed tracks for clustering."}
             
             if task_result_checker and task_result_checker.state == 'REVOKED':
@@ -810,7 +835,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                     current_gmm_n_components = max(1, current_gmm_n_components) 
                     method_params = {"method": "gmm", "params": {"n_components": current_gmm_n_components}}
                 else:
-                    log_and_update_main_clustering(f"Unsupported clustering algorithm: {clustering_method}", 100, {"error": "Unsupported algorithm"}, task_state='FAILURE')
+                    log_and_update_main_clustering(f"Unsupported clustering algorithm: {clustering_method}", 100, details_extra={"error": "Unsupported algorithm"}, task_state='FAILURE')
                     return {"status": "FAILURE", "message": f"Unsupported clustering algorithm: {clustering_method}"}
                 
                 sampled_pca_components = random.randint(pca_components_min, pca_components_max)
@@ -822,7 +847,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                 clustering_run_tasks.append(run_task)
                 clustering_run_task_ids.append(run_task.id)
 
-            log_and_update_main_clustering(f"Launched {num_clustering_runs} clustering iteration tasks.", 10, {"clustering_run_task_ids": clustering_run_task_ids})
+            log_and_update_main_clustering(f"Launched {num_clustering_runs} clustering iteration tasks.", 10, details_extra={"clustering_run_task_ids": clustering_run_task_ids})
 
             while not all(t.ready() for t in clustering_run_tasks):
                 completed_count = sum(1 for t in clustering_run_tasks if t.ready())
@@ -834,7 +859,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                 log_and_update_main_clustering(
                     f"Processing clustering runs: {completed_count}/{num_clustering_runs} completed.",
                     progress_while_waiting,
-                    {"runs_completed": completed_count, "total_runs": num_clustering_runs, "clustering_run_task_ids": clustering_run_task_ids}
+                    details_extra={"runs_completed": completed_count, "total_runs": num_clustering_runs, "clustering_run_task_ids": clustering_run_task_ids}
                 )
                 time.sleep(2) 
 
@@ -850,10 +875,10 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
                     log_and_update_main_clustering(f"A clustering run task ({t_res.id}) failed or returned unexpected result.", 85) 
 
             if not best_clustering_results:
-                log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, {"error": "No suitable clustering found"}, task_state='FAILURE')
+                log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_extra={"error": "No suitable clustering found"}, task_state='FAILURE')
                 return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
 
-            log_and_update_main_clustering(f"Best clustering found with diversity score: {best_diversity_score:.2f}.", 90, {"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")})
+            log_and_update_main_clustering(f"Best clustering found with diversity score: {best_diversity_score:.2f}.", 90, details_extra={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")})
             
             final_named_playlists = best_clustering_results["named_playlists"]
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
@@ -872,8 +897,14 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             import traceback
             error_traceback = traceback.format_exc()
             print(f"FATAL ERROR: Clustering failed: {e}\n{error_traceback}")
-            log_and_update_main_clustering(f"❌ Main clustering failed: {e}", current_progress, {"error": str(e)}, task_state='FAILURE')
-            raise 
+            log_and_update_main_clustering(f"❌ Main clustering failed: {e}", current_progress, details_extra={"error": str(e)}, task_state='FAILURE')
+            raise
+        except SoftTimeLimitExceeded:
+            print(f"SOFT TIME LIMIT EXCEEDED for main clustering task {current_task_id}")
+            log_and_update_main_clustering(f"Main clustering task {current_task_id} exceeded soft time limit.", current_progress, task_state='FAILURE') # Or REVOKED
+            # No need to raise here, Celery handles it by setting state to FAILURE if not caught,
+            # but we are updating our DB.
+            raise
 
 
 # --- API Endpoints ---
