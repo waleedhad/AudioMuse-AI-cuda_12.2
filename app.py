@@ -410,7 +410,7 @@ def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_i
             total_tracks_in_album = len(tracks)
             for idx, item in enumerate(tracks, 1):
                 track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
-                if current_task.is_revoked():
+                if self.request.is_revoked():
                     log_and_update_album_task(f"Task revoked, stopping analysis of album {album_name} before track {track_name_full}.", progress, current_track_name=track_name_full)
                     return {"status": "REVOKED", "message": f"Task revoked during album analysis: {album_name}"}
                 current_progress = 10 + int(85 * (idx / float(total_tracks_in_album))) if total_tracks_in_album > 0 else 10
@@ -422,7 +422,7 @@ def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_i
                     continue
 
                 path = download_track(jellyfin_url, headers, TEMP_DIR, item)
-                if current_task.is_revoked(): # Check after potentially long I/O
+                if self.request.is_revoked(): # Check after potentially long I/O
                     log_and_update_album_task(f"Task revoked, stopping analysis of album {album_name} after download attempt for {track_name_full}.", progress, current_track_name=track_name_full)
                     return {"status": "REVOKED", "message": f"Task revoked during album analysis: {album_name}"}
                 log_and_update_album_task(f"Download attempt for '{track_name_full}': {'Success' if path else 'Failed'}", current_progress, current_track_name=track_name_full)
@@ -490,7 +490,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             album_tasks_group = []
             album_task_ids = []
             for album in albums:
-                if current_task.is_revoked():
+                if self.request.is_revoked():
                     log_and_update_main_analysis("Main analysis task revoked before processing all albums.", progress)
                     return {"status": "REVOKED", "message": "Main analysis task revoked."}
                 # Launch a sub-task for each album
@@ -507,7 +507,7 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             # Monitor the group of album tasks
             # This is a simplified monitoring loop. For production, consider more robust patterns.
             while not all(t.ready() for t in album_tasks_group):
-                if current_task.is_revoked():
+                if self.request.is_revoked():
                     log_and_update_main_analysis("Main analysis task revoked while waiting for album sub-tasks.", progress)
                     return {"status": "REVOKED", "message": "Main analysis task revoked."}
                 completed_count = sum(1 for t in album_tasks_group if t.ready())
@@ -555,7 +555,7 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
         print(f"[SingleClusteringRun-{task_id}] Run {run_id}: Starting with method {clustering_method_config['method']}, params: {clustering_method_config['params']}, PCA: {pca_config}")
 
         all_tracks_data = json.loads(all_tracks_data_json) # Deserialize track data
-        if current_task.is_revoked():
+        if self.request.is_revoked():
             log_messages_iter.append(f"Run {run_id}: Task revoked at start.")
             return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
         rows = [type('DictRow', (), item)() for item in all_tracks_data] # Simple mock if needed by score_vector
@@ -565,7 +565,7 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
         pca_model = None
 
         if pca_config["enabled"]:
-            if current_task.is_revoked():
+            if self.request.is_revoked():
                 log_messages_iter.append(f"Run {run_id}: Task revoked before PCA.")
                 return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
             n_components_actual = min(pca_config["components"], X_scaled.shape[1], len(rows) -1 if len(rows) >1 else 1)
@@ -584,7 +584,7 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
         method = clustering_method_config["method"]
         params = clustering_method_config["params"]
 
-        if current_task.is_revoked():
+        if self.request.is_revoked():
             log_messages_iter.append(f"Run {run_id}: Task revoked before clustering method execution.")
             return {"status": "REVOKED", "message": f"Single clustering run {run_id} revoked."}
         if method == "kmeans":
@@ -719,7 +719,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             clustering_run_task_ids = []
 
             for run_idx in range(num_clustering_runs):
-                if current_task.is_revoked():
+                if self.request.is_revoked():
                     log_and_update_main_clustering("Main clustering task revoked before launching all sub-runs.", progress)
                     return {"status": "REVOKED", "message": "Main clustering task revoked."}
                 # progress_base = 10 + int(80 * (run_idx / float(num_clustering_runs))) # 10% to 90% for clustering runs
@@ -764,7 +764,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             # Monitor the group of clustering run tasks
             while not all(t.ready() for t in clustering_run_tasks):
                 completed_count = sum(1 for t in clustering_run_tasks if t.ready())
-                if current_task.is_revoked():
+                if self.request.is_revoked():
                     log_and_update_main_clustering("Main clustering task revoked while waiting for sub-runs.", current_progress)
                     return {"status": "REVOKED", "message": "Main clustering task revoked."}
                 current_progress = 10 + int(80 * (completed_count / float(num_clustering_runs))) if num_clustering_runs > 0 else 10
