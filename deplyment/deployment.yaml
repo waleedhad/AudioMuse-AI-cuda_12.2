@@ -180,15 +180,13 @@ spec:
         app: audiomuse-ai
         component: flask
     spec:
-      nodeSelector: # Keep your node selector if needed
-        kubernetes.io/hostname: ubuntu3
       securityContext:
         runAsUser: 0 # Or a non-root user if your image supports it
         runAsGroup: 0
         fsGroup: 0
       containers:
       - name: flask-app
-        image: ghcr.io/neptunehub/audiomuse-ai:0.1.4-alpha # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:devel # Your image from GHCR
         imagePullPolicy: Always
         ports:
         - containerPort: 8000 # Flask app listens on 8000
@@ -259,16 +257,14 @@ spec:
       labels:
         app: audiomuse-ai
         component: celery
-    spec:
-      nodeSelector: # Keep your node selector if needed
-        kubernetes.io/hostname: ubuntu3
+    spec: # nodeSelector removed from here
       securityContext:
         runAsUser: 0
         runAsGroup: 0
         fsGroup: 0
       containers:
       - name: celery-worker
-        image: ghcr.io/neptunehub/audiomuse-ai:0.1.4-alpha # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:devel # Your image from GHCR
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE

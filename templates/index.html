@@ -347,48 +347,63 @@
         }
 
         function updateAnalysisProgress(data) {
-            setStatus('analysis', data.status, data.state);
+            setStatus('analysis', data.status_message || data.status, data.state); // Use status_message if available
             analysisProgressBar.style.width = `${data.progress || 0}%`;
-            currentAlbumName.textContent = data.current_album || 'N/A';
-            currentAlbumProgress.textContent = `${data.current_album_idx || 0}/${data.total_albums || 0}`;
+            // Update current album details if present in data.details
+            if (data.details) {
+                currentAlbumName.textContent = data.details.current_track || data.details.album_name || 'N/A'; // Prefer current_track if available
+                if (data.details.log && data.details.log.length > 0) {
+                     // Try to extract album progress from the last log entry if specific fields aren't there
+                    const lastLog = data.details.log[data.details.log.length - 1];
+                    const match = lastLog.match(/\((\d+)\/(\d+)\)/);
+                    if (match) {
+                        currentAlbumProgress.textContent = `${match[1]}/${match[2]}`;
+                    } else {
+                        currentAlbumProgress.textContent = 'N/A';
+                    }
+                } else {
+                     currentAlbumProgress.textContent = 'N/A';
+                }
+            } else {
+                currentAlbumName.textContent = 'N/A';
+                currentAlbumProgress.textContent = 'N/A';
+            }
+
             if (data.details && data.details.log && Array.isArray(data.details.log)) {
                 analysisLogOutput.textContent = data.details.log.join('\n');
-            } else if (data.details && data.details.message) {
+            } else if (data.details && data.details.message) { // Fallback to general message
                 analysisLogOutput.textContent = String(data.details.message);
             } else if (data.state === 'FAILURE') {
                 analysisLogOutput.textContent = `Error: ${data.status_message || 'Unknown error'}`;
             } else {
-                analysisLogOutput.textContent = ''; // Clear if no logs
+                analysisLogOutput.textContent = ''; // Clear if no specific logs
             }
             analysisLogOutput.scrollTop = analysisLogOutput.scrollHeight;
-            // Show/hide individual cancel button
             document.getElementById('cancelAnalysisBtnContainer').classList.toggle('hidden', ['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state));
         }
 
         function updateClusteringProgress(data) {
-            setStatus('clustering', data.status, data.state);
+            setStatus('clustering', data.status_message || data.status, data.state); // Use status_message
             clusteringProgressBar.style.width = `${data.progress || 0}%`;
-            if (Array.isArray(data.log_output)) {
-                clusteringLogOutput.textContent = data.log_output.join('\n');
-            } else if (data.details && data.details.log && Array.isArray(data.details.log)) {
+            if (data.details && data.details.log && Array.isArray(data.details.log)) {
                 clusteringLogOutput.textContent = data.details.log.join('\n');
-            } else if (data.details && data.details.message) {
+            } else if (data.details && data.details.message) { // Fallback to general message
                 clusteringLogOutput.textContent = String(data.details.message);
             } else if (data.state === 'FAILURE') {
                 clusteringLogOutput.textContent = `Error: ${data.status_message || 'Unknown error'}`;
             } else {
-                clusteringLogOutput.textContent = ''; // Clear if no logs
+                clusteringLogOutput.textContent = ''; // Clear if no specific logs
             }
             clusteringLogOutput.scrollTop = clusteringLogOutput.scrollHeight;
-            // Show/hide individual cancel button
             document.getElementById('cancelClusteringBtnContainer').classList.toggle('hidden', ['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state));
         }
+
 
         async function pollStatus(taskId, taskType) {
             if (pollingInterval) {
                 clearInterval(pollingInterval);
             }
-            showProgressContainer(taskType, true); // Ensure correct container is visible
+            showProgressContainer(taskType, true); 
 
             pollingInterval = setInterval(async () => {
                 try {
@@ -410,40 +425,35 @@
                         clearInterval(pollingInterval);
                         pollingInterval = null;
                         
-                        // Re-enable all relevant buttons
                         startAnalysisBtn.disabled = false;
                         document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden');
                         generatePlaylistsBtn.disabled = false; 
                         document.getElementById('cancelClusteringBtnContainer').classList.add('hidden');
-                        fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                        fetchPlaylistsBtn.disabled = false; 
 
                         currentTaskId = null;
                         currentTaskType = null;
-                        updateCancelAllButtonsVisibility(); // Update "Cancel All" buttons
+                        updateCancelAllButtonsVisibility(); 
 
-                        // If clustering was successful, fetch and display playlists
                         if (taskType === 'clustering' && data.state === 'SUCCESS') {
                             fetchPlaylists();
                         }
                     } else {
-                        // Keep relevant buttons disabled if task is still in progress
-                        // Individual cancel buttons are handled by updateAnalysisProgress/updateClusteringProgress
                         startAnalysisBtn.disabled = true;
                         generatePlaylistsBtn.disabled = true;
-                        fetchPlaylistsBtn.disabled = true; // Disable fetch button during any active task
+                        fetchPlaylistsBtn.disabled = true; 
                     }
                 } catch (error) {
                     console.error(`Error polling ${taskType} status:`, error);
-                    setStatus(taskType, `Error polling: ${error.message || error}`, 'FAILURE'); // Changed 'type' to 'taskType'
+                    setStatus(taskType, `Error polling: ${error.message || error}`, 'FAILURE'); 
                     clearInterval(pollingInterval);
                     pollingInterval = null;
                     
-                    // Re-enable all relevant buttons on polling error
                     startAnalysisBtn.disabled = false;
                     document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden');
                     generatePlaylistsBtn.disabled = false;
                     document.getElementById('cancelClusteringBtnContainer').classList.add('hidden');
-                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                    fetchPlaylistsBtn.disabled = false; 
 
                     currentTaskId = null;
                     currentTaskType = null;
@@ -468,21 +478,17 @@
 
                 document.getElementById('clustering_method').value = config.cluster_algorithm || 'kmeans';
                 
-                // Set min/max values for KMeans
                 document.getElementById('num_clusters_min').value = config.num_clusters_min !== undefined ? config.num_clusters_min : 20;
                 document.getElementById('num_clusters_max').value = config.num_clusters_max !== undefined ? config.num_clusters_max : 60;
 
-                // Set min/max values for DBSCAN
                 document.getElementById('dbscan_eps_min').value = config.dbscan_eps_min !== undefined ? config.dbscan_eps_min : 0.1;
                 document.getElementById('dbscan_eps_max').value = config.dbscan_eps_max !== undefined ? config.dbscan_eps_max : 0.5;
                 document.getElementById('dbscan_min_samples_min').value = config.dbscan_min_samples_min !== undefined ? config.dbscan_min_samples_min : 5;
                 document.getElementById('dbscan_min_samples_max').value = config.dbscan_min_samples_max !== undefined ? config.dbscan_min_samples_max : 20;
 
-                // Set min/max values for GMM
                 document.getElementById('gmm_n_components_min').value = config.gmm_n_components_min !== undefined ? config.gmm_n_components_min : 20;
                 document.getElementById('gmm_n_components_max').value = config.gmm_n_components_max !== undefined ? config.gmm_n_components_max : 60;
 
-                // Set min/max values for PCA
                 document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
                 document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
 
@@ -493,24 +499,21 @@
                 toggleClusteringOptions();
             } catch (error) {
                 console.error("Failed to fetch initial configuration:", error);
-                // Using a custom modal/dialog instead of alert for better UX
                 const errorMessage = `Could not load initial configuration. Please check the backend API. Error: ${error.message}`;
                 displayMessageModal(errorMessage, 'Error');
             }
         }
 
         function toggleClusteringOptions() {
-            // Hide all options first
             kmeansOptions.classList.add('hidden');
             dbscanOptions.classList.add('hidden');
-            gmmOptions.classList.add('hidden'); // Hide GMM options
+            gmmOptions.classList.add('hidden'); 
 
-            // Show options based on selection
             if (clusteringMethodSelect.value === 'kmeans') {
                 kmeansOptions.classList.remove('hidden');
             } else if (clusteringMethodSelect.value === 'dbscan') {
                 dbscanOptions.classList.remove('hidden');
-            } else if (clusteringMethodSelect.value === 'gmm') { // Show GMM options
+            } else if (clusteringMethodSelect.value === 'gmm') { 
                 gmmOptions.classList.remove('hidden');
             }
         }
@@ -519,61 +522,59 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/last_task`);
                 const data = await response.json();
-                if (data.task_id && ['PENDING', 'PROGRESS', 'STARTED'].includes(data.status)) {
+                if (data.task_id && data.task_type && ['PENDING', 'PROGRESS', 'STARTED'].includes(data.status)) { // Added data.task_type check
                     currentTaskId = data.task_id;
                     currentTaskType = data.task_type;
 
-                    // Hide both containers initially, then show the relevant one
                     showProgressContainer('analysis', false);
                     showProgressContainer('clustering', false);
 
-                    if (currentTaskType === 'analysis') {
+                    if (currentTaskType === 'main_analysis') { // Check for main_analysis
                         analysisTaskIdDisplay.textContent = currentTaskId;
                         setStatus('analysis', data.status, data.status);
-                        pollStatus(currentTaskId, currentTaskType);
-                    } else if (currentTaskType === 'clustering') {
+                        pollStatus(currentTaskId, 'analysis'); // Use 'analysis' string
+                    } else if (currentTaskType === 'main_clustering') { // Check for main_clustering
                         clusteringTaskIdDisplay.textContent = currentTaskId;
                         setStatus('clustering', data.status, data.status);
-                        pollStatus(currentTaskId, currentTaskType);
+                        pollStatus(currentTaskId, 'clustering'); // Use 'clustering' string
                     }
-                } else if (data.task_id) {
-                    // If a task existed but finished, show its final status without polling
+                } else if (data.task_id && data.task_type) { // Added data.task_type check
                     currentTaskId = data.task_id;
                     currentTaskType = data.task_type;
 
                     showProgressContainer('analysis', false);
                     showProgressContainer('clustering', false);
 
-                    if (currentTaskType === 'analysis') {
+                    if (currentTaskType === 'main_analysis') {
                         analysisTaskIdDisplay.textContent = currentTaskId;
                         setStatus('analysis', data.status, data.status);
                         analysisProgressBar.style.width = '100%';
                         analysisLogOutput.textContent = `Previous analysis task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
-                    } else if (currentTaskType === 'clustering') {
+                        if (data.details && data.details.log) analysisLogOutput.textContent = data.details.log.join('\n');
+                    } else if (currentTaskType === 'main_clustering') {
                         document.getElementById('cancelClusteringBtnContainer').classList.add('hidden');
                         clusteringTaskIdDisplay.textContent = currentTaskId;
                         setStatus('clustering', data.status, data.status);
                         clusteringProgressBar.style.width = '100%';
                         clusteringLogOutput.textContent = `Previous clustering task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
-                        if (data.status === 'SUCCESS') { // If clustering was successful, display playlists
+                        if (data.details && data.details.log) clusteringLogOutput.textContent = data.details.log.join('\n');
+                        if (data.status === 'SUCCESS') { 
                             fetchPlaylists();
                         }
-                    } else { // No specific task type, or unknown
                     }
                     startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
+                    document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden');
                     generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                    document.getElementById('cancelClusteringBtnContainer').classList.add('hidden');
+                    fetchPlaylistsBtn.disabled = false; 
                 } else {
-                    // No previous task, hide both progress containers
                     showProgressContainer('analysis', false);
                     showProgressContainer('clustering', false);
                     startAnalysisBtn.disabled = false;
                     document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden');
                     generatePlaylistsBtn.disabled = false;
                     document.getElementById('cancelClusteringBtnContainer').classList.add('hidden');
-                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                    fetchPlaylistsBtn.disabled = false; 
                 }
                 updateCancelAllButtonsVisibility();
             } catch (error) {
@@ -584,12 +585,11 @@
                 document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden');
                 generatePlaylistsBtn.disabled = false;
                 document.getElementById('cancelClusteringBtnContainer').classList.add('hidden');
-                fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                fetchPlaylistsBtn.disabled = false; 
                 updateCancelAllButtonsVisibility();
             }
         }
 
-        // Custom modal for messages (replaces alert/confirm)
         function displayMessageModal(message, type = 'Info', onConfirm = null) {
             const modalId = 'customMessageModal';
             let modal = document.getElementById(modalId);
@@ -621,13 +621,13 @@
                 if (onConfirm) onConfirm(true);
             };
 
-            if (onConfirm) { // If onConfirm is provided, it's a confirmation dialog
+            if (onConfirm) { 
                 cancelBtn.classList.remove('hidden');
                 cancelBtn.onclick = () => {
                     modal.classList.add('hidden');
                     onConfirm(false);
                 };
-            } else { // Otherwise, it's just an info/error message
+            } else { 
                 cancelBtn.classList.add('hidden');
             }
 
@@ -635,15 +635,13 @@
         }
 
 
-        // --- Event Listeners ---
-
         analysisForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             startAnalysisBtn.disabled = true;
-            generatePlaylistsBtn.disabled = true; // Disable clustering button too
-            fetchPlaylistsBtn.disabled = true; // Disable fetch button
+            generatePlaylistsBtn.disabled = true; 
+            fetchPlaylistsBtn.disabled = true; 
             document.getElementById('cancelAnalysisBtnContainer').classList.remove('hidden');
-            document.getElementById('cancelClusteringBtnContainer').classList.add('hidden'); // Ensure clustering cancel is disabled
+            document.getElementById('cancelClusteringBtnContainer').classList.add('hidden'); 
 
             analysisLogOutput.textContent = '';
             analysisProgressBar.style.width = '0%';
@@ -651,7 +649,7 @@
             currentAlbumProgress.textContent = '0/0';
             setStatus('analysis', 'Initiating...', 'PENDING');
             showProgressContainer('analysis', true);
-            showProgressContainer('clustering', false); // Hide clustering progress
+            showProgressContainer('clustering', false); 
 
             const formData = new FormData(analysisForm);
             const data = Object.fromEntries(formData.entries());
@@ -671,9 +669,9 @@
                 }
                 const result = await response.json();
                 currentTaskId = result.task_id;
-                currentTaskType = result.task_type;
+                currentTaskType = result.task_type; // Should be 'main_analysis'
                 analysisTaskIdDisplay.textContent = currentTaskId;
-                pollStatus(currentTaskId, currentTaskType);
+                pollStatus(currentTaskId, 'analysis'); // Use 'analysis' string
                 updateCancelAllButtonsVisibility();
                 displayMessageModal("Analysis started successfully!", "Success");
             } catch (error) {
@@ -690,7 +688,7 @@
         });
 
         cancelAnalysisBtn.addEventListener('click', () => {
-            if (!currentTaskId || currentTaskType !== 'analysis') {
+            if (!currentTaskId || currentTaskType !== 'main_analysis') { // Check for 'main_analysis'
                 displayMessageModal("No active analysis to cancel.", "Info");
                 return;
             }
@@ -715,7 +713,7 @@
                         pollingInterval = null;
                     }
                     setStatus('analysis', 'Cancelled', 'REVOKED');
-                    analysisProgressBar.style.width = '100%'; // Visually mark as complete
+                    analysisProgressBar.style.width = '100%'; 
                     startAnalysisBtn.disabled = false;
                     document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden');
                     generatePlaylistsBtn.disabled = false;
@@ -736,29 +734,28 @@
             e.preventDefault();
             generatePlaylistsBtn.disabled = true;
             fetchPlaylistsBtn.disabled = true;
-            startAnalysisBtn.disabled = true; // Disable analysis button too
+            startAnalysisBtn.disabled = true; 
             document.getElementById('cancelClusteringBtnContainer').classList.remove('hidden');
-            document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden'); // Ensure analysis cancel is disabled
+            document.getElementById('cancelAnalysisBtnContainer').classList.add('hidden'); 
 
-            clusteringLogOutput.textContent = ''; // Clear previous logs
+            clusteringLogOutput.textContent = ''; 
             clusteringProgressBar.style.width = '0%';
             setStatus('clustering', 'Initiating...', 'PENDING');
             showProgressContainer('clustering', true);
-            showProgressContainer('analysis', false); // Hide analysis progress
+            showProgressContainer('analysis', false); 
 
 
             const formData = new FormData(playlistForm);
             const data = Object.fromEntries(formData.entries());
 
-            // Parse min/max values for parameters
             data.num_clusters_min = parseInt(data.num_clusters_min, 10);
             data.num_clusters_max = parseInt(data.num_clusters_max, 10);
             data.dbscan_eps_min = parseFloat(data.dbscan_eps_min);
             data.dbscan_eps_max = parseFloat(data.dbscan_eps_max);
             data.dbscan_min_samples_min = parseInt(data.dbscan_min_samples_min, 10);
             data.dbscan_min_samples_max = parseInt(data.dbscan_min_samples_max, 10);
-            data.gmm_n_components_min = parseInt(data.gmm_n_components_min, 10); // Parse new GMM field
-            data.gmm_n_components_max = parseInt(data.gmm_n_components_max, 10); // Parse new GMM field
+            data.gmm_n_components_min = parseInt(data.gmm_n_components_min, 10); 
+            data.gmm_n_components_max = parseInt(data.gmm_n_components_max, 10); 
             data.pca_components_min = parseInt(data.pca_components_min, 10);
             data.pca_components_max = parseInt(data.pca_components_max, 10);
             data.max_songs_per_cluster = parseInt(data.max_songs_per_cluster, 10);
@@ -776,9 +773,9 @@
                 }
                 const result = await response.json();
                 currentTaskId = result.task_id;
-                currentTaskType = result.task_type;
+                currentTaskType = result.task_type; // Should be 'main_clustering'
                 clusteringTaskIdDisplay.textContent = currentTaskId;
-                pollStatus(currentTaskId, currentTaskType);
+                pollStatus(currentTaskId, 'clustering'); // Use 'clustering' string
                 updateCancelAllButtonsVisibility();
                 displayMessageModal("Clustering started successfully!", "Success");
             } catch (error) {
@@ -795,7 +792,7 @@
         });
 
         cancelClusteringBtn.addEventListener('click', () => {
-            if (!currentTaskId || currentTaskType !== 'clustering') {
+            if (!currentTaskId || currentTaskType !== 'main_clustering') { // Check for 'main_clustering'
                 displayMessageModal("No active clustering to cancel.", "Info");
                 return;
             }
@@ -820,7 +817,7 @@
                         pollingInterval = null;
                     }
                     setStatus('clustering', 'Cancelled', 'REVOKED');
-                    clusteringProgressBar.style.width = '100%'; // Visually mark as complete
+                    clusteringProgressBar.style.width = '100%'; 
                     generatePlaylistsBtn.disabled = false;
                     fetchPlaylistsBtn.disabled = false;
                     startAnalysisBtn.disabled = false;
@@ -849,7 +846,6 @@
                     const result = await response.json();
                     displayMessageModal(result.message, "Success");
 
-                    // If the currently displayed main task was of this type, update its UI
                     if (currentTaskType === taskTypePrefix) {
                         if (pollingInterval) clearInterval(pollingInterval);
                         pollingInterval = null;
@@ -863,8 +859,8 @@
                         currentTaskId = null;
                         currentTaskType = null;
                     }
-                    fetchLastAnalysisStatus(); // Refresh last task status
-                    updateCancelAllButtonsVisibility(); // Update visibility of "Cancel All" buttons
+                    fetchLastAnalysisStatus(); 
+                    updateCancelAllButtonsVisibility(); 
 
                 } catch (error) {
                     console.error(`Error cancelling all ${taskTypePrefix} tasks:`, error);
@@ -873,7 +869,6 @@
             });
         }
 
-        // Attach event listeners for "Cancel All" buttons
         cancelAllAnalysisBtn.addEventListener('click', () => cancelAllTasks('main_analysis'));
         cancelAllClusteringBtn.addEventListener('click', () => {
             cancelAllTasks('main_clustering');
@@ -884,7 +879,7 @@
 
         async function fetchPlaylists() {
             playlistsDisplay.classList.add('hidden');
-            playlistList.innerHTML = ''; // Clear existing list
+            playlistList.innerHTML = ''; 
             try {
                 const response = await fetch(`${API_BASE_URL}/playlists`);
                 if (!response.ok) {
@@ -902,27 +897,23 @@
                         
                         const h3 = document.createElement('h3');
                         h3.innerHTML = `${playlistName} (${playlists[playlistName].length} tracks) `;
-                        h3.appendChild(toggleBtn); // Append button to h3
+                        h3.appendChild(toggleBtn); 
 
                         const tracksDiv = document.createElement('div');
-                        tracksDiv.className = 'playlist-tracks hidden'; // Hidden by default
+                        tracksDiv.className = 'playlist-tracks hidden'; 
                         playlists[playlistName].forEach(track => {
                             const p = document.createElement('p');
                             p.textContent = `${track.title} by ${track.author}`;
                             tracksDiv.appendChild(p);
                         });
                         
-                        li.appendChild(h3); // Append h3 (which contains the button) to li
-                        li.appendChild(tracksDiv); // Append tracksDiv to li
+                        li.appendChild(h3); 
+                        li.appendChild(tracksDiv); 
 
-                        // Corrected onclick function to reference tracksDiv via its parent (li)
                         toggleBtn.onclick = function() {
-                            // 'this' refers to the toggleBtn
-                            // 'this.closest("li")' finds the nearest parent <li> element
-                            // 'tracksDiv' is the second child of the <li> (after the h3)
                             const parentLi = this.closest("li");
                             if (parentLi) {
-                                const tracksDiv = parentLi.querySelector('.playlist-tracks'); // Find tracksDiv within this specific li
+                                const tracksDiv = parentLi.querySelector('.playlist-tracks'); 
                                 if (tracksDiv) {
                                     if (tracksDiv.classList.contains('hidden')) {
                                         tracksDiv.classList.remove('hidden');
@@ -967,20 +958,17 @@
 
             } catch (error) {
                 console.error("Error updating 'Cancel All' buttons visibility:", error);
-                // Hide buttons on error to be safe
                 cancelAllAnalysisBtn.classList.add('hidden');
                 cancelAllClusteringBtn.classList.add('hidden');
             }
         }
 
 
-        // --- Initial Load ---
         document.addEventListener('DOMContentLoaded', async () => {
             await populateConfig();
-            await fetchLastAnalysisStatus(); // Check for ongoing or last task
-            updateCancelAllButtonsVisibility(); // Set initial state of "Cancel All" buttons
-            // Periodically update "Cancel All" buttons visibility based on active tasks
-            setInterval(updateCancelAllButtonsVisibility, 5000); // e.g., every 5 seconds
+            await fetchLastAnalysisStatus(); 
+            updateCancelAllButtonsVisibility(); 
+            setInterval(updateCancelAllButtonsVisibility, 5000); 
         });
     </script>
 </body>
