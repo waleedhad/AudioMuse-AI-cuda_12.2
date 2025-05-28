@@ -385,10 +385,10 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
 
 
 # --- Celery Task Definitions (with soft_time_limit where appropriate) ---
-
-@celery.task(bind=True)
-def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, parent_task_id):
-    """Celery task to analyze a single album."""
+# Renamed and refactored: analyze_album_task -> analyze_song_task
+@celery.task(bind=True, soft_time_limit=600) # Example: 10 min soft limit per song
+def analyze_song_task(self, track_item_json, album_name_for_log, jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, parent_task_id):
+    """Celery task to analyze a single song."""
     with app.app_context(): # Ensure Flask application context
         current_task_id = self.request.id
         # Create AsyncResult once for efficiency if task ID is available
@@ -397,90 +397,83 @@ def analyze_album_task(self, album_id, album_name, jellyfin_url, jellyfin_user_i
 
         headers = {"X-Emby-Token": jellyfin_token}
         log_messages = []
-        tracks_analyzed_count = 0
         current_progress_val = 0 # Initialize for the scope
+        track_item = json.loads(track_item_json)
+        album_id = track_item.get("ParentId", "UnknownAlbumID") # Assuming ParentId is album ID
+        album_name = album_name_for_log # Use passed album name for logging consistency
 
-        def log_and_update_album_task(message, progress, current_track_name=None, task_state='PROGRESS'):
+        def log_and_update_song_task(message, progress, task_state='PROGRESS'):
             log_messages.append(message)
-            print(f"[AlbumTask-{current_task_id}-{album_name}] {message}") # Celery container log
-            details = {"album_name": album_name, "log": log_messages, "current_track": current_track_name}
+            # Log with song name for clarity
+            print(f"[SongTask-{current_task_id}-{track_item.get('Name', 'UnknownTrack')}] {message}")
+            details = {"album_name": album_name, "track_name": track_item.get('Name'), "log": log_messages}
             if task_state != 'PROGRESS': # For final states like REVOKED
                  self.update_state(state=task_state, meta={'progress': progress, 'status': message, 'details': details})
             else: # For ongoing progress
                  self.update_state(state='PROGRESS', meta={'progress': progress, 'status': message, 'details': details})
-            save_task_status(current_task_id, "album_analysis", task_state, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=progress, details=details)
+            # sub_type_identifier could be the track_item['Id']
+            save_task_status(current_task_id, "song_analysis", task_state, parent_task_id=parent_task_id, sub_type_identifier=track_item.get('Id'), progress=progress, details=details)
 
         try:
-            log_and_update_album_task(f"Fetching tracks for album: {album_name}", 5)
-            current_progress_val = 5
-            tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id)
-            if not tracks:
-                log_and_update_album_task(f"No tracks found for album: {album_name}", 100, task_state='SUCCESS')
-                return {"status": "SUCCESS", "message": f"No tracks in album {album_name}", "tracks_analyzed": 0}
+            track_name_full = f"{track_item['Name']} by {track_item.get('AlbumArtist', 'Unknown')}"
+            log_and_update_song_task(f"Starting analysis for track: {track_name_full}", 10)
+            current_progress_val = 10
 
-            total_tracks_in_album = len(tracks)
-            for idx, item in enumerate(tracks, 1):
-                track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
-                current_progress_val = 10 + int(85 * (idx / float(total_tracks_in_album))) if total_tracks_in_album > 0 else 10
-                
-                if task_result_checker and task_result_checker.state == 'REVOKED':
-                    log_and_update_album_task(f"Task revoked, stopping analysis of album {album_name} before track {track_name_full}.", current_progress_val, current_track_name=track_name_full, task_state='REVOKED')
-                    return {"status": "REVOKED", "message": f"Task revoked during album analysis: {album_name}"}
-                
-                log_and_update_album_task(f"Analyzing track: {track_name_full} ({idx}/{total_tracks_in_album})", current_progress_val, current_track_name=track_name_full)
+            if task_result_checker and task_result_checker.state == 'REVOKED':
+                log_and_update_song_task(f"Task revoked before processing {track_name_full}.", current_progress_val, task_state='REVOKED')
+                return {"status": "REVOKED", "message": f"Task for {track_name_full} revoked."}
 
-                if track_exists(None, item['Id']): # db_path not needed
-                    log_and_update_album_task(f"Skipping '{track_name_full}' (already analyzed)", current_progress_val, current_track_name=track_name_full)
-                    tracks_analyzed_count +=1 # Count as "processed" for progress
-                    continue
+            if track_exists(None, track_item['Id']):
+                log_and_update_song_task(f"Skipping '{track_name_full}' (already analyzed)", 100, task_state='SUCCESS')
+                return {"status": "SUCCESS", "message": f"Track '{track_name_full}' already analyzed."}
 
-                path = download_track(jellyfin_url, headers, TEMP_DIR, item)
-                
-                if task_result_checker and task_result_checker.state == 'REVOKED': # Check after potentially long I/O
-                    log_and_update_album_task(f"Task revoked, stopping analysis of album {album_name} after download attempt for {track_name_full}.", current_progress_val, current_track_name=track_name_full, task_state='REVOKED')
-                    return {"status": "REVOKED", "message": f"Task revoked during album analysis: {album_name}"}
-                
-                log_and_update_album_task(f"Download attempt for '{track_name_full}': {'Success' if path else 'Failed'}", current_progress_val, current_track_name=track_name_full)
-                if not path:
-                    log_and_update_album_task(f"Failed to download '{track_name_full}'. Skipping.", current_progress_val, current_track_name=track_name_full)
-                    continue
+            log_and_update_song_task(f"Downloading track: {track_name_full}", 25)
+            current_progress_val = 25
+            path = download_track(jellyfin_url, headers, TEMP_DIR, track_item)
 
+            if task_result_checker and task_result_checker.state == 'REVOKED':
+                log_and_update_song_task(f"Task revoked after download attempt for {track_name_full}.", current_progress_val, task_state='REVOKED')
+                if path and os.path.exists(path): os.remove(path)
+                return {"status": "REVOKED", "message": f"Task for {track_name_full} revoked."}
+
+            if not path:
+                log_and_update_song_task(f"Failed to download '{track_name_full}'. Skipping.", 100, task_state='FAILURE')
+                return {"status": "FAILURE", "message": f"Failed to download {track_name_full}."}
+            
+            log_and_update_song_task(f"Download complete. Analyzing '{track_name_full}'...", 50)
+            current_progress_val = 50
+
+            if task_result_checker and task_result_checker.state == 'REVOKED': # Check before heavy computation
+                log_and_update_song_task(f"Task revoked before Essentia analysis for {track_name_full}.", current_progress_val, task_state='REVOKED')
+                if path and os.path.exists(path): os.remove(path)
+                return {"status": "REVOKED", "message": f"Task for {track_name_full} revoked."}
+
+            tempo, key, scale, moods = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, top_n_moods)
+            log_and_update_song_task(f"Essentia analysis complete for '{track_name_full}'. Saving...", 75)
+            current_progress_val = 75
+
+            save_track_analysis(None, track_item['Id'], track_item['Name'], track_item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
+            mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
+            log_and_update_song_task(f"Analyzed '{track_name_full}'. Tempo: {tempo:.2f}, Key: {key} {scale}. Moods: {mood_details_str}", 100, task_state='SUCCESS')
+            
+            if path and os.path.exists(path):
                 try:
-                    if task_result_checker and task_result_checker.state == 'REVOKED': # Check before heavy computation
-                        log_and_update_album_task(f"Task revoked, stopping before analyzing track {track_name_full}.", current_progress_val, current_track_name=track_name_full, task_state='REVOKED')
-                        return {"status": "REVOKED", "message": f"Task revoked during album analysis: {album_name}"}
-                    
-                    tempo, key, scale, moods = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, top_n_moods)
-                    save_track_analysis(None, item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods) # db_path not needed
-                    tracks_analyzed_count += 1
-                    mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
-                    log_and_update_album_task(f"Analyzed '{track_name_full}'. Tempo: {tempo:.2f}, Key: {key} {scale}. Moods: {mood_details_str}", current_progress_val, current_track_name=track_name_full)
-                except Exception as e:
-                    log_and_update_album_task(f"Error analyzing '{track_name_full}': {e}", current_progress_val, current_track_name=track_name_full)
-                finally:
-                    if path and os.path.exists(path):
-                        try:
-                            os.remove(path)
-                        except Exception as cleanup_e:
-                            print(f"WARNING: Failed to clean up temp file {path}: {cleanup_e}")
+                    os.remove(path)
+                except Exception as cleanup_e:
+                    print(f"WARNING: Failed to clean up temp file {path}: {cleanup_e}")
+            return {"status": "SUCCESS", "message": f"Track '{track_name_full}' analyzed."}
 
-            log_and_update_album_task(f"Album '{album_name}' analysis complete.", 100, task_state='SUCCESS')
-            return {"status": "SUCCESS", "message": f"Album '{album_name}' analysis complete.", "tracks_analyzed": tracks_analyzed_count, "total_tracks": total_tracks_in_album}
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
-            # Determine current progress before potential failure for logging
-            # current_progress_on_failure = 0 # This was the old way, current_progress_val is better
-            # if 'current_progress_val' in locals():
-            #     current_progress_on_failure = current_progress_val
-            # elif log_messages: # Try to get progress from last log message if possible
-            #     try: # This is too complex and error prone, rely on current_progress_val
-            #         last_log_details = json.loads(log_messages[-1].get('details', '{}'))
-            #         current_progress_on_failure = last_log_details.get('progress', 0)
-            #     except: pass # Ignore if parsing fails
-
-            log_and_update_album_task(f"Failed to analyze album '{album_name}': {e}", current_progress_val, task_state='FAILURE')
-            print(f"ERROR: Album analysis {album_id} failed: {e}\n{error_traceback}")
+            log_and_update_song_task(f"Failed to analyze song '{track_item.get('Name', 'UnknownTrack')}': {e}", current_progress_val, task_state='FAILURE')
+            print(f"ERROR: Song analysis for {track_item.get('Id', 'UnknownID')} failed: {e}\n{error_traceback}")
+            if 'path' in locals() and path and os.path.exists(path): os.remove(path) # Ensure cleanup on error
+            raise # Re-raise to mark task as FAILED in Celery
+        except SoftTimeLimitExceeded:
+            print(f"SOFT TIME LIMIT EXCEEDED for song analysis task {current_task_id} (Track: {track_item.get('Name', 'UnknownTrack')})")
+            log_and_update_song_task(f"Song analysis for {track_item.get('Name', 'UnknownTrack')} exceeded soft time limit.", current_progress_val, task_state='FAILURE')
+            if 'path' in locals() and path and os.path.exists(path): os.remove(path)
             raise # Re-raise to mark task as FAILED in Celery
 
 @celery.task(bind=True, soft_time_limit=3600) # Example: 1 hour soft time limit for the whole analysis
@@ -533,17 +526,24 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             album_task_ids = []
             for album_idx, album in enumerate(albums): # Use enumerate for progress calculation
                 # Update progress before checking for revocation
-                # This progress is for launching sub-tasks, not their completion
                 launch_progress = 5 + int(5 * (album_idx / float(total_albums))) if total_albums > 0 else 5 
                 if task_result_checker and task_result_checker.state == 'REVOKED':
                     log_and_update_main_analysis("Main analysis task revoked before processing all albums.", launch_progress, task_state='REVOKED')
                     return {"status": "REVOKED", "message": "Main analysis task revoked."}
                 
-                album_task = analyze_album_task.s(
-                    album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id
-                ).apply_async()
-                album_tasks_group.append(album_task)
-                album_task_ids.append(album_task.id)
+                album_tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album['Id'])
+                for track_item in album_tracks:
+                    if task_result_checker and task_result_checker.state == 'REVOKED':
+                        log_and_update_main_analysis(f"Main analysis task revoked while dispatching songs for album {album['Name']}.", launch_progress, task_state='REVOKED')
+                        return {"status": "REVOKED", "message": "Main analysis task revoked."}
+                    
+                    # Serialize track_item to JSON to pass to Celery task
+                    track_item_json = json.dumps(track_item)
+                    song_task = analyze_song_task.s(
+                        track_item_json, album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id
+                    ).apply_async()
+                    album_tasks_group.append(song_task) # Now a list of song tasks
+                    album_task_ids.append(song_task.id)
 
             log_and_update_main_analysis(f"Launched {total_albums} album analysis tasks.", 10, 
                              details_extra={"message": f"Launched {total_albums} album analysis tasks.", "album_task_ids": album_task_ids})
@@ -551,10 +551,10 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
             while not all(t.ready() for t in album_tasks_group):
                 completed_count = sum(1 for t in album_tasks_group if t.ready())
                 # Use the 'current_progress' variable that is updated by log_and_update_main_analysis
-                # This ensures we use the latest known progress if revoked.
-                progress_while_waiting = 10 + int(80 * (completed_count / float(total_albums))) if total_albums > 0 else 10
+                # Progress here reflects completion of dispatched song tasks
+                progress_while_waiting = 10 + int(80 * (completed_count / float(len(album_tasks_group)))) if len(album_tasks_group) > 0 else 10
                 if task_result_checker and task_result_checker.state == 'REVOKED':
-                    log_and_update_main_analysis("Main analysis task revoked while waiting for album sub-tasks.", progress_while_waiting, task_state='REVOKED')
+                    log_and_update_main_analysis("Main analysis task revoked while waiting for song analysis sub-tasks.", progress_while_waiting, task_state='REVOKED')
                     return {"status": "REVOKED", "message": "Main analysis task revoked."}
                 
                 log_and_update_main_analysis(
@@ -564,21 +564,21 @@ def run_analysis_task(self, jellyfin_url, jellyfin_user_id, jellyfin_token, num_
                 )
                 time.sleep(5) 
 
-            successful_albums = 0
-            failed_albums = 0
-            total_tracks_analyzed_all_albums = 0
+            successful_songs = 0
+            failed_songs = 0
+            # total_tracks_analyzed_all_albums = 0 # This was based on album task results
             for t_res in album_tasks_group:
                 if t_res.successful():
-                    successful_albums += 1
-                    if isinstance(t_res.result, dict):
-                        total_tracks_analyzed_all_albums += t_res.result.get("tracks_analyzed", 0)
+                    successful_songs += 1
+                    # if isinstance(t_res.result, dict): # Song task result might be simpler
+                        # total_tracks_analyzed_all_albums += t_res.result.get("tracks_analyzed", 0)
                 else:
-                    failed_albums += 1
+                    failed_songs += 1
             
-            final_message = f"Main analysis complete. Successful albums: {successful_albums}, Failed albums: {failed_albums}. Total tracks analyzed: {total_tracks_analyzed_all_albums}."
-            log_and_update_main_analysis(final_message, 100, details_extra={"albums_completed": successful_albums, "albums_failed": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}, task_state='SUCCESS')
+            final_message = f"Main analysis dispatch complete. Successful song tasks: {successful_songs}, Failed song tasks: {failed_songs} (out of {len(album_tasks_group)} dispatched)."
+            log_and_update_main_analysis(final_message, 100, details_extra={"songs_completed_successfully": successful_songs, "songs_failed": failed_songs, "total_songs_dispatched": len(album_tasks_group)}, task_state='SUCCESS')
             clean_temp(TEMP_DIR)
-            return {"status": "SUCCESS", "message": final_message, "successful_albums": successful_albums, "failed_albums": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}
+            return {"status": "SUCCESS", "message": final_message, "successful_songs": successful_songs, "failed_songs": failed_songs, "total_dispatched": len(album_tasks_group)}
 
         except Exception as e:
             import traceback
@@ -604,7 +604,7 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
         initial_details = {"run_id": run_id, "params": clustering_method_config, "log": log_messages_iter}
         current_progress_single_run = 0 # Initialize progress for this task
         
-        def log_and_update_single_run(message, progress_val, details_extra=None, task_state='PROGRESS'): # Renamed progress to progress_val
+        def log_and_update_single_run(message, progress_val, details_extra=None, task_state='PROGRESS'):
             nonlocal current_progress_single_run
             current_progress_single_run = progress_val
             log_messages_iter.append(message)
@@ -622,7 +622,6 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
 
         try:
             log_and_update_single_run(f"Starting with method {clustering_method_config['method']}, params: {clustering_method_config['params']}, PCA: {pca_config}", 0) # Initial progress 0
-            # current_progress_single_run = 0 # Ensure it's defined for the try block - already done above
 
             all_tracks_data = json.loads(all_tracks_data_json)
             if task_result_checker and task_result_checker.state == 'REVOKED':
@@ -648,7 +647,6 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
                 else:
                     pca_config["enabled"] = False
             log_and_update_single_run(f"PCA {'enabled with ' + str(n_components_actual) + ' components' if pca_config['enabled'] else 'disabled'}.", 25)
-            # current_progress_single_run = 25 # Updated by log_and_update_single_run
 
             labels = None
             cluster_centers_map = {}
@@ -687,7 +685,6 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
                 centers_for_points = gmm.means_[labels]
                 raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
             log_and_update_single_run("Clustering algorithm applied.", 50) # Progress 50
-            # current_progress_single_run = 50 # Updated by log_and_update_single_run
 
             if labels is None or len(set(labels) - {-1}) == 0:
                 log_and_update_single_run("No valid clusters found.", 100, details_extra={"diversity_score": -1}, task_state='SUCCESS')
@@ -717,7 +714,6 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
                     item_id, title, author = t_item["row"].item_id, t_item["row"].title, t_item["row"].author
                     filtered_clusters[cluster_id_val].append((item_id, title, author))
             log_and_update_single_run("Tracks filtered into clusters.", 65) # Progress 65
-            # current_progress_single_run = 65 # Updated by log_and_update_single_run
 
             current_named_playlists = defaultdict(list)
             current_playlist_centroids = {}
@@ -738,7 +734,6 @@ def run_single_clustering_iteration_task(self, run_id, all_tracks_data_json, clu
 
             diversity_score = sum(unique_predominant_mood_scores.values())
             log_and_update_single_run(f"Named {len(current_named_playlists)} playlists. Diversity score: {diversity_score:.2f}", 75) # Progress 75
-            # current_progress_single_run = 75 # Updated by log_and_update_single_run
 
             pca_model_details = {"n_components": pca_model.n_components_, "mean": pca_model.mean_.tolist()} if pca_model else None
 
@@ -772,7 +767,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
         log_messages = []
         current_progress = 0 # Initialize current_progress for the scope
 
-        def log_and_update_main_clustering(message, progress_val, details_extra=None, task_state='PROGRESS'): # Renamed progress to progress_val
+        def log_and_update_main_clustering(message, progress_val, details_extra=None, task_state='PROGRESS'):
             nonlocal current_progress
             current_progress = progress_val
             log_messages.append(message)
@@ -893,7 +888,7 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
             log_and_update_main_clustering(f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}.", 100, task_state='SUCCESS')
             return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had weighted diversity score of {best_diversity_score:.2f}."}
 
-        except Exception as e:
+        except Exception as e: # Catch generic exceptions first
             import traceback
             error_traceback = traceback.format_exc()
             print(f"FATAL ERROR: Clustering failed: {e}\n{error_traceback}")
@@ -902,8 +897,6 @@ def run_clustering_task(self, clustering_method, num_clusters_min, num_clusters_
         except SoftTimeLimitExceeded:
             print(f"SOFT TIME LIMIT EXCEEDED for main clustering task {current_task_id}")
             log_and_update_main_clustering(f"Main clustering task {current_task_id} exceeded soft time limit.", current_progress, task_state='FAILURE') # Or REVOKED
-            # No need to raise here, Celery handles it by setting state to FAILURE if not caught,
-            # but we are updating our DB.
             raise
 
 
