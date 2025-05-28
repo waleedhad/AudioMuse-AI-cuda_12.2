@@ -35,8 +35,10 @@ metadata:
 data:
   JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087"
   DATABASE_URL: "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb"
-  CELERY_BROKER_URL: "redis://redis-service.playlist:6379/0"
-  CELERY_RESULT_BACKEND: "redis://redis-service.playlist:6379/0"
+  # CELERY_BROKER_URL and CELERY_RESULT_BACKEND are no longer needed for RQ.
+  # REDIS_URL is used by both app.py and rq_worker.py, and defaults to redis://localhost:6379/0 if not set.
+  # We can explicitly set it here to point to our Kubernetes Redis service.
+  REDIS_URL: "redis://redis-service.playlist:6379/0"
   TEMP_DIR: "/app/temp_audio" # Updated to match code changes
 ---
 apiVersion: apps/v1
@@ -241,36 +243,36 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: audiomuse-ai-celery
+  name: audiomuse-ai-worker # Changed from celery to worker
   namespace: playlist
   labels:
     app: audiomuse-ai
-    component: celery
+    component: worker # Changed from celery to worker
 spec:
   replicas: 2 # Scale as needed for parallel processing
   selector:
     matchLabels:
       app: audiomuse-ai
-      component: celery
+      component: worker # Changed from celery to worker
   template:
     metadata:
       labels:
         app: audiomuse-ai
-        component: celery
+        component: worker # Changed from celery to worker
     spec: # nodeSelector removed from here
       securityContext:
         runAsUser: 0
         runAsGroup: 0
         fsGroup: 0
       containers:
-      - name: celery-worker
+      - name: rq-worker # Changed from celery-worker
         image: ghcr.io/neptunehub/audiomuse-ai:devel # Your image from GHCR
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE
-          value: "celery" # Tells the container to run the Celery worker
-        - name: C_FORCE_ROOT
-          value: "true"
+          value: "worker" # Tells the container to run the RQ worker
+        # - name: C_FORCE_ROOT # This was Celery specific, remove if not needed by RQ setup
+        #   value: "true"
         # --- Load Jellyfin Credentials from Secret ---
         - name: JELLYFIN_USER_ID
           valueFrom:

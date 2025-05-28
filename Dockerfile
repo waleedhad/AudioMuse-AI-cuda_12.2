@@ -28,10 +28,10 @@ RUN pip3 install --no-cache-dir numpy==1.26.4
 RUN pip3 install --no-cache-dir \
     Flask \
     Flask-Cors \
-    celery \
     redis \
     requests \
     scikit-learn \
+    rq \
     pyyaml \
     six \
     # Added psycopg2-binary for PostgreSQL connectivity
@@ -47,5 +47,4 @@ ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
 EXPOSE 8000
 
 WORKDIR /workspace
-#CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=solo --loglevel=debug; else python3 /app/app.py; fi"]
-CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=threads --loglevel=debug; else python3 /app/app.py; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then python3 /app/rq_worker.py; else python3 /app/app.py; fi"]
