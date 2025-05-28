@@ -12,6 +12,7 @@ from rq import Queue, Retry
 from rq.job import Job, JobStatus
 from rq.exceptions import NoSuchJobError
 from rq.command import send_stop_job_command
+JobStatus = JobStatus # Make JobStatus directly accessible within the app for tasks to import via `from app import JobStatus`
 
 # Import configuration
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
@@ -278,39 +279,59 @@ def get_task_status_endpoint(task_id):
 def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     """Helper to cancel a job and its children based on DB records."""
     cancelled_count = 0
-    try:
-        job = Job.fetch(job_id, connection=redis_conn)
-        if not job.is_finished and not job.is_failed and not job.is_canceled:
-            send_stop_job_command(redis_conn, job_id) # Stops immediately, moves to failed registry
-            # RQ's send_stop_job_command marks it as failed. We want to show 'REVOKED'.
-            # So, we update our DB to 'REVOKED'.
-            job_status_after_stop = Job.fetch(job_id, connection=redis_conn).get_status()
-            print(f"Job {job_id} status after send_stop_job_command: {job_status_after_stop}")
-            cancelled_count += 1
-    except NoSuchJobError:
-        print(f"Job {job_id} not found in RQ for cancellation, might be already processed or cleared.")
-
-    # Update DB status to REVOKED regardless of RQ state if cancellation was requested
+    
+    # First, determine the task_type for the current job_id
     db_task_info = get_task_info_from_db(job_id)
-    task_type = db_task_info.get('task_type') if db_task_info else task_type_from_db
-    if task_type: # Ensure we have a task_type to save
-        save_task_status(job_id, task_type, "REVOKED", progress=100, details={"message": "Task cancelled by API."})
-    else:
-        print(f"Warning: Could not determine task_type for {job_id} to mark as REVOKED in DB.")
+    current_task_type = db_task_info.get('task_type') if db_task_info else task_type_from_db
 
+    if not current_task_type:
+        print(f"Warning: Could not determine task_type for job {job_id}. Cannot reliably mark as REVOKED in DB or cancel children.")
+        # Try a best-effort RQ cancel if job_id is known, but DB update for this job is skipped.
+        try:
+            job_rq = Job.fetch(job_id, connection=redis_conn)
+            if not job_rq.is_finished and not job_rq.is_failed and not job_rq.is_canceled:
+                send_stop_job_command(redis_conn, job_id)
+                cancelled_count += 1 # Count this as an action taken
+                print(f"Job {job_id} (task_type unknown) stop command sent to RQ.")
+            # else: Job already in a final state or not running
+        except NoSuchJobError:
+            pass # Job not in RQ, nothing to do there for this ID
+        return cancelled_count
+
+    # If current_task_type is known, proceed with RQ cancellation attempt and DB update
+    try:
+        job_rq = Job.fetch(job_id, connection=redis_conn)
+        if not job_rq.is_finished and not job_rq.is_failed and not job_rq.is_canceled:
+            send_stop_job_command(redis_conn, job_id)
+            # job_status_after_stop = Job.fetch(job_id, connection=redis_conn).get_status() # Re-fetch if needed for logging
+            # print(f"Job {job_id} (type: {current_task_type}) status after send_stop_job_command: {job_status_after_stop}")
+            cancelled_count += 1 # Count this as an action taken
+        # else: Job already in a final state or not running
+    except NoSuchJobError:
+        # Job not in RQ, might be already processed or cleared.
+        pass
+
+    # Always mark as REVOKED in DB for the current job if its task_type is known
+    save_task_status(job_id, current_task_type, "REVOKED", progress=100, details={"message": "Task cancellation processed by API."})
 
     # Attempt to cancel children based on DB parent_task_id
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT task_id, task_type FROM task_status WHERE parent_task_id = %s AND status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED')", (job_id,))
+    # Fetch children that are not already in a terminal state
+    cur.execute("""
+        SELECT task_id, task_type FROM task_status 
+        WHERE parent_task_id = %s 
+        AND status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED')
+    """, (job_id,))
     children_tasks = cur.fetchall()
     cur.close()
 
     for child_task_row in children_tasks:
         child_job_id = child_task_row['task_id']
-        child_task_type = child_task_row['task_type']
-        print(f"Recursively cancelling child job: {child_job_id}")
-        cancelled_count += cancel_job_and_children_recursive(child_job_id, child_task_type)
+        child_task_type = child_task_row['task_type'] # Child's own type
+        print(f"Recursively cancelling child job: {child_job_id} of type {child_task_type}")
+        # The count from recursive calls will be added
+        cancelled_count += cancel_job_and_children_recursive(child_job_id, child_task_type) 
     
     return cancelled_count
 
@@ -320,10 +341,7 @@ def cancel_task_endpoint(task_id):
     if not db_task_info:
         return jsonify({"message": f"Task {task_id} not found in database.", "task_id": task_id}), 404
 
-    # Mark as REVOKED_REQUEST in DB first for cooperative cancellation if tasks implement it
-    # save_task_status(task_id, db_task_info['task_type'], "REVOKED_REQUEST", progress=db_task_info.get('progress',0), details={"message": "Cancellation requested by API."})
-
-    cancelled_count = cancel_job_and_children_recursive(task_id, db_task_info.get('task_type'))
+    cancelled_count = cancel_job_and_children_recursive(task_id, db_task_info.get('task_type')) # Task type from DB
 
     if cancelled_count > 0:
         return jsonify({"message": f"Task {task_id} and its children cancellation initiated. {cancelled_count} total jobs affected.", "task_id": task_id, "cancelled_jobs_count": cancelled_count}), 200
@@ -340,13 +358,11 @@ def cancel_all_tasks_by_type_endpoint(task_type_prefix):
 
     total_cancelled_jobs = 0
     cancelled_main_task_ids = []
-    for task_row in tasks_to_cancel:
-        # Mark as REVOKED_REQUEST in DB first
-        # save_task_status(task_row['task_id'], task_row['task_type'], "REVOKED_REQUEST", details={"message": "Cancellation requested by API for all tasks of type."})
-        cancelled_jobs_for_this_main_task = cancel_job_and_children_recursive(task_row['task_id'], task_row['task_type'])
+    for task_row in tasks_to_cancel:  # task_row has 'task_id' and 'task_type'
+        cancelled_jobs_for_this_main_task = cancel_job_and_children_recursive(task_row['task_id'], task_row['task_type'])  # Use task type from DB for consistency
         if cancelled_jobs_for_this_main_task > 0:
-            total_cancelled_jobs += cancelled_jobs_for_this_main_task
-            cancelled_main_task_ids.append(task_row['task_id'])
+           total_cancelled_jobs += cancelled_jobs_for_this_main_task
+           cancelled_main_task_ids.append(task_row['task_id'])
 
     if total_cancelled_jobs > 0:
         return jsonify({"message": f"Cancellation initiated for {len(cancelled_main_task_ids)} main tasks of type '{task_type_prefix}' and their children. Total jobs affected: {total_cancelled_jobs}.", "cancelled_main_tasks": cancelled_main_task_ids}), 200
