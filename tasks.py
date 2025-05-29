@@ -211,18 +211,40 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
         log_messages = []
         tracks_analyzed_count = 0
         current_progress_val = 0
+        # Initialize current_track_analysis to None or an empty dict
+        current_track_analysis_for_meta = None
 
-        def log_and_update_album_task(message, progress, current_track_name=None, task_state='PROGRESS'):
+
+        def log_and_update_album_task(message, progress, current_track_name=None, task_state='PROGRESS', current_track_analysis_details=None):
             nonlocal current_progress_val
+            nonlocal current_track_analysis_for_meta # To update it
             current_progress_val = progress
             log_messages.append(message)
             print(f"[AlbumTask-{current_task_id}-{album_name}] {message}")
-            details = {"album_name": album_name, "log": log_messages, "current_track": current_track_name}
+            
+            # Update the shared variable for meta
+            current_track_analysis_for_meta = current_track_analysis_details
+
+            # Details for database (can be more complete)
+            db_details = {
+                "album_name": album_name,
+                "log": log_messages, # Full log for DB
+                "current_track": current_track_name,
+                "current_track_analysis": current_track_analysis_details
+            }
+            # Details for RQ job.meta (potentially truncated log, but includes current analysis)
+            meta_details = {
+                "album_name": album_name,
+                "log": log_messages[-5:], # Last 5 messages for RQ meta
+                "current_track": current_track_name,
+                "current_track_analysis": current_track_analysis_details
+            }
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
+                current_job.meta['details'] = meta_details # Use potentially truncated details for meta
                 current_job.save_meta()
-            save_task_status(current_task_id, "album_analysis", task_state, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=progress, details=details)
+            save_task_status(current_task_id, "album_analysis", task_state, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=progress, details=db_details) # Use full details for DB
 
         try:
             log_and_update_album_task(f"Fetching tracks for album: {album_name}", 5)
@@ -255,7 +277,12 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
 
                 track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
                 current_progress_val = 10 + int(85 * (idx / float(total_tracks_in_album))) if total_tracks_in_album > 0 else 10
-                log_and_update_album_task(f"Analyzing track: {track_name_full} ({idx}/{total_tracks_in_album})", current_progress_val, current_track_name=track_name_full)
+                # Clear previous track's analysis details when starting a new track
+                log_and_update_album_task(
+                    f"Analyzing track: {track_name_full} ({idx}/{total_tracks_in_album})",
+                    current_progress_val,
+                    current_track_name=track_name_full,
+                    current_track_analysis_details=None)
 
                 if track_exists(item['Id']):
                     log_and_update_album_task(f"Skipping '{track_name_full}' (already analyzed)", current_progress_val, current_track_name=track_name_full)
@@ -270,10 +297,21 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
 
                 try:
                     tempo, key, scale, moods = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, top_n_moods)
+                    current_track_details_for_api = {
+                        "name": track_name_full,
+                        "tempo": round(tempo, 2),
+                        "key": key,
+                        "scale": scale,
+                        "moods": {k: round(v, 2) for k, v in moods.items()}
+                    }
                     save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
                     tracks_analyzed_count += 1
                     mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
-                    log_and_update_album_task(f"Analyzed '{track_name_full}'. Tempo: {tempo:.2f}, Key: {key} {scale}. Moods: {mood_details_str}", current_progress_val, current_track_name=track_name_full)
+                    log_and_update_album_task(
+                        f"Analyzed '{track_name_full}'. Tempo: {tempo:.2f}, Key: {key} {scale}. Moods: {mood_details_str}",
+                        current_progress_val,
+                        current_track_name=track_name_full,
+                        current_track_analysis_details=current_track_details_for_api)
                 except Exception as e_analyze:
                     log_and_update_album_task(f"Error analyzing '{track_name_full}': {e_analyze}", current_progress_val, current_track_name=track_name_full)
                 finally:
@@ -339,6 +377,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
                     job_id=sub_task_id,
                     description=f"Analyzing album: {album['Name']}",
+                    job_timeout='1h', # Set timeout to 1 hour for album analysis
                     meta={'parent_task_id': current_task_id}
                 )
                 album_jobs.append(job)
@@ -346,15 +385,19 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             
             log_and_update_main_analysis(f"Launched {total_albums} album analysis tasks.", 10, {"album_task_ids": album_job_ids})
 
+            active_album_task_id_for_status = None
+            active_album_name_for_status = None
             while True:
                 # === Cooperative Cancellation Check for Main Analysis Task ===
                 if current_job: # Check if running as an RQ job
                     with app.app_context(): # Ensure DB access
+                    # Check self status first
                         main_task_db_info = get_task_info_from_db(current_task_id)
                         if main_task_db_info and main_task_db_info.get('status') == 'REVOKED':
                             log_and_update_main_analysis(f"🛑 Main analysis task {current_task_id} has been REVOKED. Stopping and attempting to update children.", current_progress, task_state='REVOKED')
                             # Update DB status of child jobs to REVOKED
                             for child_job_instance in album_jobs:
+                                if not child_job_instance: continue 
                                 try:
                                     # No need to call child_job_instance.cancel() here,
                                     # as the child task's cooperative cancellation will pick up the DB status change.
@@ -369,6 +412,13 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                             return {"status": "REVOKED", "message": "Main analysis task was revoked."}
                 # === End Cooperative Cancellation Check ===
                 completed_count = 0
+                # Reset active album info for this check cycle
+                active_album_task_id_for_status = None
+                active_album_name_for_status = None
+                # Find the first non-finished/failed/canceled job to report as "currently processing"
+                # This is a simplification; multiple might be "active" if you have many workers for album tasks.
+                # But for UI, showing one is often sufficient.
+
                 all_done = True
                 for job_instance in album_jobs:
                     job_instance.refresh() # Get latest status from Redis
@@ -376,13 +426,20 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                         completed_count += 1
                     else:
                         all_done = False
+                        if active_album_task_id_for_status is None: # Pick the first one we find that's still active
+                            active_album_task_id_for_status = job_instance.id
+                            if job_instance.description and "Analyzing album: " in job_instance.description:
+                                active_album_name_for_status = job_instance.description.replace("Analyzing album: ", "")
+                            elif job_instance.meta and job_instance.meta.get('details') and job_instance.meta['details'].get('album_name'):
+                                active_album_name_for_status = job_instance.meta['details']['album_name']
                 
                 progress_while_waiting = 10 + int(80 * (completed_count / float(total_albums))) if total_albums > 0 else 10
                 log_and_update_main_analysis(
                     f"Processing albums: {completed_count}/{total_albums} completed.",
                     progress_while_waiting,
-                    {"albums_completed": completed_count, "total_albums": total_albums}
-                )
+                    {"albums_completed": completed_count, "total_albums": total_albums,
+                     "currently_processing_album_task_id": active_album_task_id_for_status,
+                     "currently_processing_album_name": active_album_name_for_status})
                 if all_done: break
                 time.sleep(5)
 
@@ -405,7 +462,20 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
         except Exception as e:
             error_tb = traceback.format_exc()
             print(f"FATAL ERROR: Analysis failed: {e}\n{error_tb}")
-            log_and_update_main_analysis(f"❌ Main analysis failed: {e}", current_progress, {"error": str(e), "traceback": error_tb}, task_state='FAILURE')
+            # Ensure app_context for DB operations in exception handling
+            with app.app_context():
+                log_and_update_main_analysis(f"❌ Main analysis failed: {e}", current_progress, {"error_message": str(e), "traceback": error_tb}, task_state='FAILURE')
+                # Attempt to mark children as REVOKED if the parent fails
+                if 'album_jobs' in locals() and album_jobs: # Check if album_jobs was initialized
+                    print(f"[MainAnalysisTask-{current_task_id}] Parent task failed. Attempting to mark {len(album_jobs)} children as REVOKED.")
+                    for child_job_instance in album_jobs:
+                        try:
+                            if not child_job_instance: continue # This line needed to be indented
+                            child_db_info = get_task_info_from_db(child_job_instance.id)
+                            if child_db_info and child_db_info.get('status') not in ['REVOKED', 'SUCCESS', 'FAILURE', 'CANCELED']:
+                                save_task_status(child_job_instance.id, "album_analysis", "REVOKED", parent_task_id=current_task_id, progress=100, details={"message": "Parent task failed."})
+                        except Exception as e_cancel_child_on_fail:
+                            print(f"[MainAnalysisTask-{current_task_id}] Error marking child job {child_job_instance.id} as REVOKED during parent failure: {e_cancel_child_on_fail}")
             raise
 
 def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clustering_method_config, pca_config, max_songs_per_cluster, parent_task_id):
@@ -635,6 +705,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                     args=(run_idx, all_tracks_data_json, method_params, pca_config, max_songs_per_cluster, current_task_id),
                     job_id=sub_task_id,
                     description=f"Clustering Iteration {run_idx}",
+                    job_timeout='1h', # Set timeout to 1 hour for single clustering iteration
                     meta={'parent_task_id': current_task_id}
                 )
                 clustering_run_jobs.append(job)
@@ -648,7 +719,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                     with app.app_context():
                         main_task_db_info = get_task_info_from_db(current_task_id)
                         if main_task_db_info and main_task_db_info.get('status') == 'REVOKED':
-                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} has been REVOKED. Stopping and attempting to update children.", current_progress, task_state='REVOKED')
+                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} has been REVOKED. Stopping and updating children.", current_progress, task_state='REVOKED')
                             for child_job_instance in clustering_run_jobs:
                                 try:
                                     with app.app_context(): # New context for each save
@@ -716,5 +787,17 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
         except Exception as e:
             error_tb = traceback.format_exc()
             print(f"FATAL ERROR: Clustering failed: {e}\n{error_tb}")
-            log_and_update_main_clustering(f"❌ Main clustering failed: {e}", current_progress, {"error": str(e), "traceback": error_tb}, task_state='FAILURE')
+            with app.app_context():
+                log_and_update_main_clustering(f"❌ Main clustering failed: {e}", current_progress, {"error_message": str(e), "traceback": error_tb}, task_state='FAILURE')
+                # Attempt to mark children as REVOKED if the parent fails
+                if 'clustering_run_jobs' in locals() and clustering_run_jobs:
+                    print(f"[MainClusteringTask-{current_task_id}] Parent task failed. Attempting to mark {len(clustering_run_jobs)} children as REVOKED.")
+                    for child_job_instance in clustering_run_jobs:
+                        try:
+                            if not child_job_instance: continue # Indent this line
+                            child_db_info = get_task_info_from_db(child_job_instance.id)
+                            if child_db_info and child_db_info.get('status') not in ['REVOKED', 'SUCCESS', 'FAILURE', 'CANCELED']:
+                                save_task_status(child_job_instance.id, "single_clustering_run", "REVOKED", parent_task_id=current_task_id, progress=100, details={"message": "Parent task failed."})
+                        except Exception as e_cancel_child_on_fail:
+                            print(f"[MainClusteringTask-{current_task_id}] Error marking child job {child_job_instance.id} as REVOKED during parent failure: {e_cancel_child_on_fail}")
             raise

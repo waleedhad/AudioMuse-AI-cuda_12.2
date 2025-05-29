@@ -189,8 +189,9 @@ def start_analysis_endpoint():
         run_analysis_task,
         args=(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods),
         job_id=job_id,
-        description="Main Music Analysis",
-        retry=Retry(max=1) # Optional: retry once if fails
+        description="Main Music Analysis", # No timeout
+        retry=Retry(max=1), # Optional: retry once if fails
+        job_timeout=None 
     )
     return jsonify({"task_id": job.id, "task_type": "main_analysis", "status": job.get_status()}), 202
 
@@ -225,8 +226,9 @@ def start_clustering_endpoint():
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val
         ),
         job_id=job_id,
-        description="Main Music Clustering",
-        retry=Retry(max=1) # Optional
+        description="Main Music Clustering", # No timeout
+        retry=Retry(max=1), # Optional
+        job_timeout=None  
     )
     return jsonify({"task_id": job.id, "task_type": "main_clustering", "status": job.get_status()}), 202
 
