@@ -309,8 +309,13 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
                     tracks_analyzed_count += 1
                     mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
+                    analysis_summary_msg = f"Tempo: {tempo:.2f}, Key: {key} {scale}."
+                    if mood_details_str:
+                        analysis_summary_msg += f" Moods: {mood_details_str}"
+                    else:
+                        analysis_summary_msg += " Moods: (No moods reported or TOP_N_MOODS is low/zero)"
                     log_and_update_album_task(
-                        f"Analyzed '{track_name_full}'. Tempo: {tempo:.2f}, Key: {key} {scale}. Moods: {mood_details_str}",
+                        f"Analyzed '{track_name_full}'. {analysis_summary_msg}",
                         current_progress_val,
                         current_track_name=track_name_full,
                         current_track_analysis_details=current_track_details_for_api)
@@ -345,6 +350,8 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             nonlocal current_progress
             current_progress = progress
             log_messages.append(message)
+            # Keep only the last 10 log messages
+            log_messages[:] = log_messages[-10:]
             print(f"[MainAnalysisTask-{current_task_id}] {message}")
             current_details = {"log": log_messages, "overall_status": message, **(details_extra or {})}
             if current_job:
@@ -654,6 +661,8 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             nonlocal current_progress
             current_progress = progress
             log_messages.append(message)
+            # Keep only the last 10 log messages
+            log_messages[:] = log_messages[-10:]
             print(f"[MainClusteringTask-{current_task_id}] {message}")
             current_details = {"log": log_messages, "overall_status": message, **(details_extra or {})}
             if current_job:
