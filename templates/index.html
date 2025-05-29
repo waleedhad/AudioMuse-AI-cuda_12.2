@@ -2,217 +2,188 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AudioMuse-AI</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #1a1a1a; /* Dark background */
-        }
-        /* Custom scrollbar for log area */
-        .log-area::-webkit-scrollbar {
-            width: 8px;
-        }
-        .log-area::-webkit-scrollbar-track {
-            background: #2d2d2d;
-            border-radius: 10px;
-        }
-        .log-area::-webkit-scrollbar-thumb {
-            background: #3b82f6; /* Blue-500 */
-            border-radius: 10px;
-        }
-        .log-area::-webkit-scrollbar-thumb:hover {
-            background: #2563eb; /* Blue-600 on hover */
-        }
-        /* Style for fieldset borders */
-        .fieldset-border {
-            border: 1px solid #1e40af; /* Blue-800 */
-            border-radius: 0.5rem; /* rounded-lg */
-            padding: 1.5rem; /* p-6 */
-            margin-bottom: 2rem; /* mb-8 */
-        }
-        .fieldset-legend {
-            color: #93c5fd; /* Blue-300 */
-            font-size: 1.25rem; /* text-2xl */
-            font-weight: 600; /* font-semibold */
-            padding: 0 0.5rem;
-            margin-left: -0.5rem; /* Adjust to align with fieldset */
-        }
-    </style>
-</head>
-<body class="flex items-center justify-center min-h-screen p-4 sm:p-6 bg-gradient-to-br from-gray-900 to-black">
-    <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-blue-700">
-        <h1 class="text-4xl sm:text-5xl font-extrabold text-center text-blue-400 mb-8 tracking-wide">
+    </head>
+<body style="background-color: #1a1a1a; padding: 1.5rem;">
+    <div style="width: 100%; max-width: 960px; margin-left: auto; margin-right: auto;">
+        <h1 style="font-size: 2.25rem; text-align: center; color: #60a5fa; margin-bottom: 2rem; letter-spacing: 0.025em;">
             AudioMuse-AI
         </h1>
 
-        <div id="loading-spinner" class="hidden flex justify-center items-center py-8">
-            <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500"></div>
-            <p class="ml-4 text-blue-300 text-lg">Loading...</p>
+        <div id="loading-spinner" style="display: none; justify-content: center; align-items: center; padding-top: 2rem; padding-bottom: 2rem;">
+            <div style="height: 4rem; width: 4rem; border-radius: 9999px; border-top: 4px solid #3b82f6; border-bottom: 4px solid #3b82f6;"></div>
+            <p style="margin-left: 1rem; color: #93c5fd; font-size: 1.125rem;">Loading...</p>
         </div>
 
-        <div id="main-content" class="hidden">
-            <section class="mb-8 p-6 bg-gray-900 rounded-lg shadow-inner border border-blue-800">
-                <h2 class="text-2xl font-semibold text-blue-300 mb-4 flex items-center">
-                    <i class="fas fa-cog mr-3 text-blue-500"></i>Configuration Parameters
+        <div id="main-content" style="display: none;">
+            <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    <svg style="display: inline-block; width: 1.5em; height: 1.5em; vertical-align: middle; fill: #3b82f6; margin-right: 0.75rem;" viewBox="0 0 576 512" xmlns="http://www.w3.org/2000/svg"><path d="M572.52 241.4C518.29 135.59 410.93 64 288 64S57.68 135.59 3.48 241.41c-11.19 22.84-11.19 48.07 0 70.91C57.7 376.41 165.07 448 288 448s230.32-71.59 284.52-177.41c11.19-22.84 11.19-48.07 0-70.91zM288 352a96 96 0 1 1 0-192 96 96 0 0 1 0 192z"/></svg>
+                    Configuration Parameters
                 </h2>
-                <form id="config-form" class="text-gray-300">
-                    <fieldset class="fieldset-border">
-                        <legend class="fieldset-legend flex items-center">
-                            <i class="fas fa-server mr-2"></i>General Parameters
+                <form id="config-form" style="color: #d1d5db;">
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            <svg style="display: inline-block; width: 1.25em; height: 1.25em; vertical-align: middle; fill: currentColor; margin-right: 0.5rem;" viewBox="0 0 576 512" xmlns="http://www.w3.org/2000/svg"><path d="M64 32C28.7 32 0 60.7 0 96v64c0 35.3 28.7 64 64 64H512c35.3 0 64-28.7 64-64V96c0-35.3-28.7-64-64-64H64zm0 224c-35.3 0-64 28.7-64 64v64c0 35.3 28.7 64 64 64H512c35.3 0 64-28.7 64-64V352c0-35.3-28.7-64-64-64H64zM96 112a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm0 224a32 32 0 1 1 0 64 32 32 0 1 1 0-64z"/></svg>
+                            General Parameters
                         </legend>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="mb-2">
-                                <label for="config-jellyfin_url" class="block text-sm font-medium text-gray-400 mb-1">Jellyfin URL:</label>
-                                <input type="text" id="config-jellyfin_url" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-jellyfin_url" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin URL:</label>
+                                <input type="text" id="config-jellyfin_url" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-jellyfin_user_id" class="block text-sm font-medium text-gray-400 mb-1">Jellyfin User ID:</label>
-                                <input type="text" id="config-jellyfin_user_id" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-jellyfin_user_id" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin User ID:</label>
+                                <input type="text" id="config-jellyfin_user_id" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-jellyfin_token" class="block text-sm font-medium text-gray-400 mb-1">Jellyfin Token:</label>
-                                <input type="text" id="config-jellyfin_token" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-jellyfin_token" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin Token:</label>
+                                <input type="text" id="config-jellyfin_token" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
                         </div>
                     </fieldset>
 
-                    <fieldset class="fieldset-border">
-                        <legend class="fieldset-legend flex items-center">
-                            <i class="fas fa-chart-bar mr-2"></i>Analysis Parameters
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            <svg style="display: inline-block; width: 1.25em; height: 1.25em; vertical-align: middle; fill: currentColor; margin-right: 0.5rem;" viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><path d="M160 64c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V64zm96 0c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V64zM384 64c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V64z"/></svg>
+                            Analysis Parameters
                         </legend>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="mb-2">
-                                <label for="config-num_recent_albums" class="block text-sm font-medium text-gray-400 mb-1">Number of Recent Albums:</label>
-                                <input type="number" id="config-num_recent_albums" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-num_recent_albums" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Number of Recent Albums:</label>
+                                <input type="number" id="config-num_recent_albums" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-top_n_moods" class="block text-sm font-medium text-gray-400 mb-1">Top N Moods:</label>
-                                <input type="number" id="config-top_n_moods" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-top_n_moods" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Top N Moods:</label>
+                                <input type="number" id="config-top_n_moods" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            </div>
+                        </div>
                     </fieldset>
 
-                    <fieldset class="fieldset-border">
-                        <legend class="fieldset-legend flex items-center">
-                            <i class="fas fa-sitemap mr-2"></i>Clustering Parameters
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            <svg style="display: inline-block; width: 1.25em; height: 1.25em; vertical-align: middle; fill: currentColor; margin-right: 0.5rem;" viewBox="0 0 640 512" xmlns="http://www.w3.org/2000/svg"><path d="M384 96c0-17.7-14.3-32-32-32H32C14.3 64 0 78.3 0 96v64c0 17.7 14.3 32 32 32H352c17.7 0 32-14.3 32-32V96zm-64 0c0-17.7-14.3-32-32-32H32C14.3 64 0 78.3 0 96v64c0 17.7 14.3 32 32 32H288c17.7 0 32-14.3 32-32V96zM384 224c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H352c17.7 0 32-14.3 32-32V224zM320 224c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H288c17.7 0 32-14.3 32-32V224zM384 352c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H352c17.7 0 32-14.3 32-32V352zM320 352c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H288c17.7 0 32-14.3 32-32V352zM576 64c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32H576zM544 224c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32H544zM544 352c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V384c0-17.7-14.3-32-32-32H544z"/></svg>
+                            Clustering Parameters
                         </legend>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="mb-2">
-                                <label for="config-cluster_algorithm" class="block text-sm font-medium text-gray-400 mb-1">Clustering Algorithm:</label>
-                                <select id="config-cluster_algorithm" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-cluster_algorithm" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Algorithm:</label>
+                                <select id="config-cluster_algorithm" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                     <option value="kmeans">K-Means</option>
                                     <option value="dbscan">DBSCAN</option>
                                     <option value="gmm">GMM</option>
                                 </select>
                             </div>
-                            <div class="mb-2">
-                                <label for="config-max_distance" class="block text-sm font-medium text-gray-400 mb-1">Max Distance:</label>
-                                <input type="number" step="0.01" id="config-max_distance" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-max_distance" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Distance:</label>
+                                <input type="number" step="0.01" id="config-max_distance" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-max_songs_per_cluster" class="block text-sm font-medium text-gray-400 mb-1">Max Songs Per Cluster:</label>
-                                <input type="number" id="config-max_songs_per_cluster" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-max_songs_per_cluster" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Songs Per Cluster:</label>
+                                <input type="number" id="config-max_songs_per_cluster" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-pca_components_min" class="block text-sm font-medium text-gray-400 mb-1">PCA Components Min:</label>
-                                <input type="number" id="config-pca_components_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-pca_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Min:</label>
+                                <input type="number" id="config-pca_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-pca_components_max" class="block text-sm font-medium text-gray-400 mb-1">PCA Components Max:</label>
-                                <input type="number" id="config-pca_components_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-pca_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Max:</label>
+                                <input type="number" id="config-pca_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-clustering_runs" class="block text-sm font-medium text-gray-400 mb-1">Clustering Runs:</label>
-                                <input type="number" id="config-clustering_runs" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
-                            </div>
-                        </div>
-
-                        <div id="dbscan-params" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden">
-                            <h4 class="col-span-full text-lg font-medium text-blue-400 mb-2">DBSCAN Specific:</h4>
-                            <div class="mb-2">
-                                <label for="config-dbscan_eps_min" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Epsilon Min:</label>
-                                <input type="number" step="0.01" id="config-dbscan_eps_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
-                            </div>
-                            <div class="mb-2">
-                                <label for="config-dbscan_eps_max" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Epsilon Max:</label>
-                                <input type="number" step="0.01" id="config-dbscan_eps_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
-                            </div>
-                            <div class="mb-2">
-                                <label for="config-dbscan_min_samples_min" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Min Samples Min:</label>
-                                <input type="number" id="config-dbscan_min_samples_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
-                            </div>
-                            <div class="mb-2">
-                                <label for="config-dbscan_min_samples_max" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Min Samples Max:</label>
-                                <input type="number" id="config-dbscan_min_samples_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-clustering_runs" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Runs:</label>
+                                <input type="number" id="config-clustering_runs" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
                         </div>
 
-                        <div id="kmeans-params" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden">
-                            <h4 class="col-span-full text-lg font-medium text-blue-400 mb-2">K-Means Specific:</h4>
-                            <div class="mb-2">
-                                <label for="config-num_clusters_min" class="block text-sm font-medium text-gray-400 mb-1">Min Clusters:</label>
-                                <input type="number" id="config-num_clusters_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                        <div id="dbscan-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">DBSCAN Specific:</h4>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_eps_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Epsilon Min:</label>
+                                <input type="number" step="0.01" id="config-dbscan_eps_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-num_clusters_max" class="block text-sm font-medium text-gray-400 mb-1">Max Clusters:</label>
-                                <input type="number" id="config-num_clusters_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_eps_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Epsilon Max:</label>
+                                <input type="number" step="0.01" id="config-dbscan_eps_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_min_samples_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Min Samples Min:</label>
+                                <input type="number" id="config-dbscan_min_samples_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_min_samples_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Min Samples Max:</label>
+                                <input type="number" id="config-dbscan_min_samples_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
                         </div>
 
-                        <div id="gmm-params" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden">
-                            <h4 class="col-span-full text-lg font-medium text-blue-400 mb-2">GMM Specific:</h4>
-                            <div class="mb-2">
-                                <label for="config-gmm_n_components_min" class="block text-sm font-medium text-gray-400 mb-1">GMM Components Min:</label>
-                                <input type="number" id="config-gmm_n_components_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                        <div id="kmeans-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">K-Means Specific:</h4>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-num_clusters_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Min Clusters:</label>
+                                <input type="number" id="config-num_clusters_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div class="mb-2">
-                                <label for="config-gmm_n_components_max" class="block text-sm font-medium text-gray-400 mb-1">GMM Components Max:</label>
-                                <input type="number" id="config-gmm_n_components_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-num_clusters_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Clusters:</label>
+                                <input type="number" id="config-num_clusters_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+
+                        <div id="gmm-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">GMM Specific:</h4>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-gmm_n_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">GMM Components Min:</label>
+                                <input type="number" id="config-gmm_n_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-gmm_n_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">GMM Components Max:</label>
+                                <input type="number" id="config-gmm_n_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
                         </div>
                     </fieldset>
                 </form>
             </section>
 
-            <section class="mb-8 p-6 bg-gray-900 rounded-lg shadow-inner border border-blue-800">
-                <h2 class="text-2xl font-semibold text-blue-300 mb-4 flex items-center">
-                    <i class="fas fa-play-circle mr-3 text-blue-500"></i>Run Tasks
+            <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    <svg style="display: inline-block; width: 1.5em; height: 1.5em; vertical-align: middle; fill: #3b82f6; margin-right: 0.75rem;" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><path d="M464 256A208 208 0 1 0 48 256a208 208 0 1 0 416 0zM0 256a256 256 0 1 1 512 0A256 256 0 1 1 0 256zm294.6 96.6c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L338.7 288 208 288c-17.7 0-32-14.3-32-32s14.3-32 32-32l130.7 0L249.4 204.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L401.4 233.4c12.5 12.5 12.5 32.8 0 45.3L294.6 352.6z"/></svg>
+                    Run Tasks
                 </h2>
-                <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem;">
                     <button id="start-analysis-btn"
-                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <i class="fas fa-chart-bar mr-2"></i> Start Analysis
+                            style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
+                        <svg style="display: inline-block; width: 1.25em; height: 1.25em; vertical-align: middle; fill: currentColor; margin-right: 0.5rem;" viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><path d="M160 64c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V64zm96 0c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V64zM384 64c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V64z"/></svg>
+                        Start Analysis
                     </button>
                     <button id="start-clustering-btn"
-                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <i class="fas fa-sitemap mr-2"></i> Start Clustering
+                            style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
+                        <svg style="display: inline-block; width: 1.25em; height: 1.25em; vertical-align: middle; fill: currentColor; margin-right: 0.5rem;" viewBox="0 0 640 512" xmlns="http://www.w3.org/2000/svg"><path d="M384 96c0-17.7-14.3-32-32-32H32C14.3 64 0 78.3 0 96v64c0 17.7 14.3 32 32 32H352c17.7 0 32-14.3 32-32V96zm-64 0c0-17.7-14.3-32-32-32H32C14.3 64 0 78.3 0 96v64c0 17.7 14.3 32 32 32H288c17.7 0 32-14.3 32-32V96zM384 224c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H352c17.7 0 32-14.3 32-32V224zM320 224c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H288c17.7 0 32-14.3 32-32V224zM384 352c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H352c17.7 0 32-14.3 32-32V352zM320 352c0-17.7-14.3-32-32-32H32c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32H288c17.7 0 32-14.3 32-32V352zM576 64c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32H576zM544 224c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V256c0-17.7-14.3-32-32-32H544zM544 352c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h32c17.7 0 32-14.3 32-32V384c0-17.7-14.3-32-32-32H544z"/></svg>
+                        Start Clustering
                     </button>
                 </div>
                 <button id="cancel-task-btn"
-                        class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed mt-4">
-                    <i class="fas fa-stop-circle mr-2"></i> Cancel Current Task
+                        style="width: 100%; background-color: #dc2626; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; margin-top: 1rem;">
+                    <svg style="display: inline-block; width: 1.25em; height: 1.25em; vertical-align: middle; fill: currentColor; margin-right: 0.5rem;" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zm0-384c-26.5 0-48 21.5-48 48V304c0 26.5 21.5 48 48 48s48-21.5 48-48V128c0-26.5-21.5-48-48-48z"/></svg>
+                    Cancel Current Task
                 </button>
             </section>
 
-            <section class="p-6 bg-gray-900 rounded-lg shadow-inner border border-blue-800">
-                <h2 class="text-2xl font-semibold text-blue-300 mb-4 flex items-center">
-                    <i class="fas fa-info-circle mr-3 text-blue-500"></i>Task Status
+            <section style="padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    <svg style="display: inline-block; width: 1.5em; height: 1.5em; vertical-align: middle; fill: #3b82f6; margin-right: 0.75rem;" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><path d="M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zm0-352a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm0 128a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm-32-64h64v128h-64v-128z"/></svg>
+                    Task Status
                 </h2>
-                <div id="task-status-display" class="text-gray-300">
-                    <p><span class="font-medium text-blue-400">Task ID:</span> <span id="status-task-id">N/A</span></p>
-                    <p><span class="font-medium text-blue-400">Type:</span> <span id="status-task-type">N/A</span></p>
-                    <p><span class="font-medium text-blue-400">Status:</span> <span id="status-status" class="font-bold text-yellow-400">IDLE</span></p>
-                    <p><span class="font-medium text-blue-400">Progress:</span> <span id="status-progress">0</span>%</p>
-                    <div class="w-full bg-gray-700 rounded-full h-2.5 mt-2">
-                        <div id="progress-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-500 ease-out" style="width: 0%;"></div>
+                <div id="task-status-display" style="color: #d1d5db;">
+                    <p><span style="color: #60a5fa;">Task ID:</span> <span id="status-task-id">N/A</span></p>
+                    <p><span style="color: #60a5fa;">Type:</span> <span id="status-task-type">N/A</span></p>
+                    <p><span style="color: #60a5fa;">Status:</span> <span id="status-status" style="color: #fbbf24;">IDLE</span></p>
+                    <p><span style="color: #60a5fa;">Progress:</span> <span id="status-progress">0</span>%</p>
+                    <div style="width: 100%; background-color: #374151; border-radius: 9999px; height: 0.625rem; margin-top: 0.5rem;">
+                        <div id="progress-bar" style="background-color: #3b82f6; height: 0.625rem; border-radius: 9999px; width: 0%;"></div>
                     </div>
-                    <div class="mt-4">
-                        <h3 class="font-medium text-blue-400 mb-2">Details / Log:</h3>
-                        <pre id="status-details" class="log-area bg-gray-700 p-4 rounded-md text-sm overflow-auto max-h-60 text-gray-200 whitespace-pre-wrap"></pre>
+                    <div style="margin-top: 1rem;">
+                        <h3 style="color: #60a5fa; margin-bottom: 0.5rem;">Details / Log:</h3>
+                        <pre id="status-details" style="background-color: #374151; padding: 1rem; border-radius: 0.375rem; font-size: 0.875rem; overflow: auto; max-height: 15rem; color: #e5e7eb; white-space: pre-wrap;"></pre>
                     </div>
                 </div>
             </section>
@@ -245,13 +216,11 @@
         // Function to show/hide loading spinner
         function showLoading(show) {
             if (show) {
-                loadingSpinner.classList.remove('hidden');
-                loadingSpinner.classList.add('flex');
-                mainContent.classList.add('hidden');
+                loadingSpinner.style.display = 'flex';
+                mainContent.style.display = 'none';
             } else {
-                loadingSpinner.classList.add('hidden');
-                loadingSpinner.classList.remove('flex');
-                mainContent.classList.remove('hidden');
+                loadingSpinner.style.display = 'none';
+                mainContent.style.display = 'block'; // Changed from 'flex' to 'block' for main content
             }
         }
 
@@ -311,17 +280,17 @@
             const selectedAlgorithm = clusterAlgorithmSelect.value;
 
             // Hide all algorithm-specific divs
-            dbscanParamsDiv.classList.add('hidden');
-            kmeansParamsDiv.classList.add('hidden');
-            gmmParamsDiv.classList.add('hidden');
+            dbscanParamsDiv.style.display = 'none';
+            kmeansParamsDiv.style.display = 'none';
+            gmmParamsDiv.style.display = 'none';
 
             // Show the div for the selected algorithm
             if (selectedAlgorithm === 'dbscan') {
-                dbscanParamsDiv.classList.remove('hidden');
+                dbscanParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
             } else if (selectedAlgorithm === 'kmeans') {
-                kmeansParamsDiv.classList.remove('hidden');
+                kmeansParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
             } else if (selectedAlgorithm === 'gmm') {
-                gmmParamsDiv.classList.remove('hidden');
+                gmmParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
             }
         }
 
@@ -374,6 +343,18 @@
         function disableTaskButtons(isDisabled) {
             startAnalysisBtn.disabled = isDisabled;
             startClusteringBtn.disabled = isDisabled;
+            // Apply disabled styles manually since pseudo-classes are not available
+            if (isDisabled) {
+                startAnalysisBtn.style.opacity = '0.5';
+                startAnalysisBtn.style.cursor = 'not-allowed';
+                startClusteringBtn.style.opacity = '0.5';
+                startClusteringBtn.style.cursor = 'not-allowed';
+            } else {
+                startAnalysisBtn.style.opacity = '1';
+                startAnalysisBtn.style.cursor = 'pointer';
+                startClusteringBtn.style.opacity = '1';
+                startClusteringBtn.style.cursor = 'pointer';
+            }
         }
 
         // Displays the status of a given task
@@ -385,15 +366,15 @@
             progressBar.style.width = `${task.progress}%`;
 
             // Update status text color based on status
-            statusStatus.classList.remove('text-yellow-400', 'text-green-400', 'text-red-400', 'text-blue-400');
+            statusStatus.style.color = ''; // Reset color
             if (task.status.toUpperCase() === 'PENDING' || task.status.toUpperCase() === 'STARTED' || task.status.toUpperCase() === 'QUEUED') {
-                statusStatus.classList.add('text-yellow-400');
+                statusStatus.style.color = '#fbbf24'; // Yellow-400
             } else if (task.status.toUpperCase() === 'SUCCESS' || task.status.toUpperCase() === 'FINISHED') {
-                statusStatus.classList.add('text-green-400');
+                statusStatus.style.color = '#4ade80'; // Green-400
             } else if (task.status.toUpperCase() === 'FAILURE' || task.status.toUpperCase() === 'FAILED' || task.status.toUpperCase() === 'REVOKED' || task.status.toUpperCase() === 'CANCELED') {
-                statusStatus.classList.add('text-red-400');
+                statusStatus.style.color = '#f87171'; // Red-400
             } else {
-                statusStatus.classList.add('text-blue-400'); // For UNKNOWN/IDLE
+                statusStatus.style.color = '#60a5fa'; // Blue-400 for UNKNOWN/IDLE
             }
 
             try {
@@ -412,6 +393,8 @@
         async function startTask(taskType) {
             disableTaskButtons(true); // Immediately disable to prevent double clicks
             cancelTaskBtn.disabled = true; // Disable cancel until we get a task ID
+            cancelTaskBtn.style.opacity = '0.5'; // Apply disabled style
+            cancelTaskBtn.style.cursor = 'not-allowed';
 
             // Collect General Parameters
             const jellyfinUrl = document.getElementById('config-jellyfin_url').value;
@@ -471,6 +454,8 @@
                         details: { message: 'Task enqueued successfully.' }
                     });
                     cancelTaskBtn.disabled = false; // Enable cancel once task is enqueued
+                    cancelTaskBtn.style.opacity = '1'; // Apply enabled style
+                    cancelTaskBtn.style.cursor = 'pointer';
                 } else {
                     throw new Error(result.message || 'Failed to start task.');
                 }
@@ -479,6 +464,8 @@
                 showMessageBox('Error', `Failed to start ${taskType} task: ${error.message}`);
                 disableTaskButtons(false); // Re-enable buttons on failure
                 cancelTaskBtn.disabled = true;
+                cancelTaskBtn.style.opacity = '0.5'; // Apply disabled style
+                cancelTaskBtn.style.cursor = 'not-allowed';
                 currentTaskId = null;
             }
         }
@@ -491,6 +478,8 @@
             }
 
             cancelTaskBtn.disabled = true; // Disable button during cancellation attempt
+            cancelTaskBtn.style.opacity = '0.5'; // Apply disabled style
+            cancelTaskBtn.style.cursor = 'not-allowed';
             try {
                 const response = await fetch(`/api/cancel/${currentTaskId}`, {
                     method: 'POST',
@@ -510,6 +499,8 @@
                 showMessageBox('Error', `Failed to cancel task: ${error.message}`);
             } finally {
                 cancelTaskBtn.disabled = false; // Re-enable after attempt
+                cancelTaskBtn.style.opacity = '1'; // Apply enabled style
+                cancelTaskBtn.style.cursor = 'pointer';
             }
         }
 

@@ -191,7 +191,7 @@ def start_analysis_endpoint():
         job_id=job_id,
         description="Main Music Analysis", # No timeout
         retry=Retry(max=1), # Optional: retry once if fails
-        job_timeout=None 
+        job_timeout=-1 
     )
     return jsonify({"task_id": job.id, "task_type": "main_analysis", "status": job.get_status()}), 202
 
@@ -228,7 +228,7 @@ def start_clustering_endpoint():
         job_id=job_id,
         description="Main Music Clustering", # No timeout
         retry=Retry(max=1), # Optional
-        job_timeout=None  
+        job_timeout=-1  
     )
     return jsonify({"task_id": job.id, "task_type": "main_clustering", "status": job.get_status()}), 202
 

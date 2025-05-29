@@ -262,17 +262,19 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         parent_task_db_info = get_task_info_from_db(parent_task_id) if parent_task_id else None
                         
                         is_self_revoked = album_task_db_info and album_task_db_info.get('status') == 'REVOKED'
-                        is_parent_revoked = parent_task_db_info and parent_task_db_info.get('status') == 'REVOKED'
+                        # Check if parent is in a terminal failure or revoked state
+                        is_parent_failed_or_revoked = parent_task_db_info and parent_task_db_info.get('status') in ['REVOKED', 'FAILURE']
 
-                        if is_self_revoked or is_parent_revoked:
-                            revocation_reason = "self" if is_self_revoked else f"parent task {parent_task_id}"
+                        if is_self_revoked or is_parent_failed_or_revoked:
+                            parent_status_for_reason = parent_task_db_info.get('status') if parent_task_db_info else "N/A"
+                            revocation_reason = "self was REVOKED" if is_self_revoked else f"parent task {parent_task_id} status is {parent_status_for_reason}"
                             # Ensure path is cleaned up if it exists at this point
                             temp_file_to_clean = locals().get('path') # Get 'path' if defined in this scope
                             if temp_file_to_clean and os.path.exists(temp_file_to_clean):
                                 try: os.remove(temp_file_to_clean)
                                 except Exception as e_cleanup: print(f"Warning: Failed to clean up {temp_file_to_clean} during revocation: {e_cleanup}")
-                            log_and_update_album_task(f"🛑 Album analysis task {current_task_id} for '{album_name}' stopping because {revocation_reason} was REVOKED.", current_progress_val, task_state='REVOKED')
-                            return {"status": "REVOKED", "message": f"Album analysis for '{album_name}' revoked because {revocation_reason} was revoked."}
+                            log_and_update_album_task(f"🛑 Album analysis task {current_task_id} for '{album_name}' stopping because {revocation_reason}.", current_progress_val, task_state='REVOKED')
+                            return {"status": "REVOKED", "message": f"Album analysis for '{album_name}' stopped because {revocation_reason}."}
                 # === End Cooperative Cancellation Check ===
 
                 track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
@@ -510,12 +512,15 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
                 with app.app_context():
                     task_db_info = get_task_info_from_db(current_task_id)
                     parent_task_db_info = get_task_info_from_db(parent_task_id) if parent_task_id else None
+                    
                     is_self_revoked = task_db_info and task_db_info.get('status') == 'REVOKED'
-                    is_parent_revoked = parent_task_db_info and parent_task_db_info.get('status') == 'REVOKED'
-                    if is_self_revoked or is_parent_revoked:
-                        revocation_reason = "self" if is_self_revoked else f"parent task {parent_task_id}"
-                        log_and_update_single_run(f"🛑 Clustering run {run_id} (Task ID: {current_task_id}) stopping because {revocation_reason} was REVOKED.", current_progress_iter, task_state='REVOKED')
-                        return {"status": "REVOKED", "message": f"Clustering run {run_id} revoked."}
+                    is_parent_failed_or_revoked = parent_task_db_info and parent_task_db_info.get('status') in ['REVOKED', 'FAILURE']
+
+                    if is_self_revoked or is_parent_failed_or_revoked:
+                        parent_status_for_reason = parent_task_db_info.get('status') if parent_task_db_info else "N/A"
+                        revocation_reason = "self was REVOKED" if is_self_revoked else f"parent task {parent_task_id} status is {parent_status_for_reason}"
+                        log_and_update_single_run(f"🛑 Clustering run {run_id} (Task ID: {current_task_id}) stopping because {revocation_reason}.", current_progress_iter, task_state='REVOKED')
+                        return {"status": "REVOKED", "message": f"Clustering run {run_id} stopped because {revocation_reason}."}
             # === End Cooperative Cancellation Check ===
 
             all_tracks_data = json.loads(all_tracks_data_json)
