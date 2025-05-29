@@ -233,6 +233,26 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
 
             total_tracks_in_album = len(tracks)
             for idx, item in enumerate(tracks, 1):
+                # === Cooperative Cancellation Check for Album Task ===
+                if current_job: # Check if running as an RQ job
+                    with app.app_context(): # Ensure DB access for status check
+                        album_task_db_info = get_task_info_from_db(current_task_id)
+                        parent_task_db_info = get_task_info_from_db(parent_task_id) if parent_task_id else None
+                        
+                        is_self_revoked = album_task_db_info and album_task_db_info.get('status') == 'REVOKED'
+                        is_parent_revoked = parent_task_db_info and parent_task_db_info.get('status') == 'REVOKED'
+
+                        if is_self_revoked or is_parent_revoked:
+                            revocation_reason = "self" if is_self_revoked else f"parent task {parent_task_id}"
+                            # Ensure path is cleaned up if it exists at this point
+                            temp_file_to_clean = locals().get('path') # Get 'path' if defined in this scope
+                            if temp_file_to_clean and os.path.exists(temp_file_to_clean):
+                                try: os.remove(temp_file_to_clean)
+                                except Exception as e_cleanup: print(f"Warning: Failed to clean up {temp_file_to_clean} during revocation: {e_cleanup}")
+                            log_and_update_album_task(f"🛑 Album analysis task {current_task_id} for '{album_name}' stopping because {revocation_reason} was REVOKED.", current_progress_val, task_state='REVOKED')
+                            return {"status": "REVOKED", "message": f"Album analysis for '{album_name}' revoked because {revocation_reason} was revoked."}
+                # === End Cooperative Cancellation Check ===
+
                 track_name_full = f"{item['Name']} by {item.get('AlbumArtist', 'Unknown')}"
                 current_progress_val = 10 + int(85 * (idx / float(total_tracks_in_album))) if total_tracks_in_album > 0 else 10
                 log_and_update_album_task(f"Analyzing track: {track_name_full} ({idx}/{total_tracks_in_album})", current_progress_val, current_track_name=track_name_full)
@@ -327,6 +347,27 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             log_and_update_main_analysis(f"Launched {total_albums} album analysis tasks.", 10, {"album_task_ids": album_job_ids})
 
             while True:
+                # === Cooperative Cancellation Check for Main Analysis Task ===
+                if current_job: # Check if running as an RQ job
+                    with app.app_context(): # Ensure DB access
+                        main_task_db_info = get_task_info_from_db(current_task_id)
+                        if main_task_db_info and main_task_db_info.get('status') == 'REVOKED':
+                            log_and_update_main_analysis(f"🛑 Main analysis task {current_task_id} has been REVOKED. Stopping and attempting to update children.", current_progress, task_state='REVOKED')
+                            # Update DB status of child jobs to REVOKED
+                            for child_job_instance in album_jobs:
+                                try:
+                                    # No need to call child_job_instance.cancel() here,
+                                    # as the child task's cooperative cancellation will pick up the DB status change.
+                                    with app.app_context(): # New context for each save
+                                        child_db_info = get_task_info_from_db(child_job_instance.id)
+                                        if child_db_info and child_db_info.get('status') not in ['REVOKED', 'SUCCESS', 'FAILURE', 'CANCELED']: # Avoid re-revoking
+                                            print(f"[MainAnalysisTask-{current_task_id}] Marking child job {child_job_instance.id} as REVOKED in DB.")
+                                            save_task_status(child_job_instance.id, "album_analysis", "REVOKED", parent_task_id=current_task_id, progress=100, details={"message": "Parent task was revoked."})
+                                except Exception as e_cancel_child:
+                                    print(f"[MainAnalysisTask-{current_task_id}] Error trying to mark child job {child_job_instance.id} as REVOKED: {e_cancel_child}")
+                            clean_temp(TEMP_DIR)
+                            return {"status": "REVOKED", "message": "Main analysis task was revoked."}
+                # === End Cooperative Cancellation Check ===
                 completed_count = 0
                 all_done = True
                 for job_instance in album_jobs:
@@ -393,6 +434,20 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
 
         try:
             log_and_update_single_run(f"Starting with method {clustering_method_config['method']}, params: {clustering_method_config['params']}, PCA: {pca_config}", 0)
+            
+            # === Cooperative Cancellation Check for Single Clustering Run Task ===
+            if current_job:
+                with app.app_context():
+                    task_db_info = get_task_info_from_db(current_task_id)
+                    parent_task_db_info = get_task_info_from_db(parent_task_id) if parent_task_id else None
+                    is_self_revoked = task_db_info and task_db_info.get('status') == 'REVOKED'
+                    is_parent_revoked = parent_task_db_info and parent_task_db_info.get('status') == 'REVOKED'
+                    if is_self_revoked or is_parent_revoked:
+                        revocation_reason = "self" if is_self_revoked else f"parent task {parent_task_id}"
+                        log_and_update_single_run(f"🛑 Clustering run {run_id} (Task ID: {current_task_id}) stopping because {revocation_reason} was REVOKED.", current_progress_iter, task_state='REVOKED')
+                        return {"status": "REVOKED", "message": f"Clustering run {run_id} revoked."}
+            # === End Cooperative Cancellation Check ===
+
             all_tracks_data = json.loads(all_tracks_data_json)
             
             # Convert dicts back to pseudo-DictRow objects if score_vector expects attribute access
@@ -588,6 +643,25 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             log_and_update_main_clustering(f"Launched {num_clustering_runs} clustering iteration tasks.", 10, {"clustering_run_job_ids": clustering_run_job_ids})
 
             while True:
+                # === Cooperative Cancellation Check for Main Clustering Task ===
+                if current_job:
+                    with app.app_context():
+                        main_task_db_info = get_task_info_from_db(current_task_id)
+                        if main_task_db_info and main_task_db_info.get('status') == 'REVOKED':
+                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} has been REVOKED. Stopping and attempting to update children.", current_progress, task_state='REVOKED')
+                            for child_job_instance in clustering_run_jobs:
+                                try:
+                                    with app.app_context(): # New context for each save
+                                        child_db_info = get_task_info_from_db(child_job_instance.id)
+                                        if child_db_info and child_db_info.get('status') not in ['REVOKED', 'SUCCESS', 'FAILURE', 'CANCELED']:
+                                            print(f"[MainClusteringTask-{current_task_id}] Marking child job {child_job_instance.id} as REVOKED in DB.")
+                                            save_task_status(child_job_instance.id, "single_clustering_run", "REVOKED", parent_task_id=current_task_id, progress=100, details={"message": "Parent task was revoked."})
+                                except Exception as e_cancel_child:
+                                    print(f"[MainClusteringTask-{current_task_id}] Error trying to mark child job {child_job_instance.id} as REVOKED: {e_cancel_child}")
+                            return {"status": "REVOKED", "message": "Main clustering task was revoked."}
+                # === End Cooperative Cancellation Check ===
+
+
                 completed_count = 0
                 all_done = True
                 for job_instance in clustering_run_jobs:

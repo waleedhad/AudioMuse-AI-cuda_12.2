@@ -298,19 +298,39 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
             pass # Job not in RQ, nothing to do there for this ID
         return cancelled_count
 
-    # If current_task_type is known, proceed with RQ cancellation attempt and DB update
+    # If current_task_type is known, proceed with RQ cancellation attempt
+    action_taken_in_rq = False
     try:
         job_rq = Job.fetch(job_id, connection=redis_conn)
-        if not job_rq.is_finished and not job_rq.is_failed and not job_rq.is_canceled:
-            send_stop_job_command(redis_conn, job_id)
-            # job_status_after_stop = Job.fetch(job_id, connection=redis_conn).get_status() # Re-fetch if needed for logging
-            # print(f"Job {job_id} (type: {current_task_type}) status after send_stop_job_command: {job_status_after_stop}")
-            cancelled_count += 1 # Count this as an action taken
-        # else: Job already in a final state or not running
-    except NoSuchJobError:
-        # Job not in RQ, might be already processed or cleared.
-        pass
+        current_rq_status = job_rq.get_status()
+        print(f"Job {job_id} (type: {current_task_type}) found in RQ with status: {current_rq_status}")
 
+        if job_rq.is_started:
+            print(f"  Job {job_id} is STARTED. Attempting to send stop command.")
+            try:
+                send_stop_job_command(redis_conn, job_id) # This will likely move it to 'failed' in RQ
+                action_taken_in_rq = True
+                print(f"    Stop command sent for job {job_id}.")
+            except InvalidJobOperation:
+                print(f"    Job {job_id} was in 'started' state but became non-executable for stop command (InvalidJobOperation). Will mark as REVOKED in DB.")
+            except Exception as e_stop_cmd: # Catch other potential errors from send_stop_job_command
+                print(f"    Error sending stop command for job {job_id}: {e_stop_cmd}")
+        elif not (job_rq.is_finished or job_rq.is_failed or job_rq.is_canceled):
+            # If it's not started, and not in a terminal state (e.g., queued, deferred)
+            print(f"  Job {job_id} is {current_rq_status}. Attempting to cancel via job.cancel().")
+            job_rq.cancel() # This moves it to 'canceled' status in RQ
+            action_taken_in_rq = True
+        else:
+            print(f"  Job {job_id} is already in a terminal RQ state: {current_rq_status}. No RQ action needed.")
+            
+    except NoSuchJobError:
+        print(f"Job {job_id} (type: {current_task_type}) not found in RQ. Will mark as REVOKED in DB.")
+    except Exception as e_rq_interaction:
+        print(f"Warning: Error interacting with RQ for job {job_id} (type: {current_task_type}): {e_rq_interaction}")
+
+    if action_taken_in_rq:
+        cancelled_count += 1
+        
     # Always mark as REVOKED in DB for the current job if its task_type is known
     save_task_status(job_id, current_task_type, "REVOKED", progress=100, details={"message": "Task cancellation processed by API."})
 
