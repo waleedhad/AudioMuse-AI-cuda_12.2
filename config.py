@@ -14,8 +14,6 @@ TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio
 
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
-# --- Database Constants ---
-
 # --- General Constants (Read from Environment Variables where applicable) ---
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 40
@@ -56,9 +54,9 @@ CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "100")) # Default to 100
 # CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
 # CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
 
-# --- RQ / Redis Configuration ---
+# --- RQ / Redis / Database Configuration ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb")
 
 # --- Classifier Constant ---
 MOOD_LABELS = [

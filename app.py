@@ -16,27 +16,34 @@ JobStatus = JobStatus # Make JobStatus directly accessible within the app for ta
 
 # Import configuration
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
-    REDIS_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
+    REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS
 
 # --- Flask App Setup ---
 app = Flask(__name__)
-# --- Configuration for task log storage ---
-MAX_LOG_ENTRIES_STORED = 10 # Max number of recent log entries to store in the database per task
 
 # --- RQ Setup ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-redis_conn = Redis.from_url(REDIS_URL)
+redis_conn = Redis.from_url(
+    REDIS_URL,
+    socket_connect_timeout=15,  # seconds to wait for connection
+    socket_timeout=15           # seconds for read/write operations
+)
 rq_queue = Queue(connection=redis_conn)  # Default queue
 
 # --- Database Setup (PostgreSQL) ---
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb")
+# DATABASE_URL is now imported from config.py
+MAX_LOG_ENTRIES_STORED = 10 # Max number of recent log entries to store in the database per task
 
 def get_db():
     if 'db' not in g:
-        g.db = psycopg2.connect(DATABASE_URL)
+        try:
+            g.db = psycopg2.connect(DATABASE_URL, connect_timeout=15) # 15-second connection timeout
+        except psycopg2.OperationalError as e:
+            app.logger.error(f"Failed to connect to database: {e}") # Use app.logger for Flask context
+            raise # Re-raise to ensure the operation that needed the DB fails clearly
     return g.db
 
 @app.teardown_appcontext
