@@ -94,8 +94,8 @@
             padding-bottom: 0.75rem;
             border-bottom: 1px solid #4b5563; /* Tailwind gray-600 */
         }
-        .task-title { margin: 0; font-size: 1.125rem; }
-        .task-id-display { font-family: monospace; font-size: 0.875em; color: #9ca3af; }
+        .task-title { margin: 0; font-size: 1.25rem; color: #e5e7eb; /* Lighter for more emphasis */ }
+        .task-id-display { font-family: monospace; font-size: 0.9em; color: #93c5fd; /* Brighter for ID */ margin-left: 5px; }
         .task-status-value { font-weight: bold; }
         .task-progress-bar-container {
             background-color: #4b5563; /* Tailwind gray-600 */
@@ -383,33 +383,48 @@
             }
             if (logEl) logEl.textContent = logContent;
 
-            if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(data.state.toUpperCase())) {
+            const currentTaskStateUpper = typeof data.state === 'string' ? data.state.toUpperCase() : '';
+            if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(currentTaskStateUpper)) {
                 if (cancelBtn) cancelBtn.classList.add('hidden');
             } else {
                 if (cancelBtn) cancelBtn.classList.remove('hidden');
             }
 
+            // Specific display logic for main_analysis tasks
             if (data.task_type_from_db === 'main_analysis') {
                 let mainAnalysisActivityHtml = `<p><strong>Overall:</strong> ${data.status_message || data.state}</p>`;
                 if (data.details && data.details.currently_processing_album_name) {
                     mainAnalysisActivityHtml = `<p><strong>Overall:</strong> Processing album: <em>${data.details.currently_processing_album_name}</em></p>`;
                 }
                 
-                if (!activityDetailsEl.querySelector('.sub-task-specific-details')) {
-                     activityDetailsEl.innerHTML = mainAnalysisActivityHtml + '<div class="sub-task-specific-details" style="margin-top:0.5rem; padding-top:0.5rem; border-top: 1px dashed #4b5563;">Waiting for track details...</div>';
+                let subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details');
+                if (!subTaskSpecificDiv) {
+                     activityDetailsEl.innerHTML = mainAnalysisActivityHtml + '<div class="sub-task-specific-details" style="margin-top:0.5rem; padding-top:0.5rem; border-top: 1px dashed #4b5563;"></div>';
+                     subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details'); // Re-select after creation
                 } else {
-                    // Only update the overall part, leave sub-task details to be updated by its own poll
-                    const subTaskContent = activityDetailsEl.querySelector('.sub-task-specific-details').innerHTML;
-                    activityDetailsEl.innerHTML = mainAnalysisActivityHtml + '<div class="sub-task-specific-details" style="margin-top:0.5rem; padding-top:0.5rem; border-top: 1px dashed #4b5563;">' + subTaskContent + '</div>';
+                    // Update only the overall part, preserve the sub-task div
+                    let currentContent = activityDetailsEl.innerHTML;
+                    let subTaskMarker = '<div class="sub-task-specific-details"'; // Start of the sub-task div
+                    let subTaskStartIndex = currentContent.indexOf(subTaskMarker);
+                    if (subTaskStartIndex !== -1) {
+                        // Preserve the existing sub-task content by taking the substring from its start
+                        activityDetailsEl.innerHTML = mainAnalysisActivityHtml + currentContent.substring(subTaskStartIndex);
+                    } else { // Fallback if marker not found (e.g., if it was cleared)
+                         activityDetailsEl.innerHTML = mainAnalysisActivityHtml + '<div class="sub-task-specific-details" style="margin-top:0.5rem; padding-top:0.5rem; border-top: 1px dashed #4b5563;"></div>';
+                         subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details');
+                    }
                 }
 
+                // Manage the content of subTaskSpecificDiv based on active sub-task
                 if (data.details && data.details.currently_processing_album_task_id) {
                     card.setAttribute('data-active-subtask-id', data.details.currently_processing_album_task_id);
-                } else {
+                    if (subTaskSpecificDiv && subTaskSpecificDiv.innerHTML.trim() === '' || subTaskSpecificDiv.textContent.includes("Waiting for track details...")) { 
+                        subTaskSpecificDiv.innerHTML = '<p style="font-style:italic;">Fetching track details...</p>';
+                    }
+                } else { // No active sub-task ID from main task
                     card.removeAttribute('data-active-subtask-id');
-                     const subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details');
                     if(subTaskSpecificDiv) {
-                        if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state.toUpperCase())) {
+                        if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(currentTaskStateUpper)) {
                             subTaskSpecificDiv.innerHTML = ''; // Clear if main task is done
                         } else {
                             subTaskSpecificDiv.innerHTML = 'Waiting for track details...';
@@ -417,6 +432,7 @@
                     }
                 }
             } else if (data.task_type_from_db === 'main_clustering') {
+                // Specific display logic for main_clustering tasks
                  activityDetailsEl.innerHTML = `<p><strong>Overall:</strong> ${data.status_message || data.state}</p>`;
                  if (data.details && data.details.best_score !== undefined && data.details.best_score !== null) {
                      activityDetailsEl.innerHTML += `<p>Best Diversity Score: ${data.details.best_score.toFixed(2)}</p>`;
@@ -452,9 +468,10 @@
                         subTaskHtml += `<li><strong>Moods:</strong> Not available</li>`;
                     }
                     subTaskHtml += `</ul>`;
-                } else if (subTaskData.details.current_track && ['QUEUED', 'STARTED', 'PROGRESS'].includes(subTaskData.state.toUpperCase())) {
+                } else if (subTaskData.details.current_track && 
+                           (typeof subTaskData.state === 'string' && ['QUEUED', 'STARTED', 'PROGRESS'].includes(subTaskData.state.toUpperCase()))) {
                      subTaskHtml += `<p style="font-style:italic;">(Awaiting analysis details for current track...)</p>`;
-                } else if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(subTaskData.state.toUpperCase())) {
+                } else if (typeof subTaskData.state === 'string' && ['SUCCESS', 'FAILURE', 'REVOKED'].includes(subTaskData.state.toUpperCase())) {
                     subTaskHtml = `<p style="font-style:italic;">(Album analysis ${subTaskData.state.toLowerCase()})</p>`;
                 }
             }
@@ -479,8 +496,9 @@
                     }
                     updateTaskDisplay(taskId, data);
 
+                    const mainTaskStateUpper = typeof data.state === 'string' ? data.state.toUpperCase() : '';
                     if (data.task_type_from_db === 'main_analysis' &&
-                        ['QUEUED', 'STARTED', 'PROGRESS'].includes(data.state.toUpperCase()) &&
+                        ['QUEUED', 'STARTED', 'PROGRESS'].includes(mainTaskStateUpper) &&
                         data.details && data.details.currently_processing_album_task_id) {
                         
                         const newSubTaskId = data.details.currently_processing_album_task_id;
@@ -494,14 +512,14 @@
                             }
                         }
                     } else if (data.task_type_from_db === 'main_analysis' && 
-                               !(['QUEUED', 'STARTED', 'PROGRESS'].includes(data.state.toUpperCase()))) {
+                               !(['QUEUED', 'STARTED', 'PROGRESS'].includes(mainTaskStateUpper))) {
                         if (activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
                         currentActiveSubTaskId = null;
                         const card = document.getElementById(`task-card-${taskId}`);
                         if(card) card.removeAttribute('data-active-subtask-id');
                     }
 
-                    if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(data.state.toUpperCase())) {
+                    if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(mainTaskStateUpper)) {
                         clearInterval(taskPollingIntervals[taskId]);
                         delete taskPollingIntervals[taskId];
                         console.log(`Polling stopped for completed/failed task ${taskId}.`);
@@ -535,7 +553,8 @@
                         return;
                     }
                     updateSubTaskDisplay(subTaskId, data);
-                    if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(data.state.toUpperCase())) {
+                    const subTaskStateUpper = typeof data.state === 'string' ? data.state.toUpperCase() : '';
+                    if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(subTaskStateUpper)) {
                         console.log(`Sub-task ${subTaskId} finished/failed. Stopping its dedicated poll.`);
                         if(activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
                         activeSubTaskPollInterval = null;
@@ -581,17 +600,15 @@
                     alert(`${taskTypeForUI} started successfully! Task ID: ${data.task_id.substring(0,8)}...`);
                 } else {
                     alert(`Error starting ${taskTypeForUI}: ` + (data.message || 'Unknown error'));
-                    document.getElementById('startAnalysisBtn').disabled = false; // Re-enable on error
-                    document.getElementById('generatePlaylistsBtn').disabled = false;
+                    // Re-enable buttons based on which one might have failed, or re-evaluate all active tasks
+                    updateCancelAllButtonsVisibility(); // This will re-enable if no similar task is active
                 }
                 updateCancelAllButtonsVisibility();
             })
             .catch(error => {
                 console.error(`Error starting ${taskTypeForUI}:`, error);
                 alert(`Failed to start ${taskTypeForUI}. Check console for details.`);
-                document.getElementById('startAnalysisBtn').disabled = false; // Re-enable on error
-                document.getElementById('generatePlaylistsBtn').disabled = false;
-                updateCancelAllButtonsVisibility();
+                updateCancelAllButtonsVisibility(); // Re-enable buttons
             });
         }
         
@@ -601,7 +618,6 @@
             .then(response => response.json())
             .then(data => {
                 alert(data.message || `Cancellation request for ${taskId.substring(0,8)}... sent.`);
-                // Status will update via polling, or call pollTaskStatus(taskId) once after a short delay
                 setTimeout(() => pollTaskStatus(taskId), 500);
             })
             .catch(error => {
@@ -617,7 +633,7 @@
             .then(response => response.json())
             .then(data => {
                 alert(data.message || `Cancellation request for all ${typeName} tasks sent.`);
-                loadActiveTasks(); // Refresh the list of active tasks
+                loadActiveTasks(); 
             })
             .catch(error => {
                 console.error(`Error cancelling all ${typeName} tasks:`, error);
@@ -634,19 +650,20 @@
                         if (tasks.length === 0) {
                             container.innerHTML = '<p class="text-gray-400">No active tasks currently running.</p>';
                         } else {
-                             container.innerHTML = ''; // Clear if there were tasks before
+                             container.innerHTML = ''; 
                         }
                     }
                     tasks.forEach(taskData => {
                         renderTaskCard(taskData);
-                        updateTaskDisplay(taskData.task_id, taskData); // Update with full data from DB
-                        if (!taskPollingIntervals[taskData.task_id] && 
-                            !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(taskData.state.toUpperCase())) {
+                        updateTaskDisplay(taskData.task_id, taskData); 
+                        const taskStatusUpper = typeof taskData.state === 'string' ? taskData.state.toUpperCase() : (typeof taskData.status === 'string' ? taskData.status.toUpperCase() : '');
+                        if (!taskPollingIntervals[taskData.task_id] &&
+                            !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(taskStatusUpper)) {
                             taskPollingIntervals[taskData.task_id] = setInterval(() => pollTaskStatus(taskData.task_id), 3000);
-                            pollTaskStatus(taskData.task_id); // Initial poll for potentially active sub-tasks
+                            pollTaskStatus(taskData.task_id); 
                         }
                     });
-                    updateCancelAllButtonsVisibility(tasks); // Pass tasks to avoid another fetch
+                    updateCancelAllButtonsVisibility(tasks); 
                 })
                 .catch(error => {
                     console.error('Error fetching active tasks:', error);
@@ -658,24 +675,25 @@
         
         async function updateCancelAllButtonsVisibility(activeTasksList) {
             let tasks = activeTasksList;
-            if (!tasks) { // If not provided, fetch them
+            if (!tasks) { 
                 try {
                     const response = await fetch(`${API_BASE_URL}/active_tasks`);
                     if (!response.ok) throw new Error('Failed to fetch active tasks for button visibility');
                     tasks = await response.json();
                 } catch (error) {
                     console.error("Error updating 'Cancel All' buttons visibility (fetch):", error);
-                    tasks = []; // Assume no active tasks on error
+                    tasks = []; 
                 }
             }
 
-            const isAnalysisActive = tasks.some(task => task.task_type_from_db === 'main_analysis' && !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(task.state.toUpperCase()));
-            const isClusteringActive = tasks.some(task => task.task_type_from_db === 'main_clustering' && !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(task.state.toUpperCase()));
+            const isAnalysisActive = tasks.some(task => task.task_type_from_db === 'main_analysis' && 
+                (typeof task.state === 'string' && !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(task.state.toUpperCase())));
+            const isClusteringActive = tasks.some(task => task.task_type_from_db === 'main_clustering' && 
+                (typeof task.state === 'string' && !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(task.state.toUpperCase())));
 
             document.getElementById('cancelAllAnalysisBtn').classList.toggle('hidden', !isAnalysisActive);
             document.getElementById('cancelAllClusteringBtn').classList.toggle('hidden', !isClusteringActive);
 
-            // Also manage main start buttons based on ANY active task of that type
             document.getElementById('startAnalysisBtn').disabled = isAnalysisActive;
             document.getElementById('generatePlaylistsBtn').disabled = isClusteringActive;
         }
@@ -785,10 +803,12 @@
             ['num_clusters_min', 'num_clusters_max', 'dbscan_min_samples_min', 'dbscan_min_samples_max', 
              'gmm_n_components_min', 'gmm_n_components_max', 'pca_components_min', 'pca_components_max', 
              'max_songs_per_cluster', 'clustering_runs'].forEach(key => {
-                if (payload[key] !== undefined) payload[key] = parseInt(payload[key], 10);
+                if (payload[key] !== undefined && payload[key] !== '') payload[key] = parseInt(payload[key], 10);
+                else if (payload[key] === '') delete payload[key]; // Remove if empty to use backend defaults
             });
             ['dbscan_eps_min', 'dbscan_eps_max'].forEach(key => {
-                if (payload[key] !== undefined) payload[key] = parseFloat(payload[key]);
+                if (payload[key] !== undefined && payload[key] !== '') payload[key] = parseFloat(payload[key]);
+                else if (payload[key] === '') delete payload[key];
             });
             startNewTask(`${API_BASE_URL}/clustering/start`, payload, 'Clustering');
         });

@@ -142,6 +142,8 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
     * Ensures you're running a precise, versioned build.
     * **Use for reproducible deployments or locking to a specific version.**
 
+**All the container image can be found here:** https://github.com/neptunehub/AudioMuse-AI/pkgs/container/audiomuse-ai
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action:
