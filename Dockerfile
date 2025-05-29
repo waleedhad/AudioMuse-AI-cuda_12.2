@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-RUN apt-get update && \
+RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
