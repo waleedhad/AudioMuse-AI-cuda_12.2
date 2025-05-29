@@ -21,7 +21,7 @@ from rq import get_current_job
 # Import necessary components from the main app.py file
 # This assumes app.py will define 'app', 'redis_conn', and the DB utility functions
 from app import app, redis_conn, get_db, save_task_status, get_task_info_from_db, \
-                track_exists, save_track_analysis, get_all_tracks, update_playlist_table
+                track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
@@ -331,7 +331,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 all_done = True
                 for job_instance in album_jobs:
                     job_instance.refresh() # Get latest status from Redis
-                    if job_instance.is_finished or job_instance.is_failed or job_instance.get_status() == app.JobStatus.CANCELED:
+                    if job_instance.is_finished or job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
                         completed_count += 1
                     else:
                         all_done = False
@@ -354,7 +354,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     successful_albums += 1
                     if isinstance(job_instance.result, dict):
                         total_tracks_analyzed_all_albums += job_instance.result.get("tracks_analyzed", 0)
-                elif job_instance.is_failed or job_instance.get_status() == app.JobStatus.CANCELED:
+                elif job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
                     failed_albums += 1
             
             final_message = f"Main analysis complete. Successful albums: {successful_albums}, Failed albums: {failed_albums}. Total tracks analyzed: {total_tracks_analyzed_all_albums}."
@@ -592,7 +592,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 all_done = True
                 for job_instance in clustering_run_jobs:
                     job_instance.refresh()
-                    if job_instance.is_finished or job_instance.is_failed or job_instance.get_status() == app.JobStatus.CANCELED:
+                    if job_instance.is_finished or job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
                         completed_count += 1
                     else:
                         all_done = False
@@ -615,7 +615,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                         best_diversity_score = current_diversity_score
                         best_clustering_results = run_result
                         log_and_update_main_clustering(f"New best clustering iteration found (Run ID: {run_result.get('parameters', {}).get('run_id', 'N/A')}, Diversity: {current_diversity_score:.2f})", current_progress) # Keep current progress, just log new best
-                elif job_instance.is_failed or job_instance.get_status() == app.JobStatus.CANCELED:
+                elif job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
                      log_and_update_main_clustering(f"A clustering run task ({job_instance.id}) failed or was cancelled.", current_progress)
 
 
