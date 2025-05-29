@@ -314,42 +314,35 @@
         async function checkActiveTasks() {
             try {
                 const response = await fetch('/api/active_tasks');
-                const activeTasks = await response.json();
+                const mainActiveTask = await response.json(); // Expects a single object or {}
 
-                if (activeTasks && activeTasks.length > 0) {
-                    // Assuming only one main task can be active based on requirements
-                    const mainActiveTask = activeTasks.find(task => task.parent_task_id === null);
+                // Check if mainActiveTask is a valid task object (not empty and has a task_id)
+                if (mainActiveTask && mainActiveTask.task_id) {
 
-                    if (mainActiveTask) {
-                        currentTaskId = mainActiveTask.task_id;
-                        displayTaskStatus(mainActiveTask);
-                        disableTaskButtons(true);
-                        // Also disable fetch playlists button if a main task is active
-                        fetchPlaylistsBtn.disabled = true;
-                        fetchPlaylistsBtn.style.opacity = '0.5';
-                        fetchPlaylistsBtn.style.cursor = 'not-allowed';
-
-                        cancelTaskBtn.disabled = false;
-                        return; // Exit if a main task is found
-                    }
+                    currentTaskId = mainActiveTask.task_id;
+                    displayTaskStatus(mainActiveTask);
+                    disableTaskButtons(true);
+                    fetchPlaylistsBtn.disabled = true;
+                    fetchPlaylistsBtn.style.opacity = '0.5';
+                    fetchPlaylistsBtn.style.cursor = 'not-allowed';
+                    cancelTaskBtn.disabled = false;
+                    // No return needed here, the function will naturally end
+                } else {
+                    // No active main task
+                    currentTaskId = null;
+                    displayTaskStatus({
+                        task_id: 'N/A',
+                        task_type: 'N/A',
+                        status: 'IDLE',
+                        progress: 0,
+                        details: 'No active main task.' // Updated message
+                    });
+                    disableTaskButtons(false);
+                    fetchPlaylistsBtn.disabled = false;
+                    fetchPlaylistsBtn.style.opacity = '1';
+                    fetchPlaylistsBtn.style.cursor = 'pointer';
+                    cancelTaskBtn.disabled = true;
                 }
-
-                // If no main active task found, or no active tasks at all
-                currentTaskId = null;
-                displayTaskStatus({
-                    task_id: 'N/A',
-                    task_type: 'N/A',
-                    status: 'IDLE',
-                    progress: 0,
-                    details: 'No active tasks.'
-                });
-                disableTaskButtons(false);
-                fetchPlaylistsBtn.disabled = false;
-                fetchPlaylistsBtn.style.opacity = '1';
-                fetchPlaylistsBtn.style.cursor = 'pointer';
-
-                cancelTaskBtn.disabled = true;
-
             } catch (error) {
                 console.error('Error checking active tasks:', error);
                 displayTaskStatus({
@@ -357,7 +350,7 @@
                     task_type: 'Error',
                     status: 'ERROR',
                     progress: 0,
-                    details: `Failed to check active tasks: ${error.message}`
+                    details: `Failed to check active main task: ${error.message}` // Updated message
                 });
                 disableTaskButtons(false); // Re-enable buttons on error, allow retries
                 fetchPlaylistsBtn.disabled = false;
