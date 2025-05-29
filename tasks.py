@@ -208,13 +208,11 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
     with app.app_context():
         save_task_status(current_task_id, "album_analysis", "STARTED", parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=0, details={"album_name": album_name})
         headers = {"X-Emby-Token": jellyfin_token}
-        log_messages = []
         tracks_analyzed_count = 0
         current_progress_val = 0
-        # Initialize current_track_analysis to None or an empty dict
         current_track_analysis_for_meta = None
 
-
+        # Simplified log_and_update_album_task
         def log_and_update_album_task(message, progress, current_track_name=None, task_state='PROGRESS', current_track_analysis_details=None, final_summary_details=None):
             nonlocal current_progress_val
             nonlocal current_track_analysis_for_meta # To update it
@@ -228,21 +226,19 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
             # Details for database (can be more complete)
             db_details = {
                 "album_name": album_name,
-                "log": log_messages, # Full log for DB
+                "log": message, # Store current message as the log entry
                 "current_track": current_track_name,
                 "current_track_analysis": current_track_analysis_details
             }
             if final_summary_details: # Merge final summary if provided
                 db_details.update(final_summary_details)
-            # Details for RQ job.meta (potentially truncated log, but includes current analysis)
+            # Simplified Details for RQ job.meta
             meta_details = {
                 "album_name": album_name,
-                "log": log_messages[-5:], # Last 5 messages for RQ meta
                 "current_track": current_track_name,
-                "current_track_analysis": current_track_analysis_details
+                "status_message": message # Main status message for meta
             }
-            if final_summary_details: # Also update meta if needed, though db_details is primary for this
-                meta_details.update(final_summary_details)
+            # current_track_analysis_details can be added to meta if needed for live UI, but keeping it lean here
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
@@ -354,17 +350,14 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
     with app.app_context():
         save_task_status(current_task_id, "main_analysis", "STARTED", progress=0, details={"message": "Fetching albums..."})
         headers = {"X-Emby-Token": jellyfin_token}
-        log_messages = []
         current_progress = 0
 
+        # Simplified log_and_update_main_analysis
         def log_and_update_main_analysis(message, progress, details_extra=None, task_state='PROGRESS'):
             nonlocal current_progress
             current_progress = progress
-            log_messages.append(message)
-            # Keep only the last 10 log messages
-            log_messages[:] = log_messages[-10:]
             print(f"[MainAnalysisTask-{current_task_id}] {message}")
-            current_details = {"log": log_messages, "overall_status": message, **(details_extra or {})}
+            current_details = {"status_message": message, **(details_extra or {})}
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
@@ -397,7 +390,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
                     job_id=sub_task_id,
                     description=f"Analyzing album: {album['Name']}",
-                    job_timeout='1h', # Set timeout to 1 hour for album analysis
+                    job_timeout=-1, # Set timeout for album analysis
                     meta={'parent_task_id': current_task_id}
                 )
                 album_jobs.append(job)
@@ -405,8 +398,6 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             
             log_and_update_main_analysis(f"Launched {total_albums} album analysis tasks.", 10, {"album_task_ids": album_job_ids})
 
-            active_album_task_id_for_status = None
-            active_album_name_for_status = None
             while True:
                 # === Cooperative Cancellation Check for Main Analysis Task ===
                 if current_job: # Check if running as an RQ job
@@ -432,79 +423,58 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                             return {"status": "REVOKED", "message": "Main analysis task was revoked."}
                 # === End Cooperative Cancellation Check ===
                 completed_count = 0
-                # Reset active album info for this check cycle
-                active_album_task_id_for_status = None
-                active_album_name_for_status = None
-                # Find the first non-finished/failed/canceled job to report as "currently processing"
-                # This is a simplification; multiple might be "active" if you have many workers for album tasks.
-                # But for UI, showing one is often sufficient.
 
                 all_done = True
-                active_children_details_for_log = [] # For logging currently active children
 
                 for job_instance in album_jobs:
-                    is_child_completed = False
-                    child_status_for_log = "UNKNOWN_OR_MISSING"
-                    child_album_name_for_log = f"AlbumTask-{job_instance.id[:8]}" # Default name
-
                     try:
-                        job_instance.refresh() # Get latest status from Redis
-                        child_status_rq = job_instance.get_status()
-                        child_status_for_log = child_status_rq
+                        is_child_completed = False
 
-                        # Try to get album name from job meta or description for logging
-                        if job_instance.meta and job_instance.meta.get('details') and job_instance.meta['details'].get('album_name'):
-                            child_album_name_for_log = job_instance.meta['details']['album_name']
-                        elif job_instance.description and "Analyzing album: " in job_instance.description:
-                             child_album_name_for_log = job_instance.description.replace("Analyzing album: ", "")
+                        try:
+                            job_instance.refresh() # Get latest status from Redis
+                            child_status_rq = job_instance.get_status()
 
-                        if job_instance.is_finished or job_instance.is_failed or child_status_rq == JobStatus.CANCELED:
-                            is_child_completed = True
-                        else: # Still active in RQ
-                            if active_album_task_id_for_status is None: # Pick the first one we find that's still active
-                                active_album_task_id_for_status = job_instance.id
-                                active_album_name_for_status = child_album_name_for_log
-                            active_children_details_for_log.append(f"{child_album_name_for_log} ({job_instance.id[:8]}): {child_status_rq}")
-
-                    except NoSuchJobError:
-                        print(f"[MainAnalysisTask-{current_task_id}] Child job {job_instance.id} not found in Redis. Checking DB.")
-                        with app.app_context(): # Ensure DB context
-                            db_task_info = get_task_info_from_db(job_instance.id)
-                        
-                        if db_task_info:
-                            db_status = db_task_info.get('status')
-                            child_status_for_log = f"DB:{db_status}"
-                            if db_task_info.get('details'): # Try to get album name from DB details
-                                try:
-                                    details_dict = json.loads(db_task_info.get('details'))
-                                    child_album_name_for_log = details_dict.get('album_name', child_album_name_for_log)
-                                except (json.JSONDecodeError, TypeError): pass
-
-                            print(f"[MainAnalysisTask-{current_task_id}] Child job {job_instance.id} ({child_album_name_for_log}) in DB with status: {db_status}.")
-                            if db_status in ['SUCCESS', 'FAILURE', 'REVOKED', 'CANCELED', 'FINISHED', 'FAILED']:
+                            if job_instance.is_finished or job_instance.is_failed or child_status_rq == JobStatus.CANCELED:
                                 is_child_completed = True
+                            else: # Still active in RQ
+                                pass # Child is active, all_done will be set to False later
+
+                        except NoSuchJobError:
+                            print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} not found in Redis. Checking DB.")
+                            with app.app_context(): # Ensure DB context
+                                db_task_info = get_task_info_from_db(job_instance.id)
+                            
+                            if db_task_info:
+                                db_status = db_task_info.get('status')
+                                if db_status in ['SUCCESS', 'FAILURE', 'REVOKED', 'CANCELED', 'FINISHED', 'FAILED']:
+                                    is_child_completed = True
+                                    if db_status in ['FAILURE', 'REVOKED', 'CANCELED', 'FAILED']:
+                                        print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) has status: {db_status}.")
+                                    # If SUCCESS/FINISHED, it's completed, no special print needed here.
+                                else:
+                                    print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} (from DB) has non-terminal status '{db_status}' but missing from RQ. Treating as completed.")
+                                    is_child_completed = True 
                             else:
-                                print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} ({child_album_name_for_log}) has non-terminal DB status '{db_status}' but missing from RQ. Treating as completed.")
-                                is_child_completed = True 
+                                print(f"[MainAnalysisTask-{current_task_id}] CRITICAL: Child job {job_instance.id} not found in Redis or DB. Treating as completed.")
+                                is_child_completed = True
+                        
+                        if is_child_completed:
+                            completed_count += 1
                         else:
-                            print(f"[MainAnalysisTask-{current_task_id}] CRITICAL: Child job {job_instance.id} not found in Redis or DB. Treating as completed.")
-                            is_child_completed = True
-                            child_status_for_log = "MISSING_EVERYWHERE"
-                    
-                    if is_child_completed:
-                        completed_count += 1
-                    else:
-                        all_done = False
+                            all_done = False
+                    except Exception as e_monitor_child:
+                        job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
+                        print(f"[MainAnalysisTask-{current_task_id}] ERROR monitoring child job {job_id_for_error}: {e_monitor_child}. Treating as completed to avoid hanging.")
+                        traceback.print_exc()
+                        completed_count += 1 # Ensure progress
+                        # This job will likely be counted as 'failed' in the final tally or be missing its results.
                 
-                active_children_summary = f" Active children: {len(active_children_details_for_log)} ({', '.join(active_children_details_for_log[:2])}{'...' if len(active_children_details_for_log) > 2 else ''})" if active_children_details_for_log else ""
-                status_message_for_log = f"Processing albums: {completed_count}/{total_albums} completed.{active_children_summary}"
+                status_message_for_log = f"Processing albums: {completed_count}/{total_albums} completed."
                 progress_while_waiting = 10 + int(80 * (completed_count / float(total_albums))) if total_albums > 0 else 10
                 log_and_update_main_analysis(
                     status_message_for_log,
                     progress_while_waiting,
-                    {"albums_completed": completed_count, "total_albums": total_albums,
-                     "currently_processing_album_task_id": active_album_task_id_for_status,
-                     "currently_processing_album_name": active_album_name_for_status})
+                    {"albums_completed": completed_count, "total_albums": total_albums})
                 if all_done: break
                 time.sleep(5)
             successful_albums = 0
@@ -515,37 +485,47 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 job_is_failed_or_canceled = False
                 album_tracks_analyzed = 0
 
-                try:
-                    job_instance.refresh() # Try to get fresh status from RQ
-                    if job_instance.is_finished:
-                        job_is_successful = True
-                        if isinstance(job_instance.result, dict):
-                            album_tracks_analyzed = job_instance.result.get("tracks_analyzed", 0)
-                    elif job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
-                        job_is_failed_or_canceled = True
-                except NoSuchJobError:
-                    print(f"[MainAnalysisTask-{current_task_id}] Final check: Job {job_instance.id} not in Redis. Checking DB.")
-                    with app.app_context():
-                        db_task_info = get_task_info_from_db(job_instance.id)
-                    if db_task_info:
-                        db_status = db_task_info.get('status')
-                        print(f"[MainAnalysisTask-{current_task_id}] Final check: Job {job_instance.id} in DB, status: {db_status}.")
-                        if db_status in ['SUCCESS', 'FINISHED']:
+                # Wrap final counting for each job in a try-except
+                try: 
+                    try:
+                        job_instance.refresh() # Try to get fresh status from RQ
+                        if job_instance.is_finished:
                             job_is_successful = True
-                            if db_task_info.get('details'):
-                                try:
-                                    details_dict = json.loads(db_task_info.get('details'))
-                                    if 'tracks_analyzed' in details_dict:
-                                         album_tracks_analyzed = details_dict.get("tracks_analyzed", 0)
-                                except (json.JSONDecodeError, TypeError): pass
-                        elif db_status in ['FAILURE', 'REVOKED', 'CANCELED', 'FAILED']:
+                            if isinstance(job_instance.result, dict):
+                                album_tracks_analyzed = job_instance.result.get("tracks_analyzed", 0)
+                        elif job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
+                            # print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_instance.id} (from RQ) ended with status: {job_instance.get_status()}.")
                             job_is_failed_or_canceled = True
+                    except NoSuchJobError:
+                        print(f"[MainAnalysisTask-{current_task_id}] Warning: Final check for job {job_instance.id} - not in Redis. Checking DB.")
+                        with app.app_context():
+                            db_task_info = get_task_info_from_db(job_instance.id)
+                        if db_task_info:
+                            db_status = db_task_info.get('status')
+                            if db_status in ['SUCCESS', 'FINISHED']:
+                                job_is_successful = True
+                                if db_task_info.get('details'):
+                                    try:
+                                        details_dict = json.loads(db_task_info.get('details'))
+                                        if 'tracks_analyzed' in details_dict:
+                                            album_tracks_analyzed = details_dict.get("tracks_analyzed", 0)
+                                    except (json.JSONDecodeError, TypeError): pass
+                            elif db_status in ['FAILURE', 'REVOKED', 'CANCELED', 'FAILED']:
+                                print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) has final status: {db_status}.")
+                                job_is_failed_or_canceled = True
+                            else: 
+                                print(f"[MainAnalysisTask-{current_task_id}] Warning: Final check for job {job_instance.id} (from DB) - non-terminal status '{db_status}' but not in RQ. Counted as failed/canceled.")
+                                job_is_failed_or_canceled = True
                         else: 
-                            print(f"[MainAnalysisTask-{current_task_id}] Final check Warning: Job {job_instance.id} in DB with non-terminal status '{db_status}' but not in RQ. Counted as failed/canceled.")
+                            print(f"[MainAnalysisTask-{current_task_id}] CRITICAL: Final check for job {job_instance.id} - not found in Redis or DB. Counted as failed/canceled.")
                             job_is_failed_or_canceled = True
-                    else: 
-                        print(f"[MainAnalysisTask-{current_task_id}] Final check CRITICAL: Job {job_instance.id} not found in Redis or DB. Counted as failed/canceled.")
-                        job_is_failed_or_canceled = True
+                except Exception as e_final_count:
+                    job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
+                    print(f"[MainAnalysisTask-{current_task_id}] ERROR during final result processing for job {job_id_for_error}: {e_final_count}. Counting as failed.")
+                    traceback.print_exc()
+                    job_is_successful = False
+                    job_is_failed_or_canceled = True # Ensure it's counted as failed
+                    album_tracks_analyzed = 0 # Reset tracks analyzed for this problematic job
 
                 if job_is_successful:
                     successful_albums += 1
@@ -567,8 +547,8 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 if 'album_jobs' in locals() and album_jobs: # Check if album_jobs was initialized
                     print(f"[MainAnalysisTask-{current_task_id}] Parent task failed. Attempting to mark {len(album_jobs)} children as REVOKED.")
                     for child_job_instance in album_jobs:
-                        try:
-                            if not child_job_instance: continue # This line needed to be indented
+                        try: # Guard against issues with individual child job objects during cleanup
+                            if not child_job_instance: continue # Skip if somehow a None entry exists
                             child_db_info = get_task_info_from_db(child_job_instance.id)
                             if child_db_info and child_db_info.get('status') not in ['REVOKED', 'SUCCESS', 'FAILURE', 'CANCELED']:
                                 save_task_status(child_job_instance.id, "album_analysis", "REVOKED", parent_task_id=current_task_id, progress=100, details={"message": "Parent task failed."})
@@ -582,17 +562,17 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
     
     with app.app_context():
-        log_messages_iter = []
-        initial_details = {"run_id": run_id, "params": clustering_method_config, "pca_config": pca_config, "log": log_messages_iter}
+        initial_details = {"run_id": run_id, "params": clustering_method_config, "pca_config": pca_config, "log": "Starting..."}
         save_task_status(current_task_id, "single_clustering_run", "STARTED", parent_task_id=parent_task_id, sub_type_identifier=str(run_id), progress=0, details=initial_details)
         current_progress_iter = 0
 
-        def log_and_update_single_run(message, progress, details_extra=None, task_state='PROGRESS'):
+        # Simplified log_and_update_single_run
+        def log_and_update_single_run(message, progress, details_extra=None, task_state='PROGRESS', print_console=True):
             nonlocal current_progress_iter
             current_progress_iter = progress
-            log_messages_iter.append(message)
-            print(f"[SingleClusteringRun-{current_task_id}] Run {run_id}: {message}")
-            current_run_details = {"run_id": run_id, "log": log_messages_iter, "params": clustering_method_config, "pca_config": pca_config, **(details_extra or {})}
+            if print_console:
+                print(f"[SingleClusteringRun-{current_task_id}] Run {run_id}: {message}")
+            current_run_details = {"run_id": run_id, "log": message, "params": clustering_method_config, "pca_config": pca_config, **(details_extra or {})}
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
@@ -637,7 +617,7 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
                     data_for_clustering = pca_model.fit_transform(X_scaled)
                 else:
                     pca_config["enabled"] = False # Not enough features/samples
-            log_and_update_single_run(f"PCA {'enabled with ' + str(n_components_actual) + ' components' if pca_config['enabled'] else 'disabled'}.", 25)
+            log_and_update_single_run(f"PCA {'enabled with ' + str(n_components_actual) + ' components' if pca_config['enabled'] else 'disabled'}.", 25, print_console=False)
 
             labels = None
             cluster_centers_map = {}
@@ -667,9 +647,9 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
                 gmm.fit(data_for_clustering)
                 labels = gmm.predict(data_for_clustering)
                 cluster_centers_map = {i: gmm.means_[i] for i in range(params["n_components"])}
-                centers_for_points = gmm.means_[labels]
+                centers_for_points = gmm.means_[labels] # type: ignore
                 raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
-            log_and_update_single_run("Clustering algorithm applied.", 50)
+            log_and_update_single_run("Clustering algorithm applied.", 50, print_console=False)
 
             if labels is None or len(set(labels) - {-1}) == 0:
                 log_and_update_single_run("No valid clusters found.", 100, {"diversity_score": -1.0}, task_state='SUCCESS')
@@ -697,7 +677,7 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
                 for t_item in selected_tracks:
                     item_id, title, author = t_item["row"]["item_id"], t_item["row"]["title"], t_item["row"]["author"]
                     filtered_clusters[cid].append((item_id, title, author))
-            log_and_update_single_run("Tracks filtered into clusters.", 65)
+            log_and_update_single_run("Tracks filtered into clusters.", 65, print_console=False)
 
             current_named_playlists = defaultdict(list)
             current_playlist_centroids = {}
@@ -748,17 +728,15 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
 
     with app.app_context():
         save_task_status(current_task_id, "main_clustering", "STARTED", progress=0, details={"message": "Initializing clustering..."})
-        log_messages = []
         current_progress = 0
 
-        def log_and_update_main_clustering(message, progress, details_extra=None, task_state='PROGRESS'):
+        # Simplified log_and_update_main_clustering
+        def log_and_update_main_clustering(message, progress, details_extra=None, task_state='PROGRESS', print_console=True):
             nonlocal current_progress
             current_progress = progress
-            log_messages.append(message)
-            # Keep only the last 10 log messages
-            log_messages[:] = log_messages[-10:]
-            print(f"[MainClusteringTask-{current_task_id}] {message}")
-            current_details = {"log": log_messages, "overall_status": message, **(details_extra or {})}
+            if print_console:
+                print(f"[MainClusteringTask-{current_task_id}] {message}")
+            current_details = {"status_message": message, **(details_extra or {})}
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
@@ -813,7 +791,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                     args=(run_idx, all_tracks_data_json, method_params, pca_config, max_songs_per_cluster, current_task_id),
                     job_id=sub_task_id,
                     description=f"Clustering Iteration {run_idx}",
-                    job_timeout='1h', # Set timeout to 1 hour for single clustering iteration
+                    job_timeout=-1, # Set timeout for single clustering iteration
                     meta={'parent_task_id': current_task_id}
                 )
                 clustering_run_jobs.append(job)
@@ -844,32 +822,42 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 completed_count = 0
                 all_done = True
                 for job_instance in clustering_run_jobs:
-                    is_child_completed = False
                     try:
-                        job_instance.refresh()
-                        child_status_rq = job_instance.get_status()
-                        if job_instance.is_finished or job_instance.is_failed or child_status_rq == JobStatus.CANCELED:
-                            is_child_completed = True
-                    except NoSuchJobError:
-                        print(f"[MainClusteringTask-{current_task_id}] Child job {job_instance.id} not found in Redis. Checking DB.")
-                        with app.app_context():
-                            db_task_info = get_task_info_from_db(job_instance.id)
-                        if db_task_info:
-                            db_status = db_task_info.get('status')
-                            print(f"[MainClusteringTask-{current_task_id}] Child job {job_instance.id} in DB with status: {db_status}.")
-                            if db_status in ['SUCCESS', 'FAILURE', 'REVOKED', 'CANCELED', 'FINISHED', 'FAILED']:
+                        is_child_completed = False
+                        try:
+                            job_instance.refresh()
+                            child_status_rq = job_instance.get_status()
+                            if job_instance.is_finished or job_instance.is_failed or child_status_rq == JobStatus.CANCELED:
                                 is_child_completed = True
+                        except NoSuchJobError:
+                            print(f"[MainClusteringTask-{current_task_id}] Warning: Child job {job_instance.id} not found in Redis during monitoring. Checking DB.")
+                            with app.app_context():
+                                db_task_info = get_task_info_from_db(job_instance.id)
+                            if db_task_info:
+                                db_status = db_task_info.get('status')
+                                if db_status in ['SUCCESS', 'FAILURE', 'REVOKED', 'CANCELED', 'FINISHED', 'FAILED']:
+                                    is_child_completed = True
+                                    if db_status in ['FAILURE', 'REVOKED', 'CANCELED', 'FAILED']:
+                                        print(f"[MainClusteringTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) has status: {db_status}.")
+                                    # If SUCCESS/FINISHED, it's completed, no special print needed here.
+                                else:
+                                    print(f"[MainClusteringTask-{current_task_id}] Warning: Child job {job_instance.id} (from DB) has non-terminal DB status '{db_status}' but missing from RQ. Treating as completed.")
+                                    is_child_completed = True
                             else:
-                                print(f"[MainClusteringTask-{current_task_id}] Warning: Child job {job_instance.id} has non-terminal DB status '{db_status}' but missing from RQ. Treating as completed.")
+                                print(f"[MainClusteringTask-{current_task_id}] CRITICAL: Child job {job_instance.id} not found in Redis or DB during monitoring. Treating as completed.")
                                 is_child_completed = True
+                        
+                        if is_child_completed:
+                            completed_count += 1
+                            # If child_status_rq indicated failure/canceled, it's implicitly handled by not getting its result later.
                         else:
-                            print(f"[MainClusteringTask-{current_task_id}] CRITICAL: Child job {job_instance.id} not found in Redis or DB. Treating as completed.")
-                            is_child_completed = True
-                    
-                    if is_child_completed:
-                        completed_count += 1
-                    else:
-                        all_done = False
+                            all_done = False
+                    except Exception as e_monitor_child_cluster:
+                        job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
+                        print(f"[MainClusteringTask-{current_task_id}] ERROR monitoring child clustering job {job_id_for_error}: {e_monitor_child_cluster}. Treating as completed to avoid hanging.")
+                        traceback.print_exc()
+                        completed_count += 1 # Ensure progress
+
                 progress_while_waiting = 10 + int(80 * (completed_count / float(num_clustering_runs))) if num_clustering_runs > 0 else 10
                 log_and_update_main_clustering(
                     f"Processing clustering runs: {completed_count}/{num_clustering_runs} completed.",
@@ -881,42 +869,54 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
 
             for job_instance in clustering_run_jobs:
                 run_result_data = None 
-                try:
-                    job_instance.refresh()
-                    if job_instance.is_finished and isinstance(job_instance.result, dict):
-                        run_result_data = job_instance.result
-                except NoSuchJobError:
-                    print(f"[MainClusteringTask-{current_task_id}] Final check: Job {job_instance.id} not in Redis. Checking DB.")
-                    with app.app_context():
-                        db_task_info = get_task_info_from_db(job_instance.id)
-                    if db_task_info:
-                        db_status = db_task_info.get('status')
-                        print(f"[MainClusteringTask-{current_task_id}] Final check: Job {job_instance.id} in DB, status: {db_status}.")
-                        if db_status in ['SUCCESS', 'FINISHED']:
-                            if db_task_info.get('details'):
-                                try:
-                                    details_dict = json.loads(db_task_info.get('details'))
-                                    if 'full_result' in details_dict: # As saved by child task
-                                        run_result_data = details_dict['full_result']
-                                except (json.JSONDecodeError, TypeError): pass
-
-                if run_result_data:
-                    current_diversity_score = run_result_data.get("diversity_score", -1.0)
-                    if current_diversity_score > best_diversity_score:
-                        best_diversity_score = current_diversity_score
-                        best_clustering_results = run_result_data
-                        log_and_update_main_clustering(f"New best clustering iteration found (Run ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Diversity: {current_diversity_score:.2f})", current_progress)
-                else: # Job failed, was canceled, or result couldn't be retrieved
-                    job_status_for_failed_log = "UNKNOWN (Not in RQ, or result missing)"
-                    try: # For more accurate logging of failure
-                        job_instance.refresh() 
-                        if job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
-                            job_status_for_failed_log = job_instance.get_status()
+                try: # Wrap processing of each job's result
+                    try:
+                        job_instance.refresh()
+                        if job_instance.is_finished and isinstance(job_instance.result, dict):
+                            run_result_data = job_instance.result
                     except NoSuchJobError:
+                        print(f"[MainClusteringTask-{current_task_id}] Warning: Final check for job {job_instance.id} - not in Redis. Checking DB.")
                         with app.app_context():
-                            db_info_for_log = get_task_info_from_db(job_instance.id)
-                            job_status_for_failed_log = f"DB:{db_info_for_log.get('status')}" if db_info_for_log else "MISSING_FROM_RQ_AND_DB"
-                    log_and_update_main_clustering(f"Clustering run task ({job_instance.id}) did not yield a usable result (status: {job_status_for_failed_log}).", current_progress)
+                            db_task_info = get_task_info_from_db(job_instance.id)
+                        if db_task_info:
+                            db_status = db_task_info.get('status')
+                            if db_status in ['SUCCESS', 'FINISHED']:
+                                if db_task_info.get('details'):
+                                    try:
+                                        details_dict = json.loads(db_task_info.get('details'))
+                                        if 'full_result' in details_dict: # As saved by child task
+                                            run_result_data = details_dict['full_result']
+                                    except (json.JSONDecodeError, TypeError) as e_json:
+                                        print(f"[MainClusteringTask-{current_task_id}] Warning: Could not parse details for job {job_instance.id} from DB: {e_json}")
+                            elif db_status in ['FAILURE', 'REVOKED', 'CANCELED', 'FAILED']:
+                                print(f"[MainClusteringTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) had final status: {db_status}. No result to process.")
+                            else:
+                                print(f"[MainClusteringTask-{current_task_id}] Warning: Final check for job {job_instance.id} (from DB) - non-terminal status '{db_status}' but not in RQ. No result to process.")
+                        else:
+                            print(f"[MainClusteringTask-{current_task_id}] CRITICAL: Final check for job {job_instance.id} - not found in Redis or DB. No result to process.")
+                            
+                    if run_result_data:
+                        current_diversity_score = run_result_data.get("diversity_score", -1.0)
+                        if current_diversity_score > best_diversity_score:
+                            best_diversity_score = current_diversity_score
+                            best_clustering_results = run_result_data
+                            log_and_update_main_clustering(f"New best clustering iteration found (Run ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Diversity: {current_diversity_score:.2f})", current_progress)
+                    else: # Job failed, was canceled, or result couldn't be retrieved
+                        job_status_for_failed_log = "UNKNOWN (Not in RQ, or result missing)"
+                        try: # For more accurate logging of failure
+                            job_instance.refresh() 
+                            if job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
+                                job_status_for_failed_log = job_instance.get_status()
+                        except NoSuchJobError:
+                            with app.app_context():
+                                db_info_for_log = get_task_info_from_db(job_instance.id)
+                                job_status_for_failed_log = f"DB:{db_info_for_log.get('status')}" if db_info_for_log else "MISSING_FROM_RQ_AND_DB"
+                        log_and_update_main_clustering(f"Clustering run task ({job_instance.id}) did not yield a usable result (status: {job_status_for_failed_log}).", current_progress)
+                except Exception as e_final_result_cluster:
+                    job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
+                    print(f"[MainClusteringTask-{current_task_id}] ERROR processing final result for child clustering job {job_id_for_error}: {e_final_result_cluster}. This run will not be considered.")
+                    traceback.print_exc()
+                    # This job simply won't contribute to best_clustering_results
 
             if not best_clustering_results or best_diversity_score < 0: # Check if any valid result was found
                 log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, {"error": "No suitable clustering found"}, task_state='FAILURE')
@@ -928,10 +928,10 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
             final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
 
-            log_and_update_main_clustering("Updating playlist database...", 95)
+            log_and_update_main_clustering("Updating playlist database...", 95, print_console=False)
             update_playlist_table(final_named_playlists) 
             
-            log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", 98)
+            log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", 98, print_console=False)
             # Use global JELLYFIN_URL, etc. for this call as it's a direct system interaction
             create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS, final_max_songs_per_cluster)
             
@@ -947,8 +947,8 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 if 'clustering_run_jobs' in locals() and clustering_run_jobs:
                     print(f"[MainClusteringTask-{current_task_id}] Parent task failed. Attempting to mark {len(clustering_run_jobs)} children as REVOKED.")
                     for child_job_instance in clustering_run_jobs:
-                        try:
-                            if not child_job_instance: continue # Indent this line
+                        try: # Guard against issues with individual child job objects
+                            if not child_job_instance: continue 
                             child_db_info = get_task_info_from_db(child_job_instance.id)
                             if child_db_info and child_db_info.get('status') not in ['REVOKED', 'SUCCESS', 'FAILURE', 'CANCELED']:
                                 save_task_status(child_job_instance.id, "single_clustering_run", "REVOKED", parent_task_id=current_task_id, progress=100, details={"message": "Parent task failed."})
