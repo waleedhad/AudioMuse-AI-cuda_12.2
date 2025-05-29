@@ -66,8 +66,8 @@ spec:
         image: redis:7-alpine # Lightweight Redis image
         resources:
           limits:
-            cpu: 100m
-            memory: 128Mi
+            cpu: 500m
+            memory: 500Mi
           requests:
             cpu: 50m
             memory: 64Mi
@@ -249,7 +249,7 @@ metadata:
     app: audiomuse-ai
     component: worker # Changed from celery to worker
 spec:
-  replicas: 2 # Scale as needed for parallel processing
+  replicas: 3 # Scale as needed for parallel processing, minimum 2 for Main task and Children.
   selector:
     matchLabels:
       app: audiomuse-ai

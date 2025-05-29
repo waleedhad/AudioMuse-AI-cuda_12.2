@@ -56,6 +56,9 @@ CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "100")) # Default to 100
 # CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
 # CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
 
+# --- RQ / Redis Configuration ---
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+
 
 # --- Classifier Constant ---
 MOOD_LABELS = [
