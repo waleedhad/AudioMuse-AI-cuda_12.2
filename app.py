@@ -24,6 +24,9 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
 # --- Flask App Setup ---
 app = Flask(__name__)
 
+# --- Configuration for task log storage ---
+MAX_LOG_ENTRIES_STORED = 10 # Max number of recent log entries to store in the database per task
+
 # --- RQ Setup ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 redis_conn = Redis.from_url(REDIS_URL)
@@ -92,6 +95,17 @@ def save_task_status(task_id, task_type, status="PENDING", parent_task_id=None, 
     # It needs the app_context to run, which tasks.py will establish using the imported 'app' object.
     db = get_db()
     cur = db.cursor()
+
+    if details is not None and isinstance(details, dict):
+        if 'log' in details and isinstance(details['log'], list):
+            log_list = details['log']
+            original_log_length = len(log_list)
+            if original_log_length > MAX_LOG_ENTRIES_STORED:
+                # Keep only the most recent MAX_LOG_ENTRIES_STORED entries
+                details['log'] = log_list[-MAX_LOG_ENTRIES_STORED:]
+                # Add a note that the log was truncated for storage
+                details['log_storage_info'] = f"Log in DB truncated to last {MAX_LOG_ENTRIES_STORED} entries. Original length: {original_log_length}."
+    
     details_json = json.dumps(details) if details is not None else None
     cur.execute("""
         INSERT INTO task_status (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp)
@@ -413,19 +427,22 @@ def get_active_tasks_endpoint():
     cur.execute("""
         SELECT task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp
         FROM task_status
-        WHERE status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED')
+        WHERE parent_task_id IS NULL AND status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED')
         ORDER BY timestamp DESC
+        LIMIT 1
     """)
-    active_tasks_rows = cur.fetchall()
+    active_main_task_row = cur.fetchone()
     cur.close()
-    active_tasks_list = []
-    for row in active_tasks_rows:
-        task_item = dict(row)
+
+    if active_main_task_row:
+        task_item = dict(active_main_task_row)
         if task_item.get('details'):
-            try: task_item['details'] = json.loads(task_item['details'])
-            except json.JSONDecodeError: task_item['details'] = {"raw_details": task_item['details']}
-        active_tasks_list.append(task_item)
-    return jsonify(active_tasks_list), 200
+            try:
+                task_item['details'] = json.loads(task_item['details'])
+            except json.JSONDecodeError:
+                task_item['details'] = {"raw_details": task_item['details'], "error": "Failed to parse details JSON."}
+        return jsonify(task_item), 200
+    return jsonify({}), 200 # Return empty object if no active main task
 
 @app.route('/api/config', methods=['GET'])
 def get_config_endpoint():
