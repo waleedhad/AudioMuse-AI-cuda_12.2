@@ -3,829 +3,553 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AudioMuse AI - Task Monitor</title>
+    <title>AudioMuse-AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #111827; /* Darker Tailwind gray-900 */
-            color: #d1d5db; /* Tailwind gray-300 */
-            line-height: 1.6;
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a1a; /* Dark background */
         }
-        .container {
-            max-width: 1000px;
-            margin: auto;
+        /* Custom scrollbar for log area */
+        .log-area::-webkit-scrollbar {
+            width: 8px;
         }
-        h1, h2, h3 {
-            color: #93c5fd; /* Tailwind blue-300 */
+        .log-area::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 10px;
         }
-        h1 { text-align: center; margin-bottom: 1.5rem; font-size: 2.25rem; font-weight: bold;}
-        h2 { margin-bottom: 1rem; font-size: 1.875rem; font-weight:semibold;}
-        h3 { margin-bottom: 0.75rem; font-size: 1.25rem; font-weight:semibold;}
-
-        .card {
-            background-color: #1f2937; /* Tailwind gray-800 */
-            border-radius: 0.5rem;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+        .log-area::-webkit-scrollbar-thumb {
+            background: #3b82f6; /* Blue-500 */
+            border-radius: 10px;
         }
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-            color: #9ca3af; /* Tailwind gray-400 */
+        .log-area::-webkit-scrollbar-thumb:hover {
+            background: #2563eb; /* Blue-600 on hover */
         }
-        input[type="text"],
-        input[type="number"],
-        select {
-            width: 100%;
-            padding: 0.75rem;
-            margin-bottom: 1rem;
-            background-color: #374151; /* Tailwind gray-700 */
-            border: 1px solid #4b5563; /* Tailwind gray-600 */
-            color: #e5e7eb; /* Tailwind gray-200 */
-            border-radius: 0.375rem;
-            box-sizing: border-box;
+        /* Style for fieldset borders */
+        .fieldset-border {
+            border: 1px solid #1e40af; /* Blue-800 */
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 1.5rem; /* p-6 */
+            margin-bottom: 2rem; /* mb-8 */
         }
-        input:focus, select:focus {
-            outline: none;
-            border-color: #60a5fa; /* Tailwind blue-400 */
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.5);
+        .fieldset-legend {
+            color: #93c5fd; /* Blue-300 */
+            font-size: 1.25rem; /* text-2xl */
+            font-weight: 600; /* font-semibold */
+            padding: 0 0.5rem;
+            margin-left: -0.5rem; /* Adjust to align with fieldset */
         }
-        button {
-            padding: 0.75rem 1.5rem;
-            font-size: 1rem;
-            font-weight: 600;
-            color: white;
-            background-color: #3b82f6; /* Tailwind blue-500 */
-            border: none;
-            border-radius: 0.375rem;
-            cursor: pointer;
-            transition: background-color 0.2s ease-in-out;
-        }
-        button:hover {
-            background-color: #2563eb; /* Tailwind blue-600 */
-        }
-        button:disabled {
-            background-color: #4b5563; /* Tailwind gray-600 */
-            cursor: not-allowed;
-        }
-        button.cancel-btn, button.cancel-all-btn {
-            background-color: #ef4444; /* Tailwind red-500 */
-        }
-        button.cancel-btn:hover, button.cancel-all-btn:hover {
-            background-color: #dc2626; /* Tailwind red-600 */
-        }
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1rem;
-        }
-        .task-card { /* Reusing .card style for individual task cards */
-            background-color: #374151; /* Slightly lighter than main card for distinction */
-        }
-        .task-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.75rem;
-            padding-bottom: 0.75rem;
-            border-bottom: 1px solid #4b5563; /* Tailwind gray-600 */
-        }
-        .task-title { margin: 0; font-size: 1.25rem; color: #e5e7eb; /* Lighter for more emphasis */ }
-        .task-id-display { font-family: monospace; font-size: 0.9em; color: #93c5fd; /* Brighter for ID */ margin-left: 5px; }
-        .task-status-value { font-weight: bold; }
-        .task-progress-bar-container {
-            background-color: #4b5563; /* Tailwind gray-600 */
-            border-radius: 9999px; /* pill shape */
-            padding: 0.25rem;
-            margin: 0.75rem 0;
-        }
-        .task-progress-bar {
-            height: 0.75rem; /* 12px */
-            background-color: #3b82f6; /* Tailwind blue-500 */
-            border-radius: 9999px;
-            transition: width 0.3s ease-in-out;
-        }
-        .current-activity-details {
-            margin-top: 1rem;
-            padding: 0.75rem;
-            border: 1px solid #4b5563; /* Tailwind gray-600 */
-            background-color: #1f2937; /* Tailwind gray-800 */
-            border-radius: 0.375rem;
-            font-size: 0.875em;
-        }
-        .current-activity-details p { margin: 0.25rem 0; }
-        .current-activity-details ul { list-style-type: none; padding-left: 1rem; margin: 0.5rem 0; }
-        .current-activity-details ul ul { padding-left: 1.25rem; }
-        .task-log-details summary {
-            cursor: pointer;
-            color: #60a5fa; /* Tailwind blue-400 */
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-        }
-        .task-log-content {
-            background-color: #111827; /* Tailwind gray-900 */
-            color: #9ca3af; /* Tailwind gray-400 */
-            padding: 0.75rem;
-            border-radius: 0.375rem;
-            max-height: 250px;
-            overflow-y: auto;
-            font-size: 0.875em;
-            white-space: pre-wrap;
-            word-break: break-all;
-            border: 1px solid #374151; /* Tailwind gray-700 */
-        }
-        .playlist-list {
-            list-style: none;
-            padding-left: 0;
-        }
-        .playlist-list li {
-            background-color: #374151; /* Tailwind gray-700 */
-            margin-bottom: 0.5rem;
-            padding: 0.75rem;
-            border-radius: 0.25rem;
-        }
-        .playlist-list h3 {
-            color: #60a5fa;
-            margin-bottom: 0.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .playlist-toggle {
-            background: none;
-            border: none;
-            color: #60a5fa;
-            font-weight: bold;
-            cursor: pointer;
-            padding: 0;
-        }
-        .playlist-tracks {
-            margin-top: 0.5rem;
-            border-top: 1px solid #4b5563;
-            padding-top: 0.5rem;
-            font-size: 0.875em;
-        }
-        .playlist-tracks p {
-            margin-bottom: 0.25rem;
-            color: #d1d5db;
-        }
-
-        .hidden { display: none !important; } /* Utility class */
     </style>
 </head>
-<body>
-    <div class="container">
-        <h1>AudioMuse AI - Music Analyzer & Playlist Generator</h1>
+<body class="flex items-center justify-center min-h-screen p-4 sm:p-6 bg-gradient-to-br from-gray-900 to-black">
+    <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-4xl border border-blue-700">
+        <h1 class="text-4xl sm:text-5xl font-extrabold text-center text-blue-400 mb-8 tracking-wide">
+            AudioMuse-AI
+        </h1>
 
-        <!-- Controls Section -->
-        <div class="card">
-            <h2 class="text-xl font-semibold">Controls</h2>
-            <div class="form-grid">
-                <!-- Analysis Form -->
-                <form id="analysisForm" class="space-y-4">
-                    <h3>Start Music Analysis</h3>
-                    <div>
-                        <label for="jellyfin_url">Jellyfin URL:</label>
-                        <input type="text" id="jellyfin_url" name="jellyfin_url">
-                    </div>
-                    <div>
-                        <label for="jellyfin_user_id">Jellyfin User ID:</label>
-                        <input type="text" id="jellyfin_user_id" name="jellyfin_user_id">
-                    </div>
-                    <div>
-                        <label for="jellyfin_token">Jellyfin API Token:</label>
-                        <input type="text" id="jellyfin_token" name="jellyfin_token">
-                    </div>
-                    <div>
-                        <label for="num_recent_albums">Recent Albums (0 for all):</label>
-                        <input type="number" id="num_recent_albums" name="num_recent_albums" min="0">
-                    </div>
-                    <div>
-                        <label for="top_n_moods">Top N Moods per Track:</label>
-                        <input type="number" id="top_n_moods" name="top_n_moods" min="1">
-                    </div>
-                    <div class="col-span-full flex gap-4">
-                        <button type="submit" id="startAnalysisBtn">Start Analysis</button>
-                        <button type="button" id="cancelAllAnalysisBtn" class="cancel-all-btn hidden">Cancel All Analysis</button>
-                    </div>
-                </form>
-
-                <!-- Clustering Form -->
-                <form id="playlistForm" class="space-y-4">
-                    <h3>Generate Playlists</h3>
-                    <div>
-                        <label for="clustering_method">Algorithm:</label>
-                        <select id="clustering_method" name="clustering_method">
-                            <option value="kmeans">K-Means</option>
-                            <option value="dbscan">DBSCAN</option>
-                            <option value="gmm">GMM</option>
-                        </select>
-                    </div>
-                    <div id="kmeans_options" class="space-y-4">
-                        <div>
-                            <label for="num_clusters_min">KMeans Min Clusters:</label>
-                            <input type="number" id="num_clusters_min" name="num_clusters_min" min="1">
-                        </div>
-                        <div>
-                            <label for="num_clusters_max">KMeans Max Clusters:</label>
-                            <input type="number" id="num_clusters_max" name="num_clusters_max" min="1">
-                        </div>
-                    </div>
-                    <div id="dbscan_options" class="space-y-4 hidden">
-                        <div>
-                            <label for="dbscan_eps_min">DBSCAN Min Epsilon (eps):</label>
-                            <input type="number" step="0.01" id="dbscan_eps_min" name="dbscan_eps_min">
-                        </div>
-                        <div>
-                            <label for="dbscan_eps_max">DBSCAN Max Epsilon (eps):</label>
-                            <input type="number" step="0.01" id="dbscan_eps_max" name="dbscan_eps_max">
-                        </div>
-                        <div>
-                            <label for="dbscan_min_samples_min">DBSCAN Min Samples:</label>
-                            <input type="number" id="dbscan_min_samples_min" name="dbscan_min_samples_min" min="1">
-                        </div>
-                        <div>
-                            <label for="dbscan_min_samples_max">DBSCAN Max Samples:</label>
-                            <input type="number" id="dbscan_min_samples_max" name="dbscan_min_samples_max" min="1">
-                        </div>
-                    </div>
-                    <div id="gmm_options" class="space-y-4 hidden">
-                        <div>
-                            <label for="gmm_n_components_min">GMM Min Components:</label>
-                            <input type="number" id="gmm_n_components_min" name="gmm_n_components_min" min="1">
-                        </div>
-                        <div>
-                            <label for="gmm_n_components_max">GMM Max Components:</label>
-                            <input type="number" id="gmm_n_components_max" name="gmm_n_components_max" min="1">
-                        </div>
-                    </div>
-                    <div class="form-grid">
-                        <div>
-                            <label for="pca_components_min">PCA Min Components (0 to disable):</label>
-                            <input type="number" id="pca_components_min" name="pca_components_min" min="0">
-                        </div>
-                        <div>
-                            <label for="pca_components_max">PCA Max Components:</label>
-                            <input type="number" id="pca_components_max" name="pca_components_max" min="0">
-                        </div>
-                    </div>
-                    <div>
-                        <label for="max_songs_per_cluster">Max Songs per Cluster:</label>
-                        <input type="number" id="max_songs_per_cluster" name="max_songs_per_cluster" min="1">
-                    </div>
-                    <div>
-                        <label for="clustering_runs">Clustering Runs (for diversity):</label>
-                        <input type="number" id="clustering_runs" name="clustering_runs" min="1">
-                    </div>
-                    <div class="col-span-full flex gap-4">
-                        <button type="submit" id="generatePlaylistsBtn">Generate Playlists</button>
-                        <button type="button" id="cancelAllClusteringBtn" class="cancel-all-btn hidden">Cancel All Clustering</button>
-                    </div>
-                </form>
-            </div>
+        <div id="loading-spinner" class="hidden flex justify-center items-center py-8">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-blue-500"></div>
+            <p class="ml-4 text-blue-300 text-lg">Loading...</p>
         </div>
 
-        <!-- Active Tasks Display -->
-        <div class="card">
-            <h2>Active Tasks</h2>
-            <div id="active-tasks-container">
-                <p class="text-gray-400">No active tasks currently running or no tasks started yet.</p>
-            </div>
-        </div>
+        <div id="main-content" class="hidden">
+            <section class="mb-8 p-6 bg-gray-900 rounded-lg shadow-inner border border-blue-800">
+                <h2 class="text-2xl font-semibold text-blue-300 mb-4 flex items-center">
+                    <i class="fas fa-cog mr-3 text-blue-500"></i>Configuration Parameters
+                </h2>
+                <form id="config-form" class="text-gray-300">
+                    <fieldset class="fieldset-border">
+                        <legend class="fieldset-legend flex items-center">
+                            <i class="fas fa-server mr-2"></i>General Parameters
+                        </legend>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="mb-2">
+                                <label for="config-jellyfin_url" class="block text-sm font-medium text-gray-400 mb-1">Jellyfin URL:</label>
+                                <input type="text" id="config-jellyfin_url" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-jellyfin_user_id" class="block text-sm font-medium text-gray-400 mb-1">Jellyfin User ID:</label>
+                                <input type="text" id="config-jellyfin_user_id" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-jellyfin_token" class="block text-sm font-medium text-gray-400 mb-1">Jellyfin Token:</label>
+                                <input type="text" id="config-jellyfin_token" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                        </div>
+                    </fieldset>
 
-        <!-- Playlists Display -->
-        <div class="card">
-            <div class="flex justify-between items-center">
-                <h2>Generated Playlists</h2>
-                <button id="fetchPlaylistsBtn">Refresh Playlists</button>
-            </div>
-            <div id="playlistsDisplay" class="mt-4">
-                <ul id="playlistList" class="playlist-list">
-                    <li class="text-gray-400">Playlists will appear here after generation or refresh.</li>
-                </ul>
-            </div>
+                    <fieldset class="fieldset-border">
+                        <legend class="fieldset-legend flex items-center">
+                            <i class="fas fa-chart-bar mr-2"></i>Analysis Parameters
+                        </legend>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="mb-2">
+                                <label for="config-num_recent_albums" class="block text-sm font-medium text-gray-400 mb-1">Number of Recent Albums:</label>
+                                <input type="number" id="config-num_recent_albums" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-top_n_moods" class="block text-sm font-medium text-gray-400 mb-1">Top N Moods:</label>
+                                <input type="number" id="config-top_n_moods" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            </div>
+                    </fieldset>
+
+                    <fieldset class="fieldset-border">
+                        <legend class="fieldset-legend flex items-center">
+                            <i class="fas fa-sitemap mr-2"></i>Clustering Parameters
+                        </legend>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="mb-2">
+                                <label for="config-cluster_algorithm" class="block text-sm font-medium text-gray-400 mb-1">Clustering Algorithm:</label>
+                                <select id="config-cluster_algorithm" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                                    <option value="kmeans">K-Means</option>
+                                    <option value="dbscan">DBSCAN</option>
+                                    <option value="gmm">GMM</option>
+                                </select>
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-max_distance" class="block text-sm font-medium text-gray-400 mb-1">Max Distance:</label>
+                                <input type="number" step="0.01" id="config-max_distance" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-max_songs_per_cluster" class="block text-sm font-medium text-gray-400 mb-1">Max Songs Per Cluster:</label>
+                                <input type="number" id="config-max_songs_per_cluster" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-pca_components_min" class="block text-sm font-medium text-gray-400 mb-1">PCA Components Min:</label>
+                                <input type="number" id="config-pca_components_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-pca_components_max" class="block text-sm font-medium text-gray-400 mb-1">PCA Components Max:</label>
+                                <input type="number" id="config-pca_components_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-clustering_runs" class="block text-sm font-medium text-gray-400 mb-1">Clustering Runs:</label>
+                                <input type="number" id="config-clustering_runs" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                        </div>
+
+                        <div id="dbscan-params" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden">
+                            <h4 class="col-span-full text-lg font-medium text-blue-400 mb-2">DBSCAN Specific:</h4>
+                            <div class="mb-2">
+                                <label for="config-dbscan_eps_min" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Epsilon Min:</label>
+                                <input type="number" step="0.01" id="config-dbscan_eps_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-dbscan_eps_max" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Epsilon Max:</label>
+                                <input type="number" step="0.01" id="config-dbscan_eps_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-dbscan_min_samples_min" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Min Samples Min:</label>
+                                <input type="number" id="config-dbscan_min_samples_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-dbscan_min_samples_max" class="block text-sm font-medium text-gray-400 mb-1">DBSCAN Min Samples Max:</label>
+                                <input type="number" id="config-dbscan_min_samples_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                        </div>
+
+                        <div id="kmeans-params" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden">
+                            <h4 class="col-span-full text-lg font-medium text-blue-400 mb-2">K-Means Specific:</h4>
+                            <div class="mb-2">
+                                <label for="config-num_clusters_min" class="block text-sm font-medium text-gray-400 mb-1">Min Clusters:</label>
+                                <input type="number" id="config-num_clusters_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-num_clusters_max" class="block text-sm font-medium text-gray-400 mb-1">Max Clusters:</label>
+                                <input type="number" id="config-num_clusters_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                        </div>
+
+                        <div id="gmm-params" class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 hidden">
+                            <h4 class="col-span-full text-lg font-medium text-blue-400 mb-2">GMM Specific:</h4>
+                            <div class="mb-2">
+                                <label for="config-gmm_n_components_min" class="block text-sm font-medium text-gray-400 mb-1">GMM Components Min:</label>
+                                <input type="number" id="config-gmm_n_components_min" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                            <div class="mb-2">
+                                <label for="config-gmm_n_components_max" class="block text-sm font-medium text-gray-400 mb-1">GMM Components Max:</label>
+                                <input type="number" id="config-gmm_n_components_max" class="w-full p-2 rounded-md bg-gray-700 border border-gray-600 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 text-gray-200">
+                            </div>
+                        </div>
+                    </fieldset>
+                </form>
+            </section>
+
+            <section class="mb-8 p-6 bg-gray-900 rounded-lg shadow-inner border border-blue-800">
+                <h2 class="text-2xl font-semibold text-blue-300 mb-4 flex items-center">
+                    <i class="fas fa-play-circle mr-3 text-blue-500"></i>Run Tasks
+                </h2>
+                <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                    <button id="start-analysis-btn"
+                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fas fa-chart-bar mr-2"></i> Start Analysis
+                    </button>
+                    <button id="start-clustering-btn"
+                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i class="fas fa-sitemap mr-2"></i> Start Clustering
+                    </button>
+                </div>
+                <button id="cancel-task-btn"
+                        class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed mt-4">
+                    <i class="fas fa-stop-circle mr-2"></i> Cancel Current Task
+                </button>
+            </section>
+
+            <section class="p-6 bg-gray-900 rounded-lg shadow-inner border border-blue-800">
+                <h2 class="text-2xl font-semibold text-blue-300 mb-4 flex items-center">
+                    <i class="fas fa-info-circle mr-3 text-blue-500"></i>Task Status
+                </h2>
+                <div id="task-status-display" class="text-gray-300">
+                    <p><span class="font-medium text-blue-400">Task ID:</span> <span id="status-task-id">N/A</span></p>
+                    <p><span class="font-medium text-blue-400">Type:</span> <span id="status-task-type">N/A</span></p>
+                    <p><span class="font-medium text-blue-400">Status:</span> <span id="status-status" class="font-bold text-yellow-400">IDLE</span></p>
+                    <p><span class="font-medium text-blue-400">Progress:</span> <span id="status-progress">0</span>%</p>
+                    <div class="w-full bg-gray-700 rounded-full h-2.5 mt-2">
+                        <div id="progress-bar" class="bg-blue-500 h-2.5 rounded-full transition-all duration-500 ease-out" style="width: 0%;"></div>
+                    </div>
+                    <div class="mt-4">
+                        <h3 class="font-medium text-blue-400 mb-2">Details / Log:</h3>
+                        <pre id="status-details" class="log-area bg-gray-700 p-4 rounded-md text-sm overflow-auto max-h-60 text-gray-200 whitespace-pre-wrap"></pre>
+                    </div>
+                </div>
+            </section>
         </div>
     </div>
 
     <script>
-        const API_BASE_URL = '/api'; // Declare once at the top
-        const taskPollingIntervals = {};
-        let activeSubTaskPollInterval = null;
-        let currentActiveSubTaskId = null; // ID of the analyze_album_task being actively monitored
+        const configForm = document.getElementById('config-form');
+        const startAnalysisBtn = document.getElementById('start-analysis-btn');
+        const startClusteringBtn = document.getElementById('start-clustering-btn');
+        const cancelTaskBtn = document.getElementById('cancel-task-btn');
+        const statusTaskId = document.getElementById('status-task-id');
+        const statusTaskType = document.getElementById('status-task-type');
+        const statusStatus = document.getElementById('status-status');
+        const statusProgress = document.getElementById('status-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const statusDetails = document.getElementById('status-details');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const mainContent = document.getElementById('main-content');
 
-        function renderTaskCard(taskData) {
-            const container = document.getElementById('active-tasks-container');
-            if (!container) return null;
-            if (container.querySelector('p.text-gray-400')) { // Remove "No active tasks" message
-                container.innerHTML = '';
-            }
+        // Clustering parameter containers
+        const dbscanParamsDiv = document.getElementById('dbscan-params');
+        const kmeansParamsDiv = document.getElementById('kmeans-params');
+        const gmmParamsDiv = document.getElementById('gmm-params');
+        const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
 
-            let card = document.getElementById(`task-card-${taskData.task_id}`);
-            if (!card) {
-                card = document.createElement('div');
-                card.className = 'task-card'; // Use the specific class for task cards
-                card.id = `task-card-${taskData.task_id}`;
-                card.setAttribute('data-task-id', taskData.task_id);
-                card.innerHTML = `
-                    <div class="task-card-header">
-                        <h3 class="task-title">Task: <span class="task-id-display">${taskData.task_id.substring(0,8)}...</span> (<span class="task-type-display">${taskData.task_type_from_db || 'N/A'}</span>)</h3>
-                        <button class="cancel-task-btn cancel-btn" data-task-id="${taskData.task_id}" title="Cancel Task">&times;</button>
-                    </div>
-                    <p>Status: <strong class="task-status-value">PENDING</strong></p>
-                    <div class="task-progress-bar-container">
-                        <div class="task-progress-bar" style="width: 0%;"></div>
-                    </div>
-                    <p><span class="task-progress-text" style="font-size:0.9em;">0%</span></p>
-                    <div class="current-activity-details">
-                        <!-- Detailed sub-task info will go here -->
-                    </div>
-                    <details class="task-log-details">
-                        <summary>View Log</summary>
-                        <pre class="task-log-content">Log will appear here...</pre>
-                    </details>
-                `;
-                container.prepend(card);
-                card.querySelector('.cancel-task-btn').addEventListener('click', function() {
-                    cancelTask(this.getAttribute('data-task-id'));
-                });
-            }
-            return card;
-        }
 
-        function updateTaskDisplay(taskId, data) {
-            const card = renderTaskCard(data);
-            if (!card) return;
+        let currentTaskId = null; // Stores the ID of the currently active task
 
-            const statusEl = card.querySelector('.task-status-value');
-            const progressEl = card.querySelector('.task-progress-bar');
-            const progressTextEl = card.querySelector('.task-progress-text');
-            const logEl = card.querySelector('.task-log-content');
-            const activityDetailsEl = card.querySelector('.current-activity-details');
-            const taskTypeEl = card.querySelector('.task-type-display');
-            const cancelBtn = card.querySelector('.cancel-task-btn');
-
-            if (taskTypeEl) taskTypeEl.textContent = data.task_type_from_db || 'N/A';
-            if (statusEl) statusEl.textContent = data.status_message || data.state;
-            if (progressEl) progressEl.style.width = `${data.progress}%`;
-            if (progressTextEl) progressTextEl.textContent = `${data.progress}%`;
-            
-            let logContent = "No log available.";
-            if (data.details && data.details.log) {
-                logContent = Array.isArray(data.details.log) ? data.details.log.join('\n') : data.details.log;
-            } else if (data.details && data.details.error_message) {
-                logContent = `ERROR: ${data.details.error_message}\n${data.details.traceback || ''}`;
-            } else if (data.details && data.details.error) { // Fallback for older error key
-                 logContent = `ERROR: ${data.details.error}\n${data.details.traceback || ''}`;
-            }
-            if (logEl) logEl.textContent = logContent;
-
-            const currentTaskStateUpper = typeof data.state === 'string' ? data.state.toUpperCase() : '';
-            if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(currentTaskStateUpper)) {
-                if (cancelBtn) cancelBtn.classList.add('hidden');
+        // Function to show/hide loading spinner
+        function showLoading(show) {
+            if (show) {
+                loadingSpinner.classList.remove('hidden');
+                loadingSpinner.classList.add('flex');
+                mainContent.classList.add('hidden');
             } else {
-                if (cancelBtn) cancelBtn.classList.remove('hidden');
-            }
-
-            // Specific display logic for main_analysis tasks
-            if (data.task_type_from_db === 'main_analysis') {
-                let mainAnalysisActivityHtml = `<p><strong>Overall:</strong> ${data.status_message || data.state}</p>`;
-                if (data.details && data.details.currently_processing_album_name) {
-                    mainAnalysisActivityHtml = `<p><strong>Overall:</strong> Processing album: <em>${data.details.currently_processing_album_name}</em></p>`;
-                }
-                
-                let subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details');
-                if (!subTaskSpecificDiv) {
-                     activityDetailsEl.innerHTML = mainAnalysisActivityHtml + '<div class="sub-task-specific-details" style="margin-top:0.5rem; padding-top:0.5rem; border-top: 1px dashed #4b5563;"></div>';
-                     subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details'); // Re-select after creation
-                } else {
-                    // Update only the overall part, preserve the sub-task div
-                    let currentContent = activityDetailsEl.innerHTML;
-                    let subTaskMarker = '<div class="sub-task-specific-details"'; // Start of the sub-task div
-                    let subTaskStartIndex = currentContent.indexOf(subTaskMarker);
-                    if (subTaskStartIndex !== -1) {
-                        // Preserve the existing sub-task content by taking the substring from its start
-                        activityDetailsEl.innerHTML = mainAnalysisActivityHtml + currentContent.substring(subTaskStartIndex);
-                    } else { // Fallback if marker not found (e.g., if it was cleared)
-                         activityDetailsEl.innerHTML = mainAnalysisActivityHtml + '<div class="sub-task-specific-details" style="margin-top:0.5rem; padding-top:0.5rem; border-top: 1px dashed #4b5563;"></div>';
-                         subTaskSpecificDiv = activityDetailsEl.querySelector('.sub-task-specific-details');
-                    }
-                }
-
-                // Manage the content of subTaskSpecificDiv based on active sub-task
-                if (data.details && data.details.currently_processing_album_task_id) {
-                    card.setAttribute('data-active-subtask-id', data.details.currently_processing_album_task_id);
-                    if (subTaskSpecificDiv && subTaskSpecificDiv.innerHTML.trim() === '' || subTaskSpecificDiv.textContent.includes("Waiting for track details...")) { 
-                        subTaskSpecificDiv.innerHTML = '<p style="font-style:italic;">Fetching track details...</p>';
-                    }
-                } else { // No active sub-task ID from main task
-                    card.removeAttribute('data-active-subtask-id');
-                    if(subTaskSpecificDiv) {
-                        if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(currentTaskStateUpper)) {
-                            subTaskSpecificDiv.innerHTML = ''; // Clear if main task is done
-                        } else {
-                            subTaskSpecificDiv.innerHTML = 'Waiting for track details...';
-                        }
-                    }
-                }
-            } else if (data.task_type_from_db === 'main_clustering') {
-                // Specific display logic for main_clustering tasks
-                 activityDetailsEl.innerHTML = `<p><strong>Overall:</strong> ${data.status_message || data.state}</p>`;
-                 if (data.details && data.details.best_score !== undefined && data.details.best_score !== null) {
-                     activityDetailsEl.innerHTML += `<p>Best Diversity Score: ${data.details.best_score.toFixed(2)}</p>`;
-                 }
-            } else if (activityDetailsEl) { // For other task types or if no specific handling
-                activityDetailsEl.innerHTML = `<p>${data.status_message || data.state}</p>`;
+                loadingSpinner.classList.add('hidden');
+                loadingSpinner.classList.remove('flex');
+                mainContent.classList.remove('hidden');
             }
         }
 
-        function updateSubTaskDisplay(subTaskId, subTaskData) {
-            const mainTaskCard = document.querySelector(`.task-card[data-active-subtask-id="${subTaskId}"]`);
-            if (!mainTaskCard) return;
-
-            const subTaskSpecificDiv = mainTaskCard.querySelector('.current-activity-details .sub-task-specific-details');
-            if (!subTaskSpecificDiv) return;
-
-            let subTaskHtml = '';
-            if (subTaskData.details) {
-                if (subTaskData.details.current_track) {
-                    subTaskHtml += `<p><strong>Track:</strong> ${subTaskData.details.current_track}</p>`;
-                }
-                if (subTaskData.details.current_track_analysis) {
-                    const analysis = subTaskData.details.current_track_analysis;
-                    subTaskHtml += `<ul class="track-analysis-details">`;
-                    subTaskHtml += `<li><strong>Tempo:</strong> ${analysis.tempo !== undefined ? analysis.tempo : 'N/A'}</li>`;
-                    subTaskHtml += `<li><strong>Key:</strong> ${analysis.key || 'N/A'} ${analysis.scale || ''}</li>`;
-                    if (analysis.moods && Object.keys(analysis.moods).length > 0) {
-                        const moodStrings = Object.entries(analysis.moods)
-                                              .map(([mood, score]) => `<li>${mood}: ${score !== undefined ? score.toFixed(2) : 'N/A'}</li>`)
-                                              .join('');
-                        subTaskHtml += `<li><strong>Moods:</strong><ul>${moodStrings}</ul></li>`;
-                    } else {
-                        subTaskHtml += `<li><strong>Moods:</strong> Not available</li>`;
-                    }
-                    subTaskHtml += `</ul>`;
-                } else if (subTaskData.details.current_track && 
-                           (typeof subTaskData.state === 'string' && ['QUEUED', 'STARTED', 'PROGRESS'].includes(subTaskData.state.toUpperCase()))) {
-                     subTaskHtml += `<p style="font-style:italic;">(Awaiting analysis details for current track...)</p>`;
-                } else if (typeof subTaskData.state === 'string' && ['SUCCESS', 'FAILURE', 'REVOKED'].includes(subTaskData.state.toUpperCase())) {
-                    subTaskHtml = `<p style="font-style:italic;">(Album analysis ${subTaskData.state.toLowerCase()})</p>`;
-                }
+        // Fetches configuration from the backend
+        async function fetchConfig() {
+            showLoading(true);
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+                renderConfig(config);
+                toggleClusteringParams(); // Call after rendering config to set initial visibility
+            } catch (error) {
+                console.error('Error fetching config:', error);
+                // Use a custom message box instead of alert
+                showMessageBox('Error', 'Failed to load configuration. Please check the backend server.');
+            } finally {
+                showLoading(false);
             }
-            subTaskSpecificDiv.innerHTML = subTaskHtml;
         }
 
-        function pollTaskStatus(taskId) {
-            fetch(`${API_BASE_URL}/status/${taskId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (!data || !data.task_id) { // Handle case where task might have been cleared from DB/RQ
-                        console.warn(`Task ${taskId} not found or invalid data received. Stopping poll.`);
-                        clearInterval(taskPollingIntervals[taskId]);
-                        delete taskPollingIntervals[taskId];
-                        const card = document.getElementById(`task-card-${taskId}`);
-                        if (card) {
-                            card.querySelector('.task-status-value').textContent = 'UNKNOWN (Cleared)';
-                            card.querySelector('.cancel-task-btn').classList.add('hidden');
-                        }
-                        updateCancelAllButtonsVisibility();
-                        return;
-                    }
-                    updateTaskDisplay(taskId, data);
+        // Renders configuration fields into their respective sections
+        function renderConfig(config) {
+            // Populate General Parameters
+            document.getElementById('config-jellyfin_url').value = config.jellyfin_url || '';
+            document.getElementById('config-jellyfin_user_id').value = config.jellyfin_user_id || '';
+            document.getElementById('config-jellyfin_token').value = config.jellyfin_token || '';
 
-                    const mainTaskStateUpper = typeof data.state === 'string' ? data.state.toUpperCase() : '';
-                    if (data.task_type_from_db === 'main_analysis' &&
-                        ['QUEUED', 'STARTED', 'PROGRESS'].includes(mainTaskStateUpper) &&
-                        data.details && data.details.currently_processing_album_task_id) {
-                        
-                        const newSubTaskId = data.details.currently_processing_album_task_id;
-                        if (newSubTaskId !== currentActiveSubTaskId) {
-                            if (activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
-                            currentActiveSubTaskId = newSubTaskId;
-                            if (currentActiveSubTaskId) {
-                                console.log(`Main task ${taskId} now processing album task ${currentActiveSubTaskId}. Starting sub-poll.`);
-                                pollSubTaskStatus(currentActiveSubTaskId);
-                                activeSubTaskPollInterval = setInterval(() => pollSubTaskStatus(currentActiveSubTaskId), 2000);
-                            }
-                        }
-                    } else if (data.task_type_from_db === 'main_analysis' && 
-                               !(['QUEUED', 'STARTED', 'PROGRESS'].includes(mainTaskStateUpper))) {
-                        if (activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
-                        currentActiveSubTaskId = null;
-                        const card = document.getElementById(`task-card-${taskId}`);
-                        if(card) card.removeAttribute('data-active-subtask-id');
-                    }
+            // Populate Analysis Parameters
+            document.getElementById('config-num_recent_albums').value = config.num_recent_albums || 0;
+            document.getElementById('config-top_n_moods').value = config.top_n_moods || 0;
 
-                    if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(mainTaskStateUpper)) {
-                        clearInterval(taskPollingIntervals[taskId]);
-                        delete taskPollingIntervals[taskId];
-                        console.log(`Polling stopped for completed/failed task ${taskId}.`);
-                        if (data.task_type_from_db === 'main_analysis') {
-                            if (activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
-                            currentActiveSubTaskId = null;
-                        }
+            // Populate Clustering Parameters (common ones)
+            // Set K-Means as default if no value from config or if it's not 'dbscan' or 'gmm'
+            clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm') ? config.cluster_algorithm : 'kmeans';
+
+            document.getElementById('config-max_distance').value = config.max_distance || 0;
+            document.getElementById('config-max_songs_per_cluster').value = config.max_songs_per_cluster || 0;
+            document.getElementById('config-pca_components_min').value = config.pca_components_min || 0;
+            document.getElementById('config-pca_components_max').value = config.pca_components_max || 0;
+            document.getElementById('config-clustering_runs').value = config.clustering_runs || 0;
+
+            // Populate algorithm-specific parameters (they will be hidden/shown by toggleClusteringParams)
+            document.getElementById('config-dbscan_eps_min').value = config.dbscan_eps_min || 0;
+            document.getElementById('config-dbscan_eps_max').value = config.dbscan_eps_max || 0;
+            document.getElementById('config-dbscan_min_samples_min').value = config.dbscan_min_samples_min || 0;
+            document.getElementById('config-dbscan_min_samples_max').value = config.dbscan_min_samples_max || 0;
+
+            document.getElementById('config-num_clusters_min').value = config.num_clusters_min || 0;
+            document.getElementById('config-num_clusters_max').value = config.num_clusters_max || 0;
+
+            document.getElementById('config-gmm_n_components_min').value = config.gmm_n_components_min || 0;
+            document.getElementById('config-gmm_n_components_max').value = config.gmm_n_components_max || 0;
+        }
+
+        // Toggles visibility of clustering parameters based on selected algorithm
+        function toggleClusteringParams() {
+            const selectedAlgorithm = clusterAlgorithmSelect.value;
+
+            // Hide all algorithm-specific divs
+            dbscanParamsDiv.classList.add('hidden');
+            kmeansParamsDiv.classList.add('hidden');
+            gmmParamsDiv.classList.add('hidden');
+
+            // Show the div for the selected algorithm
+            if (selectedAlgorithm === 'dbscan') {
+                dbscanParamsDiv.classList.remove('hidden');
+            } else if (selectedAlgorithm === 'kmeans') {
+                kmeansParamsDiv.classList.remove('hidden');
+            } else if (selectedAlgorithm === 'gmm') {
+                gmmParamsDiv.classList.remove('hidden');
+            }
+        }
+
+        // Fetches active tasks and updates UI accordingly
+        async function checkActiveTasks() {
+            try {
+                const response = await fetch('/api/active_tasks');
+                const activeTasks = await response.json();
+
+                if (activeTasks && activeTasks.length > 0) {
+                    // Assuming only one main task can be active based on requirements
+                    const mainActiveTask = activeTasks.find(task => task.parent_task_id === null);
+
+                    if (mainActiveTask) {
+                        currentTaskId = mainActiveTask.task_id;
+                        displayTaskStatus(mainActiveTask);
+                        disableTaskButtons(true);
+                        cancelTaskBtn.disabled = false;
+                        return; // Exit if a main task is found
                     }
-                    updateCancelAllButtonsVisibility();
-                })
-                .catch(error => {
-                    console.error(`Error fetching status for ${taskId}:`, error);
-                    updateCancelAllButtonsVisibility();
+                }
+
+                // If no main active task found, or no active tasks at all
+                currentTaskId = null;
+                displayTaskStatus({
+                    task_id: 'N/A',
+                    task_type: 'N/A',
+                    status: 'IDLE',
+                    progress: 0,
+                    details: 'No active tasks.'
                 });
+                disableTaskButtons(false);
+                cancelTaskBtn.disabled = true;
+
+            } catch (error) {
+                console.error('Error checking active tasks:', error);
+                displayTaskStatus({
+                    task_id: 'Error',
+                    task_type: 'Error',
+                    status: 'ERROR',
+                    progress: 0,
+                    details: `Failed to check active tasks: ${error.message}`
+                });
+                disableTaskButtons(false); // Re-enable buttons on error, allow retries
+                cancelTaskBtn.disabled = true;
+            }
         }
 
-        function pollSubTaskStatus(subTaskId) {
-            if (!subTaskId || subTaskId !== currentActiveSubTaskId) {
-                if(activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
-                activeSubTaskPollInterval = null;
+        // Disables/enables task initiation buttons
+        function disableTaskButtons(isDisabled) {
+            startAnalysisBtn.disabled = isDisabled;
+            startClusteringBtn.disabled = isDisabled;
+        }
+
+        // Displays the status of a given task
+        function displayTaskStatus(task) {
+            statusTaskId.textContent = task.task_id;
+            statusTaskType.textContent = task.task_type;
+            statusStatus.textContent = task.status.toUpperCase();
+            statusProgress.textContent = task.progress;
+            progressBar.style.width = `${task.progress}%`;
+
+            // Update status text color based on status
+            statusStatus.classList.remove('text-yellow-400', 'text-green-400', 'text-red-400', 'text-blue-400');
+            if (task.status.toUpperCase() === 'PENDING' || task.status.toUpperCase() === 'STARTED' || task.status.toUpperCase() === 'QUEUED') {
+                statusStatus.classList.add('text-yellow-400');
+            } else if (task.status.toUpperCase() === 'SUCCESS' || task.status.toUpperCase() === 'FINISHED') {
+                statusStatus.classList.add('text-green-400');
+            } else if (task.status.toUpperCase() === 'FAILURE' || task.status.toUpperCase() === 'FAILED' || task.status.toUpperCase() === 'REVOKED' || task.status.toUpperCase() === 'CANCELED') {
+                statusStatus.classList.add('text-red-400');
+            } else {
+                statusStatus.classList.add('text-blue-400'); // For UNKNOWN/IDLE
+            }
+
+            try {
+                let detailsText = task.details;
+                if (typeof task.details === 'object' && task.details !== null) {
+                    detailsText = JSON.stringify(task.details, null, 2);
+                }
+                statusDetails.textContent = detailsText;
+            } catch (e) {
+                statusDetails.textContent = `Error parsing details: ${e.message}\nRaw: ${task.details}`;
+            }
+            statusDetails.scrollTop = statusDetails.scrollHeight; // Scroll to bottom
+        }
+
+        // Starts a new task (analysis or clustering)
+        async function startTask(taskType) {
+            disableTaskButtons(true); // Immediately disable to prevent double clicks
+            cancelTaskBtn.disabled = true; // Disable cancel until we get a task ID
+
+            // Collect General Parameters
+            const jellyfinUrl = document.getElementById('config-jellyfin_url').value;
+            const jellyfinUserId = document.getElementById('config-jellyfin_user_id').value;
+            const jellyfinToken = document.getElementById('config-jellyfin_token').value;
+
+            const payload = {
+                jellyfin_url: jellyfinUrl,
+                jellyfin_user_id: jellyfinUserId,
+                jellyfin_token: jellyfinToken
+            };
+
+            if (taskType === 'analysis') {
+                // Collect Analysis Parameters
+                payload.num_recent_albums = parseInt(document.getElementById('config-num_recent_albums').value);
+                payload.top_n_moods = parseInt(document.getElementById('config-top_n_moods').value);
+            } else if (taskType === 'clustering') {
+                // Collect Clustering Parameters
+                payload.clustering_method = clusterAlgorithmSelect.value;
+                payload.max_distance = parseFloat(document.getElementById('config-max_distance').value);
+                payload.max_songs_per_cluster = parseInt(document.getElementById('config-max_songs_per_cluster').value);
+                payload.pca_components_min = parseInt(document.getElementById('config-pca_components_min').value);
+                payload.pca_components_max = parseInt(document.getElementById('config-pca_components_max').value);
+                payload.clustering_runs = parseInt(document.getElementById('config-clustering_runs').value);
+
+                // Add algorithm-specific parameters to payload based on current selection
+                if (payload.clustering_method === 'dbscan') {
+                    payload.dbscan_eps_min = parseFloat(document.getElementById('config-dbscan_eps_min').value);
+                    payload.dbscan_eps_max = parseFloat(document.getElementById('config-dbscan_eps_max').value);
+                    payload.dbscan_min_samples_min = parseInt(document.getElementById('config-dbscan_min_samples_min').value);
+                    payload.dbscan_min_samples_max = parseInt(document.getElementById('config-dbscan_min_samples_max').value);
+                } else if (payload.clustering_method === 'kmeans') {
+                    payload.num_clusters_min = parseInt(document.getElementById('config-num_clusters_min').value);
+                    payload.num_clusters_max = parseInt(document.getElementById('config-num_clusters_max').value);
+                } else if (payload.clustering_method === 'gmm') {
+                    payload.gmm_n_components_min = parseInt(document.getElementById('config-gmm_n_components_min').value);
+                    payload.gmm_n_components_max = parseInt(document.getElementById('config-gmm_n_components_max').value);
+                }
+            }
+
+            try {
+                const response = await fetch(`/api/${taskType}/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    currentTaskId = result.task_id;
+                    displayTaskStatus({
+                        task_id: result.task_id,
+                        task_type: result.task_type,
+                        status: result.status,
+                        progress: 0,
+                        details: { message: 'Task enqueued successfully.' }
+                    });
+                    cancelTaskBtn.disabled = false; // Enable cancel once task is enqueued
+                } else {
+                    throw new Error(result.message || 'Failed to start task.');
+                }
+            } catch (error) {
+                console.error(`Error starting ${taskType} task:`, error);
+                showMessageBox('Error', `Failed to start ${taskType} task: ${error.message}`);
+                disableTaskButtons(false); // Re-enable buttons on failure
+                cancelTaskBtn.disabled = true;
+                currentTaskId = null;
+            }
+        }
+
+        // Cancels the currently active task
+        async function cancelTask() {
+            if (!currentTaskId) {
+                showMessageBox('Info', 'No active task to cancel.');
                 return;
             }
-            fetch(`${API_BASE_URL}/status/${subTaskId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (!data || !data.task_id) {
-                        console.warn(`Sub-task ${subTaskId} not found or invalid data. Stopping its poll.`);
-                        if(activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
-                        activeSubTaskPollInterval = null;
-                        currentActiveSubTaskId = null; // Allow main task to pick a new one
-                        return;
-                    }
-                    updateSubTaskDisplay(subTaskId, data);
-                    const subTaskStateUpper = typeof data.state === 'string' ? data.state.toUpperCase() : '';
-                    if (['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(subTaskStateUpper)) {
-                        console.log(`Sub-task ${subTaskId} finished/failed. Stopping its dedicated poll.`);
-                        if(activeSubTaskPollInterval) clearInterval(activeSubTaskPollInterval);
-                        activeSubTaskPollInterval = null;
-                        currentActiveSubTaskId = null; // Allow main task to pick a new one
-                        const mainTaskCard = document.querySelector(`.task-card[data-active-subtask-id="${subTaskId}"]`);
-                        if (mainTaskCard) {
-                            const subTaskSpecificDiv = mainTaskCard.querySelector('.current-activity-details .sub-task-specific-details');
-                            if (subTaskSpecificDiv) subTaskSpecificDiv.innerHTML = `<p style="font-style:italic;">(Album analysis ${data.state.toLowerCase()})</p>`;
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error(`Error fetching status for sub-task ${subTaskId}:`, error);
-                });
-        }
 
-        function startNewTask(endpoint, payload, taskTypeForUI) {
-            // Disable all start buttons
-            document.getElementById('startAnalysisBtn').disabled = true;
-            document.getElementById('generatePlaylistsBtn').disabled = true;
-
-            fetch(endpoint, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.task_id) {
-                    console.log(`Task ${data.task_id} (${data.task_type}) started. Status: ${data.status}`);
-                    const initialData = { 
-                        task_id: data.task_id, 
-                        task_type_from_db: data.task_type, 
-                        state: data.status, 
-                        progress: 0, 
-                        details: { log: ["Task enqueued..."] },
-                        status_message: "Task enqueued..."
-                    };
-                    renderTaskCard(initialData);
-                    updateTaskDisplay(data.task_id, initialData); // Update with initial data
-                    taskPollingIntervals[data.task_id] = setInterval(() => pollTaskStatus(data.task_id), 3000);
-                    pollTaskStatus(data.task_id); // Initial poll
-                    alert(`${taskTypeForUI} started successfully! Task ID: ${data.task_id.substring(0,8)}...`);
-                } else {
-                    alert(`Error starting ${taskTypeForUI}: ` + (data.message || 'Unknown error'));
-                    // Re-enable buttons based on which one might have failed, or re-evaluate all active tasks
-                    updateCancelAllButtonsVisibility(); // This will re-enable if no similar task is active
-                }
-                updateCancelAllButtonsVisibility();
-            })
-            .catch(error => {
-                console.error(`Error starting ${taskTypeForUI}:`, error);
-                alert(`Failed to start ${taskTypeForUI}. Check console for details.`);
-                updateCancelAllButtonsVisibility(); // Re-enable buttons
-            });
-        }
-        
-        function cancelTask(taskId) {
-            if (!confirm(`Are you sure you want to cancel task ${taskId.substring(0,8)}...?`)) return;
-            fetch(`${API_BASE_URL}/cancel/${taskId}`, { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message || `Cancellation request for ${taskId.substring(0,8)}... sent.`);
-                setTimeout(() => pollTaskStatus(taskId), 500);
-            })
-            .catch(error => {
-                console.error(`Error cancelling task ${taskId}:`, error);
-                alert(`Failed to cancel task ${taskId.substring(0,8)}...`);
-            });
-        }
-        
-        function cancelAllTasks(taskTypePrefix) {
-            const typeName = taskTypePrefix.includes('analysis') ? 'Analysis' : 'Clustering';
-            if (!confirm(`Are you sure you want to cancel ALL active ${typeName} tasks?`)) return;
-            fetch(`${API_BASE_URL}/cancel_all/${taskTypePrefix}`, { method: 'POST' })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message || `Cancellation request for all ${typeName} tasks sent.`);
-                loadActiveTasks(); 
-            })
-            .catch(error => {
-                console.error(`Error cancelling all ${typeName} tasks:`, error);
-                alert(`Failed to cancel all ${typeName} tasks.`);
-            });
-        }
-
-        function loadActiveTasks() {
-            fetch(`${API_BASE_URL}/active_tasks`)
-                .then(response => response.json())
-                .then(tasks => {
-                    const container = document.getElementById('active-tasks-container');
-                    if(container) {
-                        if (tasks.length === 0) {
-                            container.innerHTML = '<p class="text-gray-400">No active tasks currently running.</p>';
-                        } else {
-                             container.innerHTML = ''; 
-                        }
-                    }
-                    tasks.forEach(taskData => {
-                        renderTaskCard(taskData);
-                        updateTaskDisplay(taskData.task_id, taskData); 
-                        const taskStatusUpper = typeof taskData.state === 'string' ? taskData.state.toUpperCase() : (typeof taskData.status === 'string' ? taskData.status.toUpperCase() : '');
-                        if (!taskPollingIntervals[taskData.task_id] &&
-                            !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(taskStatusUpper)) {
-                            taskPollingIntervals[taskData.task_id] = setInterval(() => pollTaskStatus(taskData.task_id), 3000);
-                            pollTaskStatus(taskData.task_id); 
-                        }
-                    });
-                    updateCancelAllButtonsVisibility(tasks); 
-                })
-                .catch(error => {
-                    console.error('Error fetching active tasks:', error);
-                    const container = document.getElementById('active-tasks-container');
-                    if(container) container.innerHTML = '<p class="text-red-400">Error loading active tasks.</p>';
-                    updateCancelAllButtonsVisibility([]);
-                });
-        }
-        
-        async function updateCancelAllButtonsVisibility(activeTasksList) {
-            let tasks = activeTasksList;
-            if (!tasks) { 
-                try {
-                    const response = await fetch(`${API_BASE_URL}/active_tasks`);
-                    if (!response.ok) throw new Error('Failed to fetch active tasks for button visibility');
-                    tasks = await response.json();
-                } catch (error) {
-                    console.error("Error updating 'Cancel All' buttons visibility (fetch):", error);
-                    tasks = []; 
-                }
-            }
-
-            const isAnalysisActive = tasks.some(task => task.task_type_from_db === 'main_analysis' && 
-                (typeof task.state === 'string' && !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(task.state.toUpperCase())));
-            const isClusteringActive = tasks.some(task => task.task_type_from_db === 'main_clustering' && 
-                (typeof task.state === 'string' && !['SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED'].includes(task.state.toUpperCase())));
-
-            document.getElementById('cancelAllAnalysisBtn').classList.toggle('hidden', !isAnalysisActive);
-            document.getElementById('cancelAllClusteringBtn').classList.toggle('hidden', !isClusteringActive);
-
-            document.getElementById('startAnalysisBtn').disabled = isAnalysisActive;
-            document.getElementById('generatePlaylistsBtn').disabled = isClusteringActive;
-        }
-
-
-        async function populateConfig() {
+            cancelTaskBtn.disabled = true; // Disable button during cancellation attempt
             try {
-                const response = await fetch(`${API_BASE_URL}/config`);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                const config = await response.json();
-
-                document.getElementById('jellyfin_url').value = config.jellyfin_url || '';
-                document.getElementById('jellyfin_user_id').value = config.jellyfin_user_id || '';
-                document.getElementById('jellyfin_token').value = config.jellyfin_token || '';
-                document.getElementById('num_recent_albums').value = config.num_recent_albums !== undefined ? config.num_recent_albums : 0;
-                document.getElementById('top_n_moods').value = config.top_n_moods !== undefined ? config.top_n_moods : 5;
-                document.getElementById('clustering_method').value = config.cluster_algorithm || 'kmeans';
-                document.getElementById('num_clusters_min').value = config.num_clusters_min !== undefined ? config.num_clusters_min : 20;
-                document.getElementById('num_clusters_max').value = config.num_clusters_max !== undefined ? config.num_clusters_max : 60;
-                document.getElementById('dbscan_eps_min').value = config.dbscan_eps_min !== undefined ? config.dbscan_eps_min : 0.1;
-                document.getElementById('dbscan_eps_max').value = config.dbscan_eps_max !== undefined ? config.dbscan_eps_max : 0.5;
-                document.getElementById('dbscan_min_samples_min').value = config.dbscan_min_samples_min !== undefined ? config.dbscan_min_samples_min : 5;
-                document.getElementById('dbscan_min_samples_max').value = config.dbscan_min_samples_max !== undefined ? config.dbscan_min_samples_max : 20;
-                document.getElementById('gmm_n_components_min').value = config.gmm_n_components_min !== undefined ? config.gmm_n_components_min : 20;
-                document.getElementById('gmm_n_components_max').value = config.gmm_n_components_max !== undefined ? config.gmm_n_components_max : 60;
-                document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
-                document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
-                document.getElementById('max_songs_per_cluster').value = config.max_songs_per_cluster !== undefined ? config.max_songs_per_cluster : 40;
-                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 100;
-                toggleClusteringOptions();
-            } catch (error) {
-                console.error("Failed to fetch initial configuration:", error);
-                alert(`Could not load initial configuration. Please check the backend API. Error: ${error.message}`);
-            }
-        }
-
-        function toggleClusteringOptions() {
-            document.getElementById('kmeans_options').classList.add('hidden');
-            document.getElementById('dbscan_options').classList.add('hidden');
-            document.getElementById('gmm_options').classList.add('hidden');
-            const selectedMethod = document.getElementById('clustering_method').value;
-            if (selectedMethod === 'kmeans') document.getElementById('kmeans_options').classList.remove('hidden');
-            else if (selectedMethod === 'dbscan') document.getElementById('dbscan_options').classList.remove('hidden');
-            else if (selectedMethod === 'gmm') document.getElementById('gmm_options').classList.remove('hidden');
-        }
-        
-        async function fetchPlaylists() {
-            const playlistListEl = document.getElementById('playlistList');
-            playlistListEl.innerHTML = '<li class="text-gray-400">Loading playlists...</li>';
-            try {
-                const response = await fetch(`${API_BASE_URL}/playlists`);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                const playlists = await response.json();
-                playlistListEl.innerHTML = ''; // Clear loading message
-                if (Object.keys(playlists).length === 0) {
-                    playlistListEl.innerHTML = '<li class="text-gray-400">No playlists found.</li>';
-                } else {
-                    for (const playlistName in playlists) {
-                        const li = document.createElement('li');
-                        const toggleBtn = document.createElement('button');
-                        toggleBtn.className = 'playlist-toggle';
-                        toggleBtn.textContent = 'Show Tracks';
-                        
-                        const h3 = document.createElement('h3');
-                        h3.innerHTML = `${playlistName} <span class="text-sm text-gray-400">(${playlists[playlistName].length} tracks)</span> `;
-                        h3.appendChild(toggleBtn);
-
-                        const tracksDiv = document.createElement('div');
-                        tracksDiv.className = 'playlist-tracks hidden';
-                        playlists[playlistName].forEach(track => {
-                            const p = document.createElement('p');
-                            p.textContent = `${track.title} - ${track.author}`;
-                            tracksDiv.appendChild(p);
-                        });
-                        
-                        li.appendChild(h3);
-                        li.appendChild(tracksDiv);
-
-                        toggleBtn.onclick = function() {
-                            tracksDiv.classList.toggle('hidden');
-                            this.textContent = tracksDiv.classList.contains('hidden') ? 'Show Tracks' : 'Hide Tracks';
-                        };
-                        playlistListEl.appendChild(li);
+                const response = await fetch(`/api/cancel/${currentTaskId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
                     }
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showMessageBox('Success', result.message);
+                    await checkActiveTasks(); // Force a status update immediately after cancellation
+                } else {
+                    throw new Error(result.message || 'Failed to cancel task.');
                 }
             } catch (error) {
-                console.error("Error fetching playlists:", error);
-                playlistListEl.innerHTML = `<li class="text-red-400">Failed to load playlists: ${error.message}</li>`;
+                console.error('Error cancelling task:', error);
+                showMessageBox('Error', `Failed to cancel task: ${error.message}`);
+            } finally {
+                cancelTaskBtn.disabled = false; // Re-enable after attempt
             }
         }
 
-        // --- Event Listeners ---
-        document.getElementById('analysisForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const payload = Object.fromEntries(formData.entries());
-            payload.num_recent_albums = parseInt(payload.num_recent_albums, 10);
-            payload.top_n_moods = parseInt(payload.top_n_moods, 10);
-            startNewTask(`${API_BASE_URL}/analysis/start`, payload, 'Analysis');
+        // Custom message box function (replaces alert)
+        function showMessageBox(title, message) {
+            const messageBox = document.createElement('div');
+            messageBox.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background-color: #333;
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                z-index: 1000;
+                border: 1px solid #3b82f6; /* Blue-500 */
+                max-width: 400px;
+                text-align: center;
+            `;
+            messageBox.innerHTML = `
+                <h3 style="font-weight: bold; margin-bottom: 10px; color: #93c5fd;">${title}</h3>
+                <p>${message}</p>
+                <button style="margin-top: 15px; padding: 8px 15px; background-color: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;" onclick="this.parentNode.remove()">OK</button>
+            `;
+            document.body.appendChild(messageBox);
+        }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchConfig();
+            checkActiveTasks(); // Initial check for active tasks
+            setInterval(checkActiveTasks, 3000); // Poll for active tasks every 3 seconds
+            clusterAlgorithmSelect.addEventListener('change', toggleClusteringParams);
         });
 
-        document.getElementById('playlistForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const payload = Object.fromEntries(formData.entries());
-            // Convert numbers
-            ['num_clusters_min', 'num_clusters_max', 'dbscan_min_samples_min', 'dbscan_min_samples_max', 
-             'gmm_n_components_min', 'gmm_n_components_max', 'pca_components_min', 'pca_components_max', 
-             'max_songs_per_cluster', 'clustering_runs'].forEach(key => {
-                if (payload[key] !== undefined && payload[key] !== '') payload[key] = parseInt(payload[key], 10);
-                else if (payload[key] === '') delete payload[key]; // Remove if empty to use backend defaults
-            });
-            ['dbscan_eps_min', 'dbscan_eps_max'].forEach(key => {
-                if (payload[key] !== undefined && payload[key] !== '') payload[key] = parseFloat(payload[key]);
-                else if (payload[key] === '') delete payload[key];
-            });
-            startNewTask(`${API_BASE_URL}/clustering/start`, payload, 'Clustering');
-        });
-
-        document.getElementById('cancelAllAnalysisBtn').addEventListener('click', () => cancelAllTasks('main_analysis'));
-        document.getElementById('cancelAllClusteringBtn').addEventListener('click', () => cancelAllTasks('main_clustering'));
-        document.getElementById('clustering_method').addEventListener('change', toggleClusteringOptions);
-        document.getElementById('fetchPlaylistsBtn').addEventListener('click', fetchPlaylists);
-
-        // --- Initial Page Load ---
-        document.addEventListener('DOMContentLoaded', async () => {
-            // API_BASE_URL is already defined globally at the top of the script
-            await populateConfig();
-            loadActiveTasks();
-            fetchPlaylists(); // Fetch playlists on initial load
-            setInterval(updateCancelAllButtonsVisibility, 5000); // Periodically check if "Cancel All" buttons should be visible
-        });
+        startAnalysisBtn.addEventListener('click', () => startTask('analysis'));
+        startClusteringBtn.addEventListener('click', () => startTask('clustering'));
+        cancelTaskBtn.addEventListener('click', cancelTask);
     </script>
 </body>
 </html>
