@@ -217,7 +217,6 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
             nonlocal current_progress_val
             nonlocal current_track_analysis_for_meta # To update it
             current_progress_val = progress
-            log_messages.append(message)
             print(f"[AlbumTask-{current_task_id}-{album_name}] {message}")
             
             # Update the shared variable for meta
