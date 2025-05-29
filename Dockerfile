@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM debian:bookworm-slim
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
@@ -6,10 +6,14 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
+# Add 'contrib' and 'non-free' components to sources.list and update
+RUN echo "deb http://deb.debian.org/debian bookworm main contrib non-free" > /etc/apt/sources.list.d/debian.list && \
+    echo "deb http://deb.debian.org/debian bookworm-updates main contrib non-free" >> /etc/apt/sources.list.d/debian.list && \
+    echo "deb http://deb.debian.org/debian-security bookworm-security main contrib non-free" >> /etc/apt/sources.list.d/debian.list && \
+    apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
-    libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
+    libfftw3-dev libyaml-0-2 libtag1v5 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
     strace \
