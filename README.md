@@ -173,6 +173,12 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * **Mood prediction model** – A TensorFlow-based model trained to map MusiCNN embeddings to mood probabilities (you must provide or train your own compatible model).  
 * **Docker / OCI-compatible Containers** – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
 
+## **Additional Documentation**
+
+In **audiomuse-ai/docs** you can find additional documentation for this project, in details:
+* **api_doc.pdf** - Is a minimal documentation of the API in case you want to integrate it in your front-end (still work in progress)
+* **docker_docs.pdf** - Is a step-by-step documentation if you want to deploy everything on your local machine (debian) becuase you don't have a K3S (or other kubernetes) cluster avaiable.
+
 ## **🚀 Future Possibilities**
 
 This MVP lays the groundwork for further development:
