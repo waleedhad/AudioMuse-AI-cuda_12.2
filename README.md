@@ -143,6 +143,10 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
   * Ensures you're running a precise, versioned build.  
   * **Use for reproducible deployments or locking to a specific version.**
 
+**Important version**
+* **0.1.5-alpha** - Last version with the use of Sqlite and Celery. Only 1 worker admitted.
+  * To deploy you can download the source code from here and use the appropriate deployment.yaml example: https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v0.1.5-alpha
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
