@@ -110,49 +110,54 @@ def clean_successful_task_details_on_new_start():
     Cleans the 'details' field (specifically 'log' and 'log_storage_info')
     for all tasks in the database that are marked as SUCCESS.
     This is typically called when a new main task starts.
+    This function will now change the status of these tasks to REVOKED
+    and update their details to a minimal archival message.
     """
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
-    app.logger.info("Starting cleanup of details for previously successful tasks.")
+    app.logger.info("Starting archival of previously successful tasks (setting status to REVOKED and pruning details).")
     try:
+        # Select tasks that are currently marked as SUCCESS
         cur.execute("SELECT task_id, details FROM task_status WHERE status = %s", (TASK_STATUS_SUCCESS,))
-        tasks_to_clean = cur.fetchall()
+        tasks_to_archive = cur.fetchall()
         
-        cleaned_count = 0
-        for task_row in tasks_to_clean:
+        archived_count = 0
+        for task_row in tasks_to_archive:
             task_id = task_row['task_id']
-            details_json = task_row['details']
-            if details_json:
+            original_details_json = task_row['details']
+            original_status_message = "Task completed successfully." # Default
+            
+            if original_details_json:
                 try:
-                    details_dict = json.loads(details_json)
-                    needs_update = False
-                    if 'log' in details_dict and (not isinstance(details_dict['log'], list) or len(details_dict['log']) > 1 or (len(details_dict['log']) == 1 and "cleaned" not in details_dict['log'][0].lower() and "success" not in details_dict['log'][0].lower() )):
-                        # Replace log with a summary or remove it, preserving other info
-                        summary_message = details_dict.get("status_message", "Task completed successfully.")
-                        details_dict['log'] = [f"Log cleaned. Original status: {summary_message}"]
-                        needs_update = True
-                    if 'log_storage_info' in details_dict:
-                        del details_dict['log_storage_info']
-                        needs_update = True
-                    
-                    if needs_update:
-                        updated_details_json = json.dumps(details_dict)
-                        with db.cursor() as update_cur:
-                            update_cur.execute("UPDATE task_status SET details = %s WHERE task_id = %s", (updated_details_json, task_id))
-                        cleaned_count += 1
+                    original_details_dict = json.loads(original_details_json)
+                    original_status_message = original_details_dict.get("status_message", original_status_message)
                 except json.JSONDecodeError:
-                    app.logger.warning(f"Could not parse details JSON for successful task {task_id} during cleanup.")
-                except Exception as e_clean_item:
-                    app.logger.error(f"Error cleaning details for successful task {task_id}: {e_clean_item}")
+                    app.logger.warning(f"Could not parse original details JSON for task {task_id} during archival. Using default status message.")
+
+            # New minimal details for the archived task
+            archived_details = {
+                "log": [f"[Archived] Task was previously successful. Original summary: {original_status_message}"],
+                "original_status_before_archival": TASK_STATUS_SUCCESS, # Keep a record of its original success
+                "archival_reason": "New main task started, old successful task archived."
+            }
+            archived_details_json = json.dumps(archived_details)
+
+            # Update status to REVOKED, set new minimal details, progress to 100, and update timestamp
+            with db.cursor() as update_cur:
+                update_cur.execute(
+                    "UPDATE task_status SET status = %s, details = %s, progress = 100, timestamp = NOW() WHERE task_id = %s AND status = %s", 
+                    (TASK_STATUS_REVOKED, archived_details_json, task_id, TASK_STATUS_SUCCESS) # Ensure we only update tasks that are still SUCCESS
+                )
+            archived_count += 1
         
-        if cleaned_count > 0:
+        if archived_count > 0:
             db.commit()
-            app.logger.info(f"Cleaned details for {cleaned_count} previously successful tasks.")
+            app.logger.info(f"Archived (set status to REVOKED and pruned details for) {archived_count} previously successful tasks.")
         else:
-            app.logger.info("No previously successful tasks required details cleaning.")
+            app.logger.info("No previously successful tasks found to archive.")
     except Exception as e_main_clean:
         db.rollback() # Rollback in case of error during the main query or commit
-        app.logger.error(f"Error during the task details cleanup process: {e_main_clean}")
+        app.logger.error(f"Error during the task archival process: {e_main_clean}")
     finally:
         cur.close()
 
