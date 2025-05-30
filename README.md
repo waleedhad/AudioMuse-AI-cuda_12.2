@@ -104,27 +104,18 @@ This are the default parameters on wich the analysis or clustering task will be 
 
 An example K8s deployment is provided in **deployments/deployment.yaml**. Start from it as a template.
 
-**Persistence Note:** The PostgreSQL database can be configured to use a persistent volume.
-
-volumeMounts:  
-  \- name: workspace-hostpath  
-    mountPath: /workspace  
-volumes:  
-  \- name: workspace-hostpath  
-    hostPath:  
-      path: /mnt/workspace
-
 **Before Deploying:**
 
 * Update the **mandatory** requirements like jellyfin-credentials Secret with real Jellyfin user\_id and api\_token. Set JELLYFIN\_URL, REDIS\_URL, and DATABASE\_URL in the audiomuse-ai-config ConfigMap.  
-* Remember to configure the storage: Adjust /mnt/workspace to a persistent path or switch to a PVC for the PostgreSQL data.
+* Remember to configure a PVC for the PostgreSQL data.
+* **IMPORTANT** - minim number of worker needed is 2, because first run the main task and the second do the actual analysis/work. For 1 node suggested number of worker is 2. For 3 node is 4 (number of node + 1)
 
 Then you can easily deploy it with:
 
 kubectl apply \-f deployments/deployment.yaml
 
 Access the Flask service through the port exposed by your LoadBalancer or service type.  
-For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.1.1-alpha. The latest tag is used for development purposes.
+For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.1.1-alpha.
 
 ## **🐳 Docker Image Tagging Strategy**
 
