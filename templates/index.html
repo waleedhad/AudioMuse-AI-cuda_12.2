@@ -228,6 +228,7 @@
 
 
         let currentTaskId = null; // Stores the ID of the currently active task
+        let lastPolledTaskDetails = {}; // Stores { taskId: { state: '...', task_type: '...' } } to track status changes for alerts
 
         // Function to show/hide loading spinner
         function showLoading(show) {
@@ -311,54 +312,125 @@
         }
 
         // Fetches active tasks and updates UI accordingly
+        // Returns true if an active task was found/handled or a previously active task's final status was processed.
+        // Returns false if no active task was found and no previously active task was processed.
         async function checkActiveTasks() {
             try {
                 const response = await fetch('/api/active_tasks');
                 const mainActiveTask = await response.json(); // Expects a single object or {}
 
-                // Check if mainActiveTask is a valid task object (not empty and has a task_id)
                 if (mainActiveTask && mainActiveTask.task_id) {
-
+                    // A task is currently active
                     currentTaskId = mainActiveTask.task_id;
-                    displayTaskStatus(mainActiveTask);
+                    
+                    const previousDetailsForThisTask = lastPolledTaskDetails[currentTaskId];
+                    // Use mainActiveTask.status as per your latest example for /api/active_tasks
+                    // Fallback to .state if .status is not present, then to 'UNKNOWN'
+                    const currentStatusUpper = mainActiveTask.status ? mainActiveTask.status.toUpperCase() : (mainActiveTask.state ? mainActiveTask.state.toUpperCase() : 'UNKNOWN');
+                    const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
+
+                    displayTaskStatus(mainActiveTask); // Update UI with current task info
+
+                    // Check if this task just transitioned to a terminal state
+                    const currentTaskIsTerminal = terminalStates.includes(currentStatusUpper);
+                    const previousTaskStateWasTerminal = previousDetailsForThisTask && previousDetailsForThisTask.state && terminalStates.includes(previousDetailsForThisTask.state.toUpperCase());
+    
+                    if (currentTaskIsTerminal && !previousTaskStateWasTerminal) {
+                            let alertTitle = 'Task Update';
+                            let alertMessage = `Task ${mainActiveTask.task_id} (${mainActiveTask.task_type_from_db || mainActiveTask.task_type || 'Unknown Type'}) has ${currentStatusUpper.toLowerCase()}.`;
+                            if (currentStatusUpper === 'SUCCESS' || currentStatusUpper === 'FINISHED') alertTitle = 'Task Completed';
+                            else if (currentStatusUpper === 'FAILURE' || currentStatusUpper === 'FAILED') alertTitle = 'Task Failed';
+                            else if (currentStatusUpper === 'REVOKED' || currentStatusUpper === 'CANCELED') alertTitle = 'Task Canceled';
+                            
+                            if (alertTitle) {
+                                showMessageBox(alertTitle, alertMessage);
+                            }
+                        }
+                    // Store the state using the determined status field for consistency in lastPolledTaskDetails
+                    lastPolledTaskDetails[currentTaskId] = { state: currentStatusUpper !== 'UNKNOWN' ? mainActiveTask.status || mainActiveTask.state : 'UNKNOWN', task_type: mainActiveTask.task_type_from_db || mainActiveTask.task_type, task_id: mainActiveTask.task_id };
                     disableTaskButtons(true);
                     fetchPlaylistsBtn.disabled = true;
                     fetchPlaylistsBtn.style.opacity = '0.5';
                     fetchPlaylistsBtn.style.cursor = 'not-allowed';
                     cancelTaskBtn.disabled = false;
-                    // No return needed here, the function will naturally end
+
+                    return true; // Indicate an active task was found and handled
                 } else {
-                    // No active main task
+                    const previouslyTrackedTaskId = currentTaskId; // Check if we *were* tracking a task
                     currentTaskId = null;
-                    displayTaskStatus({
-                        task_id: 'N/A',
-                        task_type: 'N/A',
-                        status: 'IDLE',
-                        progress: 0,
-                        details: 'No active main task.' // Updated message
-                    });
-                    disableTaskButtons(false);
-                    fetchPlaylistsBtn.disabled = false;
-                    fetchPlaylistsBtn.style.opacity = '1';
-                    fetchPlaylistsBtn.style.cursor = 'pointer';
-                    cancelTaskBtn.disabled = true;
+
+                    if (previouslyTrackedTaskId) {
+                        // A task was being tracked, and now it's gone from active_tasks (or never appeared if it was too fast).
+                        // This means it finished or was cancelled.
+                        // Fetch its final status to be sure and for the alert.
+                        try {
+                            const finalStatusResponse = await fetch(`/api/status/${previouslyTrackedTaskId}`);
+                            if (finalStatusResponse.ok) {
+                                const finalStatusData = await finalStatusResponse.json();
+                                const upperFinalStatus = finalStatusData.state ? finalStatusData.state.toUpperCase() : 'UNKNOWN';
+                                const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
+                                const previousDetailsForFinishedTask = lastPolledTaskDetails[previouslyTrackedTaskId];
+
+                                const finalStatusIsTerminal = terminalStates.includes(upperFinalStatus);
+                                const previousFinishedStateWasTerminal = previousDetailsForFinishedTask && previousDetailsForFinishedTask.state && terminalStates.includes(previousDetailsForFinishedTask.state.toUpperCase());
+
+                                if (finalStatusIsTerminal && !previousFinishedStateWasTerminal) {
+                                        let alertTitle = 'Task Update';
+                                        let alertMessage = `Task ${finalStatusData.task_id} (${finalStatusData.task_type_from_db || finalStatusData.task_type || 'Unknown Type'}) has ${upperFinalStatus.toLowerCase()}.`;
+                                        if (upperFinalStatus === 'SUCCESS' || upperFinalStatus === 'FINISHED') alertTitle = 'Task Completed';
+                                        else if (upperFinalStatus === 'FAILURE' || upperFinalStatus === 'FAILED') alertTitle = 'Task Failed';
+                                        else if (upperFinalStatus === 'REVOKED' || upperFinalStatus === 'CANCELED') alertTitle = 'Task Canceled';
+                                        
+                                        if (alertTitle) {
+                                            showMessageBox(alertTitle, alertMessage);
+                                        }
+                                    }
+                                displayTaskStatus(finalStatusData); // Display its final status
+                            } else {
+                                console.warn(`Could not fetch final status for ${previouslyTrackedTaskId}. Displaying IDLE.`);
+                                displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Previously active task finished or cleared.' });
+                            }
+                        } catch (e) {
+                            console.error(`Error fetching final status for ${previouslyTrackedTaskId}:`, e);
+                            displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Error fetching status of previously active task.' });
+                        }
+                        delete lastPolledTaskDetails[previouslyTrackedTaskId]; // Clean up
+                        // Even if fetching final status failed, we handled the end of a task.
+                        // Common UI updates for no active task (or task just finished)
+                        disableTaskButtons(false);
+                        fetchPlaylistsBtn.disabled = false;
+                        fetchPlaylistsBtn.style.opacity = '1';
+                        fetchPlaylistsBtn.style.cursor = 'pointer';
+                        cancelTaskBtn.disabled = true;
+                        return true; // A previously tracked task was processed
+                    } else {
+                        // No task was being tracked, and no task is active.
+                        // Common UI updates for no active task
+                        disableTaskButtons(false);
+                        fetchPlaylistsBtn.disabled = false;
+                        fetchPlaylistsBtn.style.opacity = '1';
+                        fetchPlaylistsBtn.style.cursor = 'pointer';
+                        cancelTaskBtn.disabled = true;
+                    }
                 }
+                return false; // Indicate no active task was found by /api/active_tasks and no previously tracked task was processed
             } catch (error) {
                 console.error('Error checking active tasks:', error);
                 displayTaskStatus({
                     task_id: 'Error',
                     task_type: 'Error',
-                    status: 'ERROR',
+                    state: 'ERROR', // Consistent with displayTaskStatus
                     progress: 0,
-                    details: `Failed to check active main task: ${error.message}` // Updated message
+                    details: `Failed to check active main task: ${error.message}. Polling will continue.`
                 });
                 disableTaskButtons(false); // Re-enable buttons on error, allow retries
                 fetchPlaylistsBtn.disabled = false;
                 fetchPlaylistsBtn.style.opacity = '1';
                 fetchPlaylistsBtn.style.cursor = 'pointer';
-
                 cancelTaskBtn.disabled = true;
+                currentTaskId = null; // Reset on error
             }
+            return false; // Default to no active task found/handled
         }
 
         // Disables/enables task initiation buttons
@@ -383,25 +455,27 @@
         // Displays the status of a given task
         function displayTaskStatus(task) {
             statusTaskId.textContent = task.task_id;
-            statusTaskType.textContent = task.task_type;
-            statusStatus.textContent = task.status.toUpperCase();
+            statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A'; // Prefer task_type_from_db
+            // Prioritize 'status' if present (from /api/active_tasks example), then 'state', then 'UNKNOWN'
+            const taskStateUpper = task.status ? task.status.toUpperCase() : (task.state ? task.state.toUpperCase() : 'UNKNOWN');
+            statusStatus.textContent = taskStateUpper;
             statusProgress.textContent = task.progress;
             progressBar.style.width = `${task.progress}%`;
 
             // Update status text color based on status
             statusStatus.style.color = ''; // Reset color
-            if (task.status.toUpperCase() === 'PENDING' || task.status.toUpperCase() === 'STARTED' || task.status.toUpperCase() === 'QUEUED') {
-                statusStatus.style.color = '#fbbf24'; // Yellow-400
-            } else if (task.status.toUpperCase() === 'SUCCESS' || task.status.toUpperCase() === 'FINISHED') {
+            if (taskStateUpper === 'PENDING' || taskStateUpper === 'STARTED' || taskStateUpper === 'QUEUED' || taskStateUpper === 'PROGRESS') {
+                statusStatus.style.color = '#fbbf24'; // Yellow-400 for ongoing tasks
+            } else if (taskStateUpper === 'SUCCESS' || taskStateUpper === 'FINISHED') {
                 statusStatus.style.color = '#4ade80'; // Green-400
                 // If a clustering task finishes successfully, automatically fetch playlists
-                if (task.task_type && task.task_type.toLowerCase().includes('clustering')) {
+                if ((task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
                     fetchPlaylistsBtn.click(); // Trigger the button click
                 }
-            } else if (task.status.toUpperCase() === 'FAILURE' || task.status.toUpperCase() === 'FAILED' || task.status.toUpperCase() === 'REVOKED' || task.status.toUpperCase() === 'CANCELED') {
+            } else if (taskStateUpper === 'FAILURE' || taskStateUpper === 'FAILED' || taskStateUpper === 'REVOKED' || taskStateUpper === 'CANCELED') {
                 statusStatus.style.color = '#f87171'; // Red-400
                 playlistsSection.style.display = 'none'; // Hide playlists if task failed/revoked
-            } else {
+            } else { // Includes IDLE or other unknown states
                 statusStatus.style.color = '#60a5fa'; // Blue-400 for UNKNOWN/IDLE
             }
 
@@ -476,20 +550,21 @@
                     body: JSON.stringify(payload)
                 });
                 const result = await response.json();
-                if (response.ok) {
+                if (response.ok && result.task_id) { // Ensure task_id is present
                     currentTaskId = result.task_id;
                     displayTaskStatus({
                         task_id: result.task_id,
                         task_type: result.task_type,
-                        status: result.status,
+                        state: result.state || result.status || 'PENDING', // Use result.state or result.status
                         progress: 0,
                         details: { message: 'Task enqueued successfully.' }
                     });
+                    lastPolledTaskDetails[result.task_id] = { state: result.state || result.status || 'PENDING', task_type: result.task_type, task_id: result.task_id }; // Prime for alert logic
                     cancelTaskBtn.disabled = false; // Enable cancel once task is enqueued
-                    cancelTaskBtn.style.opacity = '1'; // Apply enabled style
+                    cancelTaskBtn.style.opacity = '1';
                     cancelTaskBtn.style.cursor = 'pointer';
                 } else {
-                    throw new Error(result.message || 'Failed to start task.');
+                    throw new Error(result.message || 'Failed to start task. No task ID received.');
                 }
             } catch (error) {
                 console.error(`Error starting ${taskType} task:`, error);
@@ -533,9 +608,17 @@
                 console.error('Error cancelling task:', error);
                 showMessageBox('Error', `Failed to cancel task: ${error.message}`);
             } finally {
-                cancelTaskBtn.disabled = false; // Re-enable after attempt
-                cancelTaskBtn.style.opacity = '1'; // Apply enabled style
-                cancelTaskBtn.style.cursor = 'pointer';
+                // Re-enable button only if there's still a task potentially running or if cancellation failed to register
+                // checkActiveTasks will update currentTaskId if the task is truly gone
+                if (currentTaskId) {
+                    cancelTaskBtn.disabled = false;
+                    cancelTaskBtn.style.opacity = '1';
+                    cancelTaskBtn.style.cursor = 'pointer';
+                } else {
+                     cancelTaskBtn.disabled = true;
+                     cancelTaskBtn.style.opacity = '0.5';
+                     cancelTaskBtn.style.cursor = 'not-allowed';
+                }
             }
         }
 
@@ -600,7 +683,14 @@
 
         // Custom message box function (replaces alert)
         function showMessageBox(title, message) {
+            // Remove any existing message box first
+            const existingBox = document.getElementById('custom-message-box');
+            if (existingBox) {
+                existingBox.remove();
+            }
+
             const messageBox = document.createElement('div');
+            messageBox.id = 'custom-message-box'; // Add an ID for potential removal
             messageBox.style.cssText = `
                 position: fixed;
                 top: 50%;
@@ -623,11 +713,51 @@
             `;
             document.body.appendChild(messageBox);
         }
+        
+        // Fetches and displays the status of the overall last significant task from the backend
+        async function fetchAndDisplayOverallLastTask() {
+            try {
+                // Ensure this endpoint exists on your backend and returns the last significant task
+                // This endpoint should provide the status of the most recent task that reached a terminal state.
+                const response = await fetch('/api/last_task'); // Assuming this is your endpoint for the last task
+                if (response.ok) {
+                    const lastTask = await response.json();
+                    if (lastTask && lastTask.task_id && (lastTask.state || lastTask.status)) {
+                        // Display whatever the last task is, regardless of its state,
+                        // as this is the "last known state" if no task is active.
+                        console.log('Displaying overall last task from /api/last_task:', lastTask);
+                        displayTaskStatus(lastTask);
+                        // If it's a terminal state, it will be colored appropriately by displayTaskStatus.
+                        // If it's somehow an old PENDING/STARTED task that got stuck, it will show that.
+                    } else {
+                        console.log('No significant last task found from /api/last_task or state/status missing.');
+                        displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. No last task data.' });
+                    }
+                } else {
+                    console.warn('Failed to fetch /api/last_task. Displaying IDLE.');
+                    displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. Could not fetch last task status.' });
+                }
+            } catch (error) {
+                console.error('Error fetching overall last task status:', error);
+                displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. Error fetching last task status.' });
+            }
+        }
 
         // Event Listeners
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchConfig();
-            checkActiveTasks(); // Initial check for active tasks
+        document.addEventListener('DOMContentLoaded', async () => {
+            await fetchConfig(); // Loads config and shows main content
+
+            // Initial check for active tasks.
+            // checkActiveTasks returns true if it found and handled an active task from /api/active_tasks
+            // or handled a task that just finished (was previouslyTrackedTaskId).
+            const isActiveTaskRunningOrJustFinished = await checkActiveTasks();
+
+            if (!isActiveTaskRunningOrJustFinished) {
+                // If no task is currently running AND no task just finished in this session,
+                // then fetch and display the status of the overall last task from the backend.
+                await fetchAndDisplayOverallLastTask();
+            }
+
             setInterval(checkActiveTasks, 3000); // Poll for active tasks every 3 seconds
             clusterAlgorithmSelect.addEventListener('change', toggleClusteringParams);
         });
