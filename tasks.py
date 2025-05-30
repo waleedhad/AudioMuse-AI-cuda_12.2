@@ -29,7 +29,8 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, \
     JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # For create_or_update_playlists_on_jellyfin
-from rq.exceptions import NoSuchJobError
+from rq.job import Job # Import Job class
+from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
 # --- Task-specific Helper Functions ---
 
