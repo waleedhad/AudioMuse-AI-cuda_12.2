@@ -178,6 +178,8 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 In **audiomuse-ai/docs** you can find additional documentation for this project, in details:
 * **api_doc.pdf** - Is a minimal documentation of the API in case you want to integrate it in your front-end (still work in progress)
 * **docker_docs.pdf** - Is a step-by-step documentation if you want to deploy everything on your local machine (debian) becuase you don't have a K3S (or other kubernetes) cluster avaiable.
+  * **audiomuse-ai/deployment/docker-compose.yaml** - is the docker compose file used in the docker_docs.pdf
+  
 
 ## **🚀 Future Possibilities**
 
