@@ -153,7 +153,7 @@
                     Run Tasks
                 </h2>
                 <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem;">
-                    <button id="start-analysis-btn"
+                    <button id="start-analysis-btn" 
                             style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
                         Start Analysis
                     </button>
@@ -167,7 +167,7 @@
                     </button>
                 </div>
                 <button id="cancel-task-btn"
-                        style="width: 100%; background-color: #dc2626; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; margin-top: 1rem;">
+                        style="width: 100%; background-color: #dc2626; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; margin-top: 1rem; opacity: 0.5; cursor: not-allowed;">
                     Cancel Current Task
                 </button>
             </section>
@@ -311,6 +311,18 @@
             }
         }
 
+        // Helper function to update cancel button's state and style
+        function updateCancelButtonState(isDisabled) {
+            cancelTaskBtn.disabled = isDisabled;
+            if (isDisabled) {
+                cancelTaskBtn.style.opacity = '0.5';
+                cancelTaskBtn.style.cursor = 'not-allowed';
+            } else {
+                cancelTaskBtn.style.opacity = '1';
+                cancelTaskBtn.style.cursor = 'pointer';
+            }
+        }
+
         // Fetches active tasks and updates UI accordingly
         // Returns true if an active task was found/handled or a previously active task's final status was processed.
         // Returns false if no active task was found and no previously active task was processed.
@@ -352,7 +364,7 @@
                     fetchPlaylistsBtn.disabled = true;
                     fetchPlaylistsBtn.style.opacity = '0.5';
                     fetchPlaylistsBtn.style.cursor = 'not-allowed';
-                    cancelTaskBtn.disabled = false;
+                    updateCancelButtonState(false);
 
                     return true; // Indicate an active task was found and handled
                 } else {
@@ -401,7 +413,7 @@
                         fetchPlaylistsBtn.disabled = false;
                         fetchPlaylistsBtn.style.opacity = '1';
                         fetchPlaylistsBtn.style.cursor = 'pointer';
-                        cancelTaskBtn.disabled = true;
+                        updateCancelButtonState(true);
                         return true; // A previously tracked task was processed
                     } else {
                         // No task was being tracked, and no task is active.
@@ -410,7 +422,7 @@
                         fetchPlaylistsBtn.disabled = false;
                         fetchPlaylistsBtn.style.opacity = '1';
                         fetchPlaylistsBtn.style.cursor = 'pointer';
-                        cancelTaskBtn.disabled = true;
+                        updateCancelButtonState(true);
                     }
                 }
                 return false; // Indicate no active task was found by /api/active_tasks and no previously tracked task was processed
@@ -427,7 +439,7 @@
                 fetchPlaylistsBtn.disabled = false;
                 fetchPlaylistsBtn.style.opacity = '1';
                 fetchPlaylistsBtn.style.cursor = 'pointer';
-                cancelTaskBtn.disabled = true;
+                updateCancelButtonState(true);
                 currentTaskId = null; // Reset on error
             }
             return false; // Default to no active task found/handled
@@ -494,13 +506,10 @@
         // Starts a new task (analysis or clustering)
         async function startTask(taskType) {
             disableTaskButtons(true); // Immediately disable to prevent double clicks
-            cancelTaskBtn.disabled = true; // Disable cancel until we get a task ID
-            cancelTaskBtn.style.opacity = '0.5'; // Apply disabled style
-            cancelTaskBtn.style.cursor = 'not-allowed';
+            updateCancelButtonState(true); // Disable cancel until we get a task ID
             fetchPlaylistsBtn.disabled = true; // Disable fetch playlists during task execution
             fetchPlaylistsBtn.style.opacity = '0.5';
             fetchPlaylistsBtn.style.cursor = 'not-allowed';
-            cancelTaskBtn.style.cursor = 'not-allowed';
 
             // Collect General Parameters
             const jellyfinUrl = document.getElementById('config-jellyfin_url').value;
@@ -518,6 +527,9 @@
                 payload.num_recent_albums = parseInt(document.getElementById('config-num_recent_albums').value);
                 payload.top_n_moods = parseInt(document.getElementById('config-top_n_moods').value);
             } else if (taskType === 'clustering') {
+                // Hide and clear playlists section when starting a new clustering task
+                playlistsSection.style.display = 'none';
+                playlistsContainer.innerHTML = '';
                 // Collect Clustering Parameters
                 payload.clustering_method = clusterAlgorithmSelect.value;
                 payload.max_distance = parseFloat(document.getElementById('config-max_distance').value);
@@ -560,9 +572,7 @@
                         details: { message: 'Task enqueued successfully.' }
                     });
                     lastPolledTaskDetails[result.task_id] = { state: result.state || result.status || 'PENDING', task_type: result.task_type, task_id: result.task_id }; // Prime for alert logic
-                    cancelTaskBtn.disabled = false; // Enable cancel once task is enqueued
-                    cancelTaskBtn.style.opacity = '1';
-                    cancelTaskBtn.style.cursor = 'pointer';
+                    updateCancelButtonState(false); // Enable cancel once task is enqueued
                 } else {
                     throw new Error(result.message || 'Failed to start task. No task ID received.');
                 }
@@ -570,12 +580,10 @@
                 console.error(`Error starting ${taskType} task:`, error);
                 showMessageBox('Error', `Failed to start ${taskType} task: ${error.message}`);
                 disableTaskButtons(false); // Re-enable buttons on failure
-                cancelTaskBtn.disabled = true;
+                updateCancelButtonState(true);
                 fetchPlaylistsBtn.disabled = false; // Re-enable fetch playlists on failure
                 fetchPlaylistsBtn.style.opacity = '1';
                 fetchPlaylistsBtn.style.cursor = 'pointer';
-                cancelTaskBtn.style.opacity = '0.5'; // Apply disabled style
-                cancelTaskBtn.style.cursor = 'not-allowed';
                 currentTaskId = null;
             }
         }
@@ -587,9 +595,7 @@
                 return;
             }
 
-            cancelTaskBtn.disabled = true; // Disable button during cancellation attempt
-            cancelTaskBtn.style.opacity = '0.5'; // Apply disabled style
-            cancelTaskBtn.style.cursor = 'not-allowed';
+            updateCancelButtonState(true); // Disable button during cancellation attempt
             try {
                 const response = await fetch(`/api/cancel/${currentTaskId}`, {
                     method: 'POST',
@@ -608,17 +614,8 @@
                 console.error('Error cancelling task:', error);
                 showMessageBox('Error', `Failed to cancel task: ${error.message}`);
             } finally {
-                // Re-enable button only if there's still a task potentially running or if cancellation failed to register
                 // checkActiveTasks will update currentTaskId if the task is truly gone
-                if (currentTaskId) {
-                    cancelTaskBtn.disabled = false;
-                    cancelTaskBtn.style.opacity = '1';
-                    cancelTaskBtn.style.cursor = 'pointer';
-                } else {
-                     cancelTaskBtn.disabled = true;
-                     cancelTaskBtn.style.opacity = '0.5';
-                     cancelTaskBtn.style.cursor = 'not-allowed';
-                }
+                updateCancelButtonState(!currentTaskId); // Disable if no current task ID, enable if there might still be one
             }
         }
 
@@ -756,6 +753,7 @@
                 // If no task is currently running AND no task just finished in this session,
                 // then fetch and display the status of the overall last task from the backend.
                 await fetchAndDisplayOverallLastTask();
+                updateCancelButtonState(true); // No active task, so cancel should be disabled
             }
 
             setInterval(checkActiveTasks, 3000); // Poll for active tasks every 3 seconds
