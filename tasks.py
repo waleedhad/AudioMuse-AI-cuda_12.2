@@ -1037,10 +1037,13 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 try:
                     if run_result_data:
                         current_diversity_score = run_result_data.get("diversity_score", -1.0)
-                        if current_diversity_score > best_diversity_score:
+                        # If current_diversity_score is greater than or equal to best_diversity_score,
+                        # it means we've found a run that is at least as good as the best one seen so far.
+                        # We update best_clustering_results to ensure we have the data from one such best run.
+                        if current_diversity_score >= best_diversity_score:
                             best_diversity_score = current_diversity_score
                             best_clustering_results = run_result_data
-                            log_and_update_main_clustering(f"Aggregating: New best run found (ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Score: {current_diversity_score:.2f})", current_progress, details_to_add_or_update={"best_score": best_diversity_score})
+                            log_and_update_main_clustering(f"Aggregating: Found run (ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Score: {current_diversity_score:.2f}) matching/exceeding best.", current_progress, details_to_add_or_update={"best_score": best_diversity_score})
                     else: 
                         failed_job_id = job_instance_result_phase.id if job_instance_result_phase else "Unknown_ID"
                         job_status_for_failed_log = "UNKNOWN (Result not found)"
