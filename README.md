@@ -145,16 +145,11 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 
 ## Screenshots
 
-Here are a few glimpses of AudioMuse AI in action:
+Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
 
-#### Different parameter
-
-![Screenshot of  general parameter](screenshot/general_parameter.png "General parameters.")
-![Screenshot of  analysis parameter](screenshot/analysis_parameter.png "Analysis parameters.")
-![Screenshot of  clustering parameter](screenshot/clustering_parameters.png "Clustering parameters.")
 ### Analysis task
 
-![Screenshot of AudioMuse AI's web interface showing the progress of music analysis tasks.](screenshot/analysis_task.png) "Audio analysis and task status.")
+![Screenshot of AudioMuse AI's web interface showing the progress of music analysis tasks.](screenshot/analysis_task.png "Audio analysis and task status.")
 
 ### Clustering task
 
