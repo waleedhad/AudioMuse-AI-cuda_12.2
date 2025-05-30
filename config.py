@@ -3,14 +3,14 @@ import os
 # --- Jellyfin and DB Constants (Read from Environment Variables first) ---
 
 # JELLYFIN_USER_ID and JELLYFIN_TOKEN come from a Kubernetes Secret
-JELLYFIN_USER_ID = os.getenv("JELLYFIN_USER_ID", "0e45c44b3e2e4da7a2be11a72a1c8575")
-JELLYFIN_TOKEN = os.getenv("JELLYFIN_TOKEN", "e0b8c325bc1b426c81922b90c0aa2ff1")
+JELLYFIN_USER_ID = os.environ.get("JELLYFIN_USER_ID", "your_default_user_id")  # Replace with a suitable default or handle missing case
+JELLYFIN_TOKEN = os.environ.get("JELLYFIN_TOKEN", "your_default_token")  # Replace with a suitable default or handle missing case
 
 # Other variables come from the audiomuse-ai-config ConfigMap
-JELLYFIN_URL = os.getenv("JELLYFIN_URL", "http://jellyfin.192.168.3.131.nip.io:8087")
-TEMP_DIR = os.getenv("TEMP_DIR", "/workspace/temp_audio") # Now explicitly using /app/temp_audio as default for emptyDir
-DB_PATH = os.getenv("DB_PATH", "/workspace/db.sqlite") # Default to /app if env var not found (local dev fallback)
-STATUS_DB_PATH = os.getenv("STATUS_DB_PATH", "/workspace/status_db.sqlite") # Ensure status DB path is also from env var
+JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://your_jellyfin_url:8096") # Replace with your default URL
+TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio
+
+
 
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
@@ -21,7 +21,7 @@ MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000")) # Convert to int
 
 # --- Algorithm Choose Constant (Read from Environment Variables) ---
-CLUSTER_ALGORITHM = os.getenv("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
+CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
 
 # --- DBSCAN Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for DBSCAN parameters
@@ -40,7 +40,7 @@ NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "60"))
 # Default ranges for GMM parameters
 GMM_N_COMPONENTS_MIN = int(os.getenv("GMM_N_COMPONENTS_MIN", "20"))
 GMM_N_COMPONENTS_MAX = int(os.getenv("GMM_N_COMPONENTS_MAX", "60"))
-GMM_COVARIANCE_TYPE = os.getenv("GMM_COVARIANCE_TYPE", "full") # 'full', 'tied', 'diag', 'spherical'
+GMM_COVARIANCE_TYPE = os.environ.get("GMM_COVARIANCE_TYPE", "full") # 'full', 'tied', 'diag', 'spherical'
 
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
@@ -48,12 +48,15 @@ PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PC
 PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "5")) # Max components for PCA
 
 # --- Clustering Runs for Diversity (New Constant) ---
-CLUSTERING_RUNS = int(os.getenv("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
+CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 
-# --- Celery Broker/Backend URLs (from ConfigMap in your deployment) ---
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
+# --- Celery Broker/Backend URLs (No longer used with RQ) ---
+# CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
+# CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
 
+# --- RQ / Redis / Database Configuration ---
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb")
 
 # --- Classifier Constant ---
 MOOD_LABELS = [
@@ -67,27 +70,3 @@ MOOD_LABELS = [
 TOP_N_MOODS = 5
 EMBEDDING_MODEL_PATH = "/app/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/msd-msd-musicnn-1.pb"
-
-# --- Debugging (Optional, remove in production if not needed) ---
-print(f"DEBUG: JELLYFIN_USER_ID: {JELLYFIN_USER_ID}")
-print(f"DEBUG: JELLYFIN_URL: {JELLYFIN_URL}")
-print(f"DEBUG: JELLYFIN_TOKEN: {'***hidden***' if JELLYFIN_TOKEN else 'None'}")
-print(f"DEBUG: TEMP_DIR: {TEMP_DIR}")
-print(f"DEBUG: DB_PATH: {DB_PATH}")
-print(f"DEBUG: STATUS_DB_PATH: {STATUS_DB_PATH}")
-print(f"DEBUG: NUM_RECENT_ALBUMS: {NUM_RECENT_ALBUMS}")
-print(f"DEBUG: CLUSTER_ALGORITHM: {CLUSTER_ALGORITHM}")
-print(f"DEBUG: NUM_CLUSTERS_MIN: {NUM_CLUSTERS_MIN}")
-print(f"DEBUG: NUM_CLUSTERS_MAX: {NUM_CLUSTERS_MAX}")
-print(f"DEBUG: DBSCAN_EPS_MIN: {DBSCAN_EPS_MIN}")
-print(f"DEBUG: DBSCAN_EPS_MAX: {DBSCAN_EPS_MAX}")
-print(f"DEBUG: DBSCAN_MIN_SAMPLES_MIN: {DBSCAN_MIN_SAMPLES_MIN}")
-print(f"DEBUG: DBSCAN_MIN_SAMPLES_MAX: {DBSCAN_MIN_SAMPLES_MAX}")
-print(f"DEBUG: GMM_N_COMPONENTS_MIN: {GMM_N_COMPONENTS_MIN}")
-print(f"DEBUG: GMM_N_COMPONENTS_MAX: {GMM_N_COMPONENTS_MAX}")
-print(f"DEBUG: GMM_COVARIANCE_TYPE: {GMM_COVARIANCE_TYPE}")
-print(f"DEBUG: PCA_COMPONENTS_MIN: {PCA_COMPONENTS_MIN}")
-print(f"DEBUG: PCA_COMPONENTS_MAX: {PCA_COMPONENTS_MAX}")
-print(f"DEBUG: CLUSTERING_RUNS: {CLUSTERING_RUNS}")
-print(f"DEBUG: CELERY_BROKER_URL: {CELERY_BROKER_URL}")
-print(f"DEBUG: CELERY_RESULT_BACKEND: {CELERY_RESULT_BACKEND}")

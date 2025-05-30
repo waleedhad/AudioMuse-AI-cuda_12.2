@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-RUN apt-get update && \
+RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
@@ -17,6 +17,9 @@ RUN apt-get update && \
     iputils-ping \
     libopenblas-dev \
     liblapack-dev \
+    # Added dependencies for psycopg2-binary
+    libpq-dev \
+    gcc \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -25,12 +28,14 @@ RUN pip3 install --no-cache-dir numpy==1.26.4
 RUN pip3 install --no-cache-dir \
     Flask \
     Flask-Cors \
-    celery \
     redis \
     requests \
     scikit-learn \
+    rq \
     pyyaml \
-    six
+    six \
+    # Added psycopg2-binary for PostgreSQL connectivity
+    psycopg2-binary
 
 RUN pip3 install --no-cache-dir essentia-tensorflow
 
@@ -42,5 +47,4 @@ ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
 EXPOSE 8000
 
 WORKDIR /workspace
-#CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=solo --loglevel=debug; else python3 /app/app.py; fi"]
-CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"celery\" ]; then celery -A app.celery worker --pool=threads --loglevel=debug; else python3 /app/app.py; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then python3 /app/rq_worker.py; else python3 /app/app.py; fi"]

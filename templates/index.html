@@ -2,882 +2,769 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Music Analyzer & Playlist Generator</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
-    <style>
-        /* Custom styles for better readability and spacing */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #1a202c; /* Dark background */
-            color: #e2e8f0; /* Light text */
-            line-height: 1.6;
-        }
-        .container {
-            max-width: 1000px;
-        }
-        .card {
-            background-color: #2d3748; /* Darker card background */
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        input[type="text"],
-        input[type="number"],
-        textarea,
-        select { /* Added select */
-            background-color: #4a5568;
-            border: 1px solid #4a5568;
-            color: #e2e8f0;
-            padding: 0.5rem 0.75rem;
-            border-radius: 0.25rem;
-            width: 100%;
-        }
-        button {
-            background-color: #63b3ed; /* Blue button */
-            color: #ffffff;
-            padding: 0.75rem 1.5rem;
-            border-radius: 0.25rem;
-            font-weight: bold;
-            transition: background-color 0.2s ease-in-out;
-        }
-        button:hover {
-            background-color: #4299e1; /* Darker blue on hover */
-        }
-        button:disabled {
-            background-color: #a0aec0;
-            cursor: not-allowed;
-        }
-        .log-output {
-            background-color: #171923; /* Even darker for logs */
-            color: #cbd5e0;
-            font-family: monospace;
-            white-space: pre-wrap; /* Preserve whitespace and break lines */
-            max-height: 300px;
-            overflow-y: auto;
-            border-radius: 0.25rem;
-            padding: 1rem;
-        }
-        .status-box {
-            padding: 1rem;
-            border-radius: 0.25rem;
-            font-weight: bold;
-        }
-        .status-PENDING { background-color: #2a4365; } /* Blue-gray */
-        .status-PROGRESS { background-color: #3182ce; } /* Blue */
-        .status-SUCCESS { background-color: #38a169; } /* Green */
-        .status-FAILURE { background-color: #e53e3e; } /* Red */
-        .status-REVOKED { background-color: #dd6b20; } /* Orange */
-
-
-        .playlist-list {
-            list-style: none;
-            padding-left: 0;
-        }
-        .playlist-list li {
-            background-color: #4a5568;
-            margin-bottom: 0.5rem;
-            padding: 0.75rem;
-            border-radius: 0.25rem;
-            display: flex;
-            flex-direction: column; /* Changed to column for better layout of tracks */
-            align-items: flex-start;
-        }
-        .playlist-list li:last-child {
-            margin-bottom: 0;
-        }
-        .playlist-list h3 {
-            color: #63b3ed;
-            margin-bottom: 0.5rem;
-            display: flex;
-            justify-content: space-between;
-            width: 100%;
-            align-items: center;
-        }
-        .playlist-toggle {
-            background: none;
-            border: none;
-            color: #63b3ed;
-            font-weight: bold;
-            cursor: pointer;
-            padding: 0;
-            margin-left: auto; /* Push to right */
-        }
-        .playlist-tracks {
-            margin-top: 0.5rem;
-            border-top: 1px solid #63b3ed;
-            padding-top: 0.5rem;
-            width: 100%;
-        }
-        .playlist-tracks p {
-            margin-bottom: 0.25rem;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AudioMuse-AI</title>
 </head>
-<body class="p-8">
-    <div class="container mx-auto">
-        <h1 class="text-4xl font-bold text-center mb-8 text-blue-300">AudioMuse-AI - Music Analyzer & Playlist Generator</h1>
+<body style="background-color: #1a1a1a; padding: 1.5rem;">
+    <div style="width: 100%; max-width: 960px; margin-left: auto; margin-right: auto;">
+        <h1 style="font-size: 2.25rem; text-align: center; color: #60a5fa; margin-bottom: 2rem; letter-spacing: 0.025em;">
+            AudioMuse-AI
+        </h1>
 
-        <div class="card p-6 mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Start Music Analysis</h2>
-            <form id="analysisForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label for="jellyfin_url" class="block text-gray-400 text-sm font-bold mb-2">Jellyfin URL:</label>
-                    <input type="text" id="jellyfin_url" name="jellyfin_url" placeholder="Enter Jellyfin URL" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="jellyfin_user_id" class="block text-gray-400 text-sm font-bold mb-2">Jellyfin User ID:</label>
-                    <input type="text" id="jellyfin_user_id" name="jellyfin_user_id" placeholder="Enter Jellyfin User ID" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="jellyfin_token" class="block text-gray-400 text-sm font-bold mb-2">Jellyfin API Token:</label>
-                    <input type="text" id="jellyfin_token" name="jellyfin_token" placeholder="Enter Jellyfin API Token" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="num_recent_albums" class="block text-gray-400 text-sm font-bold mb-2">Number of Recent Albums (0 for all):</label>
-                    <input type="number" id="num_recent_albums" name="num_recent_albums" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="top_n_moods" class="block text-gray-400 text-sm font-bold mb-2">Top N Moods per Track:</label>
-                    <input type="number" id="top_n_moods" name="top_n_moods" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
+        <div id="loading-spinner" style="display: none; justify-content: center; align-items: center; padding-top: 2rem; padding-bottom: 2rem;">
+            <div style="height: 4rem; width: 4rem; border-radius: 9999px; border-top: 4px solid #3b82f6; border-bottom: 4px solid #3b82f6; animation: spin 1s linear infinite;"></div>
+            <p style="margin-left: 1rem; color: #93c5fd; font-size: 1.125rem;">Loading...</p>
+        </div>
 
-                <div class="col-span-1 md:col-span-2 mt-4 text-center">
-                    <button type="submit" id="startAnalysisBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+        <style>
+            /* Keyframe animation for the loading spinner */
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+
+        <div id="main-content" style="display: none;">
+            <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    Configuration Parameters
+                </h2>
+                <form id="config-form" style="color: #d1d5db;">
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            General Parameters
+                        </legend>
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-jellyfin_url" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin URL:</label>
+                                <input type="text" id="config-jellyfin_url" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-jellyfin_user_id" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin User ID:</label>
+                                <input type="text" id="config-jellyfin_user_id" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-jellyfin_token" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin Token:</label>
+                                <input type="text" id="config-jellyfin_token" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            Analysis Parameters
+                        </legend>
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-num_recent_albums" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Number of Recent Albums:</label>
+                                <input type="number" id="config-num_recent_albums" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-top_n_moods" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Top N Moods:</label>
+                                <input type="number" id="config-top_n_moods" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            Clustering Parameters
+                        </legend>
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-cluster_algorithm" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Algorithm:</label>
+                                <select id="config-cluster_algorithm" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                    <option value="kmeans">K-Means</option>
+                                    <option value="dbscan">DBSCAN</option>
+                                    <option value="gmm">GMM</option>
+                                </select>
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-max_distance" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Distance:</label>
+                                <input type="number" step="0.01" id="config-max_distance" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-max_songs_per_cluster" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Songs Per Cluster:</label>
+                                <input type="number" id="config-max_songs_per_cluster" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-pca_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Min:</label>
+                                <input type="number" id="config-pca_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-pca_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Max:</label>
+                                <input type="number" id="config-pca_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-clustering_runs" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Runs:</label>
+                                <input type="number" id="config-clustering_runs" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+
+                        <div id="dbscan-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">DBSCAN Specific:</h4>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_eps_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Epsilon Min:</label>
+                                <input type="number" step="0.01" id="config-dbscan_eps_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_eps_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Epsilon Max:</label>
+                                <input type="number" step="0.01" id="config-dbscan_eps_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_min_samples_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Min Samples Min:</label>
+                                <input type="number" id="config-dbscan_min_samples_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-dbscan_min_samples_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Min Samples Max:</label>
+                                <input type="number" id="config-dbscan_min_samples_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+
+                        <div id="kmeans-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">K-Means Specific:</h4>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-num_clusters_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Min Clusters:</label>
+                                <input type="number" id="config-num_clusters_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-num_clusters_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Clusters:</label>
+                                <input type="number" id="config-num_clusters_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+
+                        <div id="gmm-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">GMM Specific:</h4>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-gmm_n_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">GMM Components Min:</label>
+                                <input type="number" id="config-gmm_n_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-gmm_n_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">GMM Components Max:</label>
+                                <input type="number" id="config-gmm_n_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                        </div>
+                    </fieldset>
+                </form>
+            </section>
+
+            <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    Run Tasks
+                </h2>
+                <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem;">
+                    <button id="start-analysis-btn" 
+                            style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
                         Start Analysis
                     </button>
-                </div>
-            </form>
-        </div>
-
-        <div id="analysisProgressContainer" class="card p-6 mb-8 hidden">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Analysis Status</h2>
-            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="analysisTaskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
-            <p class="text-lg mb-4 status-box" id="analysisStatus">Status: Idle</p>
-            <div class="w-full bg-gray-600 rounded-full h-4 mb-4">
-                <div id="analysisProgressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
-            </div>
-            <p class="text-gray-400 text-sm mb-2">Current Album: <span id="currentAlbumName">N/A</span> (<span id="currentAlbumProgress">0/0</span>)</p>
-            <h3 class="text-xl font-semibold mb-2 text-white">Analysis Log:</h3>
-            <pre id="analysisLogOutput" class="log-output"></pre>
-            <div class="mt-4 text-center">
-                   <button id="cancelAnalysisBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                    Cancel Analysis
-                </button>
-            </div>
-        </div>
-
-        <div class="card p-6 mb-8">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Generate Playlists</h2>
-            <form id="playlistForm" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label for="clustering_method" class="block text-gray-400 text-sm font-bold mb-2">Clustering Method:</label>
-                    <select id="clustering_method" name="clustering_method" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                        <option value="kmeans">KMeans</option>
-                        <option value="dbscan">DBSCAN</option>
-                        <option value="gmm">Gaussian Mixture Model (GMM)</option>
-                    </select>
-                </div>
-                <div id="kmeans_options" class="grid grid-cols-2 gap-4 col-span-2">
-                    <div>
-                        <label for="num_clusters_min" class="block text-gray-400 text-sm font-bold mb-2">KMeans Min Clusters:</label>
-                        <input type="number" id="num_clusters_min" name="num_clusters_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="num_clusters_max" class="block text-gray-400 text-sm font-bold mb-2">KMeans Max Clusters:</label>
-                        <input type="number" id="num_clusters_max" name="num_clusters_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                </div>
-                <div id="dbscan_options" class="grid grid-cols-2 gap-4 col-span-2 hidden">
-                    <div>
-                        <label for="dbscan_eps_min" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Min Epsilon (eps):</label>
-                        <input type="number" step="0.01" id="dbscan_eps_min" name="dbscan_eps_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="dbscan_eps_max" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Max Epsilon (eps):</label>
-                        <input type="number" step="0.01" id="dbscan_eps_max" name="dbscan_eps_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="dbscan_min_samples_min" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Min Samples:</label>
-                        <input type="number" id="dbscan_min_samples_min" name="dbscan_min_samples_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="dbscan_min_samples_max" class="block text-gray-400 text-sm font-bold mb-2">DBSCAN Max Samples:</label>
-                        <input type="number" id="dbscan_min_samples_max" name="dbscan_min_samples_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-align focus:outline-none focus:shadow-outline">
-                    </div>
-                </div>
-                <div id="gmm_options" class="grid grid-cols-2 gap-4 col-span-2 hidden">
-                    <div>
-                        <label for="gmm_n_components_min" class="block text-gray-400 text-sm font-bold mb-2">GMM Min Components:</label>
-                        <input type="number" id="gmm_n_components_min" name="gmm_n_components_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="gmm_n_components_max" class="block text-gray-400 text-sm font-bold mb-2">GMM Max Components:</label>
-                        <input type="number" id="gmm_n_components_max" name="gmm_n_components_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 gap-4 col-span-2">
-                    <div>
-                        <label for="pca_components_min" class="block text-gray-400 text-sm font-bold mb-2">PCA Min Components (0 to disable):</label>
-                        <input type="number" id="pca_components_min" name="pca_components_min" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                    <div>
-                        <label for="pca_components_max" class="block text-gray-400 text-sm font-bold mb-2">PCA Max Components:</label>
-                        <input type="number" id="pca_components_max" name="pca_components_max" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                    </div>
-                </div>
-                <div>
-                    <label for="max_songs_per_cluster" class="block text-gray-400 text-sm font-bold mb-2">Max Songs per Cluster:</label>
-                    <input type="number" id="max_songs_per_cluster" name="max_songs_per_cluster" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div>
-                    <label for="clustering_runs" class="block text-gray-400 text-sm font-bold mb-2">Clustering Runs (for diversity):</label>
-                    <input type="number" id="clustering_runs" name="clustering_runs" class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline">
-                </div>
-                <div class="col-span-1 md:col-span-2 mt-4 text-center">
-                    <button type="submit" id="generatePlaylistsBtn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                        Generate Playlists
+                    <button id="start-clustering-btn"
+                            style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
+                        Start Clustering
                     </button>
-                    <button type="button" id="fetchPlaylistsBtn" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-4">
-                        Fetch Saved Playlists
+                    <button id="fetch-playlists-btn"
+                            style="flex-grow: 1; background-color: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%; margin-top: 0.5rem;">
+                        Fetch Playlists
                     </button>
                 </div>
-            </form>
-        </div>
-
-        <div id="clusteringProgressContainer" class="card p-6 mb-8 hidden">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Clustering Status</h2>
-            <p class="text-lg mb-2 text-gray-300">Task ID: <span id="clusteringTaskIdDisplay" class="font-bold text-blue-400">N/A</span></p>
-            <p class="text-lg mb-4 status-box" id="clusteringStatus">Status: Idle</p>
-            <div class="w-full bg-gray-600 rounded-full h-4 mb-4">
-                <div id="clusteringProgressBar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div>
-            </div>
-            <h3 class="text-xl font-semibold mb-2 text-white">Clustering Log:</h3>
-            <pre id="clusteringLogOutput" class="log-output"></pre>
-            <div class="mt-4 text-center">
-                   <button id="cancelClusteringBtn" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                    Cancel Clustering
+                <button id="cancel-task-btn"
+                        style="width: 100%; background-color: #dc2626; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; margin-top: 1rem; opacity: 0.5; cursor: not-allowed;">
+                    Cancel Current Task
                 </button>
-            </div>
-        </div>
+            </section>
 
+            <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    Task Status
+                </h2>
+                <div id="task-status-display" style="color: #d1d5db;">
+                    <p><span style="color: #60a5fa;">Task ID:</span> <span id="status-task-id">N/A</span></p>
+                    <p><span style="color: #60a5fa;">Type:</span> <span id="status-task-type">N/A</span></p>
+                    <p><span style="color: #60a5fa;">Status:</span> <span id="status-status" style="color: #fbbf24;">IDLE</span></p>
+                    <p><span style="color: #60a5fa;">Progress:</span> <span id="status-progress">0</span>%</p>
+                    <div style="width: 100%; background-color: #374151; border-radius: 9999px; height: 0.625rem; margin-top: 0.5rem;">
+                        <div id="progress-bar" style="background-color: #3b82f6; height: 0.625rem; border-radius: 9999px; width: 0%;"></div>
+                    </div>
+                    <div style="margin-top: 1rem;">
+                        <h3 style="color: #60a5fa; margin-bottom: 0.5rem;">Details / Log:</h3>
+                        <pre id="status-details" style="background-color: #374151; padding: 1rem; border-radius: 0.375rem; font-size: 0.875rem; overflow: auto; max-height: 15rem; color: #e5e7eb; white-space: pre-wrap;"></pre>
+                    </div>
+                </div>
+            </section>
 
-        <div id="playlistsDisplay" class="card p-6 hidden">
-            <h2 class="text-2xl font-semibold mb-4 text-white">Generated Playlists</h2>
-            <ul id="playlistList" class="playlist-list">
-                </ul>
+            <section id="playlists-section" style="padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af; display: none;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                    Generated Playlists
+                </h2>
+                <div id="playlists-container" style="color: #d1d5db;">
+                    <!-- Playlists will be rendered here -->
+                </div>
+            </section>
         </div>
     </div>
 
     <script>
-        const API_BASE_URL = '/api';
+        const configForm = document.getElementById('config-form');
+        const startAnalysisBtn = document.getElementById('start-analysis-btn');
+        const startClusteringBtn = document.getElementById('start-clustering-btn');
+        const fetchPlaylistsBtn = document.getElementById('fetch-playlists-btn');
 
-        // Analysis elements
-        const analysisForm = document.getElementById('analysisForm');
-        const startAnalysisBtn = document.getElementById('startAnalysisBtn');
-        const analysisProgressContainer = document.getElementById('analysisProgressContainer');
-        const analysisTaskIdDisplay = document.getElementById('analysisTaskIdDisplay');
-        const analysisStatus = document.getElementById('analysisStatus');
-        const analysisProgressBar = document.getElementById('analysisProgressBar');
-        const currentAlbumName = document.getElementById('currentAlbumName');
-        const currentAlbumProgress = document.getElementById('currentAlbumProgress');
-        const analysisLogOutput = document.getElementById('analysisLogOutput');
-        const cancelAnalysisBtn = document.getElementById('cancelAnalysisBtn');
+        const cancelTaskBtn = document.getElementById('cancel-task-btn');
+        const statusTaskId = document.getElementById('status-task-id');
+        const statusTaskType = document.getElementById('status-task-type');
+        const statusStatus = document.getElementById('status-status');
+        const statusProgress = document.getElementById('status-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const statusDetails = document.getElementById('status-details');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const mainContent = document.getElementById('main-content');
+        const playlistsSection = document.getElementById('playlists-section');
+        const playlistsContainer = document.getElementById('playlists-container');
 
-        // Playlist/Clustering elements
-        const playlistForm = document.getElementById('playlistForm');
-        const clusteringMethodSelect = document.getElementById('clustering_method');
-        const kmeansOptions = document.getElementById('kmeans_options');
-        const dbscanOptions = document.getElementById('dbscan_options');
-        const gmmOptions = document.getElementById('gmm_options'); // New GMM options div
-        const playlistsDisplay = document.getElementById('playlistsDisplay');
-        const playlistList = document.getElementById('playlistList');
-        const fetchPlaylistsBtn = document.getElementById('fetchPlaylistsBtn');
-        const generatePlaylistsBtn = document.getElementById('generatePlaylistsBtn'); // Added for disabling
-
-        // Clustering Progress elements
-        const clusteringProgressContainer = document.getElementById('clusteringProgressContainer');
-        const clusteringTaskIdDisplay = document.getElementById('clusteringTaskIdDisplay');
-        const clusteringStatus = document.getElementById('clusteringStatus');
-        const clusteringProgressBar = document.getElementById('clusteringProgressBar');
-        const clusteringLogOutput = document.getElementById('clusteringLogOutput');
-        const cancelClusteringBtn = document.getElementById('cancelClusteringBtn');
-
-        // New element for max_songs_per_cluster
-        const maxSongsPerClusterInput = document.getElementById('max_songs_per_cluster');
+        // Clustering parameter containers
+        const dbscanParamsDiv = document.getElementById('dbscan-params');
+        const kmeansParamsDiv = document.getElementById('kmeans-params');
+        const gmmParamsDiv = document.getElementById('gmm-params');
+        const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
 
 
-        let pollingInterval = null;
-        let currentTaskId = null;
-        let currentTaskType = null; // To store 'analysis' or 'clustering'
+        let currentTaskId = null; // Stores the ID of the currently active task
+        let lastPolledTaskDetails = {}; // Stores { taskId: { state: '...', task_type: '...' } } to track status changes for alerts
 
-        // --- Utility Functions ---
-
-        function showProgressContainer(type, show = true) {
-            if (type === 'analysis') {
-                analysisProgressContainer.classList.toggle('hidden', !show);
-            } else if (type === 'clustering') {
-                clusteringProgressContainer.classList.toggle('hidden', !show);
-            }
-        }
-
-        function setStatus(type, statusText, stateClass) {
-            let statusElement;
-            if (type === 'analysis') {
-                statusElement = analysisStatus;
-            } else if (type === 'clustering') {
-                statusElement = clusteringStatus;
-            }
-            if (statusElement) {
-                statusElement.textContent = `Status: ${statusText}`;
-                statusElement.className = 'text-lg mb-4 status-box'; // Reset classes
-                if (stateClass) {
-                    statusElement.classList.add(`status-${stateClass}`); // Add state-specific class
-                }
-            }
-        }
-
-        function updateAnalysisProgress(data) {
-            setStatus('analysis', data.status, data.state);
-            analysisProgressBar.style.width = `${data.progress || 0}%`;
-            currentAlbumName.textContent = data.current_album || 'N/A';
-            currentAlbumProgress.textContent = `${data.current_album_idx || 0}/${data.total_albums || 0}`;
-            if (Array.isArray(data.log_output)) {
-                analysisLogOutput.textContent = data.log_output.join('\n');
+        // Function to show/hide loading spinner
+        function showLoading(show) {
+            if (show) {
+                loadingSpinner.style.display = 'flex';
+                mainContent.style.display = 'none';
             } else {
-                analysisLogOutput.textContent = String(data.log_output || '');
+                loadingSpinner.style.display = 'none';
+                mainContent.style.display = 'block'; // Changed from 'flex' to 'block' for main content
             }
-            analysisLogOutput.scrollTop = analysisLogOutput.scrollHeight;
         }
 
-        function updateClusteringProgress(data) {
-            setStatus('clustering', data.status, data.state);
-            clusteringProgressBar.style.width = `${data.progress || 0}%`;
-            if (Array.isArray(data.log_output)) {
-                clusteringLogOutput.textContent = data.log_output.join('\n');
-            } else {
-                clusteringLogOutput.textContent = String(data.log_output || '');
-            }
-            clusteringLogOutput.scrollTop = clusteringLogOutput.scrollHeight;
-        }
-
-        async function pollStatus(taskId, taskType) {
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
-            }
-            showProgressContainer(taskType, true); // Ensure correct container is visible
-
-            pollingInterval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${API_BASE_URL}/status/${taskId}`);
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    const data = await response.json();
-
-                    if (taskType === 'analysis') {
-                        analysisTaskIdDisplay.textContent = data.task_id;
-                        updateAnalysisProgress(data);
-                    } else if (taskType === 'clustering') {
-                        clusteringTaskIdDisplay.textContent = data.task_id;
-                        updateClusteringProgress(data);
-                    }
-
-                    if (['SUCCESS', 'FAILURE', 'REVOKED'].includes(data.state)) {
-                        clearInterval(pollingInterval);
-                        pollingInterval = null;
-                        
-                        // Re-enable all relevant buttons
-                        startAnalysisBtn.disabled = false;
-                        cancelAnalysisBtn.disabled = true;
-                        generatePlaylistsBtn.disabled = false; 
-                        cancelClusteringBtn.disabled = true;
-                        fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
-
-                        currentTaskId = null;
-                        currentTaskType = null;
-
-                        // If clustering was successful, fetch and display playlists
-                        if (taskType === 'clustering' && data.state === 'SUCCESS') {
-                            fetchPlaylists();
-                        }
-
-                    } else {
-                        // Keep relevant buttons disabled if task is still in progress
-                        startAnalysisBtn.disabled = true;
-                        cancelAnalysisBtn.disabled = (taskType === 'analysis' ? false : true); // Only enable if it's the active task type
-                        generatePlaylistsBtn.disabled = true;
-                        cancelClusteringBtn.disabled = (taskType === 'clustering' ? false : true); // Only enable if it's the active task type
-                        fetchPlaylistsBtn.disabled = true; // Disable fetch button during any active task
-                    }
-                } catch (error) {
-                    console.error(`Error polling ${taskType} status:`, error);
-                    setStatus(taskType, `Error polling: ${error.message || error}`, 'FAILURE'); // Changed 'type' to 'taskType'
-                    clearInterval(pollingInterval);
-                    pollingInterval = null;
-                    
-                    // Re-enable all relevant buttons on polling error
-                    startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
-                    generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
-
-                    currentTaskId = null;
-                    currentTaskType = null;
-                }
-            }, 3000);
-        }
-
-        async function populateConfig() {
+        // Fetches configuration from the backend
+        async function fetchConfig() {
+            showLoading(true);
             try {
-                const response = await fetch(`${API_BASE_URL}/config`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                const response = await fetch('/api/config');
                 const config = await response.json();
-
-                document.getElementById('jellyfin_url').value = config.jellyfin_url || '';
-                document.getElementById('jellyfin_user_id').value = config.jellyfin_user_id || '';
-                document.getElementById('jellyfin_token').value = config.jellyfin_token || '';
-                document.getElementById('num_recent_albums').value = config.num_recent_albums !== undefined ? config.num_recent_albums : 0;
-                document.getElementById('top_n_moods').value = config.top_n_moods !== undefined ? config.top_n_moods : 5;
-
-                document.getElementById('clustering_method').value = config.cluster_algorithm || 'kmeans';
-                
-                // Set min/max values for KMeans
-                document.getElementById('num_clusters_min').value = config.num_clusters_min !== undefined ? config.num_clusters_min : 20;
-                document.getElementById('num_clusters_max').value = config.num_clusters_max !== undefined ? config.num_clusters_max : 60;
-
-                // Set min/max values for DBSCAN
-                document.getElementById('dbscan_eps_min').value = config.dbscan_eps_min !== undefined ? config.dbscan_eps_min : 0.1;
-                document.getElementById('dbscan_eps_max').value = config.dbscan_eps_max !== undefined ? config.dbscan_eps_max : 0.5;
-                document.getElementById('dbscan_min_samples_min').value = config.dbscan_min_samples_min !== undefined ? config.dbscan_min_samples_min : 5;
-                document.getElementById('dbscan_min_samples_max').value = config.dbscan_min_samples_max !== undefined ? config.dbscan_min_samples_max : 20;
-
-                // Set min/max values for GMM
-                document.getElementById('gmm_n_components_min').value = config.gmm_n_components_min !== undefined ? config.gmm_n_components_min : 20;
-                document.getElementById('gmm_n_components_max').value = config.gmm_n_components_max !== undefined ? config.gmm_n_components_max : 60;
-
-                // Set min/max values for PCA
-                document.getElementById('pca_components_min').value = config.pca_components_min !== undefined ? config.pca_components_min : 0;
-                document.getElementById('pca_components_max').value = config.pca_components_max !== undefined ? config.pca_components_max : 10;
-
-                maxSongsPerClusterInput.value = config.max_songs_per_cluster !== undefined ? config.max_songs_per_cluster : 40;
-
-                document.getElementById('clustering_runs').value = config.clustering_runs !== undefined ? config.clustering_runs : 100;
-
-                toggleClusteringOptions();
+                renderConfig(config);
+                toggleClusteringParams(); // Call after rendering config to set initial visibility
             } catch (error) {
-                console.error("Failed to fetch initial configuration:", error);
-                // Using a custom modal/dialog instead of alert for better UX
-                const errorMessage = `Could not load initial configuration. Please check the backend API. Error: ${error.message}`;
-                displayMessageModal(errorMessage, 'Error');
+                console.error('Error fetching config:', error);
+                // Use a custom message box instead of alert
+                showMessageBox('Error', 'Failed to load configuration. Please check the backend server.');
+            } finally {
+                showLoading(false);
             }
         }
 
-        function toggleClusteringOptions() {
-            // Hide all options first
-            kmeansOptions.classList.add('hidden');
-            dbscanOptions.classList.add('hidden');
-            gmmOptions.classList.add('hidden'); // Hide GMM options
+        // Renders configuration fields into their respective sections
+        function renderConfig(config) {
+            // Populate General Parameters
+            document.getElementById('config-jellyfin_url').value = config.jellyfin_url || '';
+            document.getElementById('config-jellyfin_user_id').value = config.jellyfin_user_id || '';
+            document.getElementById('config-jellyfin_token').value = config.jellyfin_token || '';
 
-            // Show options based on selection
-            if (clusteringMethodSelect.value === 'kmeans') {
-                kmeansOptions.classList.remove('hidden');
-            } else if (clusteringMethodSelect.value === 'dbscan') {
-                dbscanOptions.classList.remove('hidden');
-            } else if (clusteringMethodSelect.value === 'gmm') { // Show GMM options
-                gmmOptions.classList.remove('hidden');
+            // Populate Analysis Parameters
+            document.getElementById('config-num_recent_albums').value = config.num_recent_albums || 0;
+            document.getElementById('config-top_n_moods').value = config.top_n_moods || 0;
+
+            // Populate Clustering Parameters (common ones)
+            // Set K-Means as default if no value from config or if it's not 'dbscan' or 'gmm'
+            clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm') ? config.cluster_algorithm : 'kmeans';
+
+            document.getElementById('config-max_distance').value = config.max_distance || 0;
+            document.getElementById('config-max_songs_per_cluster').value = config.max_songs_per_cluster || 0;
+            document.getElementById('config-pca_components_min').value = config.pca_components_min || 0;
+            document.getElementById('config-pca_components_max').value = config.pca_components_max || 0;
+            document.getElementById('config-clustering_runs').value = config.clustering_runs || 0;
+
+            // Populate algorithm-specific parameters (they will be hidden/shown by toggleClusteringParams)
+            document.getElementById('config-dbscan_eps_min').value = config.dbscan_eps_min || 0;
+            document.getElementById('config-dbscan_eps_max').value = config.dbscan_eps_max || 0;
+            document.getElementById('config-dbscan_min_samples_min').value = config.dbscan_min_samples_min || 0;
+            document.getElementById('config-dbscan_min_samples_max').value = config.dbscan_min_samples_max || 0;
+
+            document.getElementById('config-num_clusters_min').value = config.num_clusters_min || 0;
+            document.getElementById('config-num_clusters_max').value = config.num_clusters_max || 0;
+
+            document.getElementById('config-gmm_n_components_min').value = config.gmm_n_components_min || 0;
+            document.getElementById('config-gmm_n_components_max').value = config.gmm_n_components_max || 0;
+        }
+
+        // Toggles visibility of clustering parameters based on selected algorithm
+        function toggleClusteringParams() {
+            const selectedAlgorithm = clusterAlgorithmSelect.value;
+
+            // Hide all algorithm-specific divs
+            dbscanParamsDiv.style.display = 'none';
+            kmeansParamsDiv.style.display = 'none';
+            gmmParamsDiv.style.display = 'none';
+
+            // Show the div for the selected algorithm
+            if (selectedAlgorithm === 'dbscan') {
+                dbscanParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
+            } else if (selectedAlgorithm === 'kmeans') {
+                kmeansParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
+            } else if (selectedAlgorithm === 'gmm') {
+                gmmParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
             }
         }
 
-        async function fetchLastAnalysisStatus() {
+        // Helper function to update cancel button's state and style
+        function updateCancelButtonState(isDisabled) {
+            cancelTaskBtn.disabled = isDisabled;
+            if (isDisabled) {
+                cancelTaskBtn.style.opacity = '0.5';
+                cancelTaskBtn.style.cursor = 'not-allowed';
+            } else {
+                cancelTaskBtn.style.opacity = '1';
+                cancelTaskBtn.style.cursor = 'pointer';
+            }
+        }
+
+        // Fetches active tasks and updates UI accordingly
+        // Returns true if an active task was found/handled or a previously active task's final status was processed.
+        // Returns false if no active task was found and no previously active task was processed.
+        async function checkActiveTasks() {
             try {
-                const response = await fetch(`${API_BASE_URL}/last_task`);
-                const data = await response.json();
-                if (data.task_id && ['PENDING', 'PROGRESS', 'STARTED'].includes(data.status)) {
-                    currentTaskId = data.task_id;
-                    currentTaskType = data.task_type;
+                const response = await fetch('/api/active_tasks');
+                const mainActiveTask = await response.json(); // Expects a single object or {}
 
-                    // Hide both containers initially, then show the relevant one
-                    showProgressContainer('analysis', false);
-                    showProgressContainer('clustering', false);
+                if (mainActiveTask && mainActiveTask.task_id) {
+                    // A task is currently active
+                    currentTaskId = mainActiveTask.task_id;
+                    
+                    const previousDetailsForThisTask = lastPolledTaskDetails[currentTaskId];
+                    // Use mainActiveTask.status as per your latest example for /api/active_tasks
+                    // Fallback to .state if .status is not present, then to 'UNKNOWN'
+                    const currentStatusUpper = mainActiveTask.status ? mainActiveTask.status.toUpperCase() : (mainActiveTask.state ? mainActiveTask.state.toUpperCase() : 'UNKNOWN');
+                    const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
 
-                    if (currentTaskType === 'analysis') {
-                        analysisTaskIdDisplay.textContent = currentTaskId;
-                        setStatus('analysis', data.status, data.status);
-                        pollStatus(currentTaskId, currentTaskType);
-                    } else if (currentTaskType === 'clustering') {
-                        clusteringTaskIdDisplay.textContent = currentTaskId;
-                        setStatus('clustering', data.status, data.status);
-                        pollStatus(currentTaskId, currentTaskType);
-                    }
-                } else if (data.task_id) {
-                    // If a task existed but finished, show its final status without polling
-                    currentTaskId = data.task_id;
-                    currentTaskType = data.task_type;
+                    displayTaskStatus(mainActiveTask); // Update UI with current task info
 
-                    showProgressContainer('analysis', false);
-                    showProgressContainer('clustering', false);
-
-                    if (currentTaskType === 'analysis') {
-                        analysisTaskIdDisplay.textContent = currentTaskId;
-                        setStatus('analysis', data.status, data.status);
-                        analysisProgressBar.style.width = '100%';
-                        analysisLogOutput.textContent = `Previous analysis task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
-                    } else if (currentTaskType === 'clustering') {
-                        clusteringTaskIdDisplay.textContent = currentTaskId;
-                        setStatus('clustering', data.status, data.status);
-                        clusteringProgressBar.style.width = '100%';
-                        clusteringLogOutput.textContent = `Previous clustering task (ID: ${currentTaskId}) finished with status: ${data.status}.`;
-                        if (data.status === 'SUCCESS') { // If clustering was successful, display playlists
-                            fetchPlaylists();
+                    // Check if this task just transitioned to a terminal state
+                    const currentTaskIsTerminal = terminalStates.includes(currentStatusUpper);
+                    const previousTaskStateWasTerminal = previousDetailsForThisTask && previousDetailsForThisTask.state && terminalStates.includes(previousDetailsForThisTask.state.toUpperCase());
+    
+                    if (currentTaskIsTerminal && !previousTaskStateWasTerminal) {
+                            let alertTitle = 'Task Update';
+                            let alertMessage = `Task ${mainActiveTask.task_id} (${mainActiveTask.task_type_from_db || mainActiveTask.task_type || 'Unknown Type'}) has ${currentStatusUpper.toLowerCase()}.`;
+                            if (currentStatusUpper === 'SUCCESS' || currentStatusUpper === 'FINISHED') alertTitle = 'Task Completed';
+                            else if (currentStatusUpper === 'FAILURE' || currentStatusUpper === 'FAILED') alertTitle = 'Task Failed';
+                            else if (currentStatusUpper === 'REVOKED' || currentStatusUpper === 'CANCELED') alertTitle = 'Task Canceled';
+                            
+                            if (alertTitle) {
+                                showMessageBox(alertTitle, alertMessage);
+                            }
                         }
-                    }
-                    startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
-                    generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                    // Store the state using the determined status field for consistency in lastPolledTaskDetails
+                    lastPolledTaskDetails[currentTaskId] = { state: currentStatusUpper !== 'UNKNOWN' ? mainActiveTask.status || mainActiveTask.state : 'UNKNOWN', task_type: mainActiveTask.task_type_from_db || mainActiveTask.task_type, task_id: mainActiveTask.task_id };
+                    disableTaskButtons(true);
+                    fetchPlaylistsBtn.disabled = true;
+                    fetchPlaylistsBtn.style.opacity = '0.5';
+                    fetchPlaylistsBtn.style.cursor = 'not-allowed';
+                    updateCancelButtonState(false);
+
+                    return true; // Indicate an active task was found and handled
                 } else {
-                    // No previous task, hide both progress containers
-                    showProgressContainer('analysis', false);
-                    showProgressContainer('clustering', false);
-                    startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
-                    generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                    const previouslyTrackedTaskId = currentTaskId; // Check if we *were* tracking a task
+                    currentTaskId = null;
+
+                    if (previouslyTrackedTaskId) {
+                        // A task was being tracked, and now it's gone from active_tasks (or never appeared if it was too fast).
+                        // This means it finished or was cancelled.
+                        // Fetch its final status to be sure and for the alert.
+                        try {
+                            const finalStatusResponse = await fetch(`/api/status/${previouslyTrackedTaskId}`);
+                            if (finalStatusResponse.ok) {
+                                const finalStatusData = await finalStatusResponse.json();
+                                const upperFinalStatus = finalStatusData.state ? finalStatusData.state.toUpperCase() : 'UNKNOWN';
+                                const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
+                                const previousDetailsForFinishedTask = lastPolledTaskDetails[previouslyTrackedTaskId];
+
+                                const finalStatusIsTerminal = terminalStates.includes(upperFinalStatus);
+                                const previousFinishedStateWasTerminal = previousDetailsForFinishedTask && previousDetailsForFinishedTask.state && terminalStates.includes(previousDetailsForFinishedTask.state.toUpperCase());
+
+                                if (finalStatusIsTerminal && !previousFinishedStateWasTerminal) {
+                                        let alertTitle = 'Task Update';
+                                        let alertMessage = `Task ${finalStatusData.task_id} (${finalStatusData.task_type_from_db || finalStatusData.task_type || 'Unknown Type'}) has ${upperFinalStatus.toLowerCase()}.`;
+                                        if (upperFinalStatus === 'SUCCESS' || upperFinalStatus === 'FINISHED') alertTitle = 'Task Completed';
+                                        else if (upperFinalStatus === 'FAILURE' || upperFinalStatus === 'FAILED') alertTitle = 'Task Failed';
+                                        else if (upperFinalStatus === 'REVOKED' || upperFinalStatus === 'CANCELED') alertTitle = 'Task Canceled';
+                                        
+                                        if (alertTitle) {
+                                            showMessageBox(alertTitle, alertMessage);
+                                        }
+                                    }
+                                displayTaskStatus(finalStatusData); // Display its final status
+                            } else {
+                                console.warn(`Could not fetch final status for ${previouslyTrackedTaskId}. Displaying IDLE.`);
+                                displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Previously active task finished or cleared.' });
+                            }
+                        } catch (e) {
+                            console.error(`Error fetching final status for ${previouslyTrackedTaskId}:`, e);
+                            displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Error fetching status of previously active task.' });
+                        }
+                        delete lastPolledTaskDetails[previouslyTrackedTaskId]; // Clean up
+                        // Even if fetching final status failed, we handled the end of a task.
+                        // Common UI updates for no active task (or task just finished)
+                        disableTaskButtons(false);
+                        fetchPlaylistsBtn.disabled = false;
+                        fetchPlaylistsBtn.style.opacity = '1';
+                        fetchPlaylistsBtn.style.cursor = 'pointer';
+                        updateCancelButtonState(true);
+                        return true; // A previously tracked task was processed
+                    } else {
+                        // No task was being tracked, and no task is active.
+                        // Common UI updates for no active task
+                        disableTaskButtons(false);
+                        fetchPlaylistsBtn.disabled = false;
+                        fetchPlaylistsBtn.style.opacity = '1';
+                        fetchPlaylistsBtn.style.cursor = 'pointer';
+                        updateCancelButtonState(true);
+                    }
                 }
+                return false; // Indicate no active task was found by /api/active_tasks and no previously tracked task was processed
             } catch (error) {
-                console.error("Error fetching last task status:", error);
-                showProgressContainer('analysis', false);
-                showProgressContainer('clustering', false);
-                startAnalysisBtn.disabled = false;
-                cancelAnalysisBtn.disabled = true;
-                generatePlaylistsBtn.disabled = false;
-                cancelClusteringBtn.disabled = true;
-                fetchPlaylistsBtn.disabled = false; // Ensure fetch button is re-enabled
+                console.error('Error checking active tasks:', error);
+                displayTaskStatus({
+                    task_id: 'Error',
+                    task_type: 'Error',
+                    state: 'ERROR', // Consistent with displayTaskStatus
+                    progress: 0,
+                    details: `Failed to check active main task: ${error.message}. Polling will continue.`
+                });
+                disableTaskButtons(false); // Re-enable buttons on error, allow retries
+                fetchPlaylistsBtn.disabled = false;
+                fetchPlaylistsBtn.style.opacity = '1';
+                fetchPlaylistsBtn.style.cursor = 'pointer';
+                updateCancelButtonState(true);
+                currentTaskId = null; // Reset on error
+            }
+            return false; // Default to no active task found/handled
+        }
+
+        // Disables/enables task initiation buttons
+        function disableTaskButtons(isDisabled) {
+            startAnalysisBtn.disabled = isDisabled;
+            startClusteringBtn.disabled = isDisabled;
+            // fetchPlaylistsBtn is handled separately in checkActiveTasks or when a task starts/ends
+            // Apply disabled styles manually since pseudo-classes are not available
+            if (isDisabled) {
+                startAnalysisBtn.style.opacity = '0.5';
+                startAnalysisBtn.style.cursor = 'not-allowed';
+                startClusteringBtn.style.opacity = '0.5';
+                startClusteringBtn.style.cursor = 'not-allowed';
+            } else {
+                startAnalysisBtn.style.opacity = '1';
+                startAnalysisBtn.style.cursor = 'pointer';
+                startClusteringBtn.style.opacity = '1';
+                startClusteringBtn.style.cursor = 'pointer';
             }
         }
 
-        // Custom modal for messages (replaces alert/confirm)
-        function displayMessageModal(message, type = 'Info', onConfirm = null) {
-            const modalId = 'customMessageModal';
-            let modal = document.getElementById(modalId);
-            if (!modal) {
-                modal = document.createElement('div');
-                modal.id = modalId;
-                modal.className = 'fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50';
-                modal.innerHTML = `
-                    <div class="bg-gray-800 p-6 rounded-lg shadow-xl max-w-sm w-full text-white">
-                        <h3 class="text-xl font-bold mb-4" id="modalTitle"></h3>
-                        <p class="mb-6" id="modalMessage"></p>
-                        <div class="flex justify-end space-x-4">
-                            <button id="modalCancelBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">Cancel</button>
-                            <button id="modalConfirmBtn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">OK</button>
-                        </div>
-                    </div>
-                `;
-                document.body.appendChild(modal);
+        // Displays the status of a given task
+        function displayTaskStatus(task) {
+            statusTaskId.textContent = task.task_id;
+            statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A'; // Prefer task_type_from_db
+            // Prioritize 'status' if present (from /api/active_tasks example), then 'state', then 'UNKNOWN'
+            const taskStateUpper = task.status ? task.status.toUpperCase() : (task.state ? task.state.toUpperCase() : 'UNKNOWN');
+            statusStatus.textContent = taskStateUpper;
+            statusProgress.textContent = task.progress;
+            progressBar.style.width = `${task.progress}%`;
+
+            // Update status text color based on status
+            statusStatus.style.color = ''; // Reset color
+            if (taskStateUpper === 'PENDING' || taskStateUpper === 'STARTED' || taskStateUpper === 'QUEUED' || taskStateUpper === 'PROGRESS') {
+                statusStatus.style.color = '#fbbf24'; // Yellow-400 for ongoing tasks
+            } else if (taskStateUpper === 'SUCCESS' || taskStateUpper === 'FINISHED') {
+                statusStatus.style.color = '#4ade80'; // Green-400
+                // If a clustering task finishes successfully, automatically fetch playlists
+                if ((task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
+                    console.log('Clustering task successful, automatically fetching playlists...');
+                    fetchPlaylists(); // Call the function directly
+                }
+            } else if (taskStateUpper === 'FAILURE' || taskStateUpper === 'FAILED' || taskStateUpper === 'REVOKED' || taskStateUpper === 'CANCELED') {
+                statusStatus.style.color = '#f87171'; // Red-400
+                playlistsSection.style.display = 'none'; // Hide playlists if task failed/revoked
+            } else { // Includes IDLE or other unknown states
+                statusStatus.style.color = '#60a5fa'; // Blue-400 for UNKNOWN/IDLE
             }
 
-            document.getElementById('modalTitle').textContent = type;
-            document.getElementById('modalMessage').textContent = message;
+            try {
+                let detailsText = task.details;
+                if (typeof task.details === 'object' && task.details !== null) {
+                    detailsText = JSON.stringify(task.details, null, 2);
+                }
+                statusDetails.textContent = detailsText;
+            } catch (e) {
+                statusDetails.textContent = `Error parsing details: ${e.message}\nRaw: ${task.details}`;
+            }
+            statusDetails.scrollTop = statusDetails.scrollHeight; // Scroll to bottom
+        }
 
-            const confirmBtn = document.getElementById('modalConfirmBtn');
-            const cancelBtn = document.getElementById('modalCancelBtn');
+        // Starts a new task (analysis or clustering)
+        async function startTask(taskType) {
+            disableTaskButtons(true); // Immediately disable to prevent double clicks
+            updateCancelButtonState(true); // Disable cancel until we get a task ID
+            fetchPlaylistsBtn.disabled = true; // Disable fetch playlists during task execution
+            fetchPlaylistsBtn.style.opacity = '0.5';
+            fetchPlaylistsBtn.style.cursor = 'not-allowed';
 
-            confirmBtn.onclick = () => {
-                modal.classList.add('hidden');
-                if (onConfirm) onConfirm(true);
+            // Collect General Parameters
+            const jellyfinUrl = document.getElementById('config-jellyfin_url').value;
+            const jellyfinUserId = document.getElementById('config-jellyfin_user_id').value;
+            const jellyfinToken = document.getElementById('config-jellyfin_token').value;
+
+            const payload = {
+                jellyfin_url: jellyfinUrl,
+                jellyfin_user_id: jellyfinUserId,
+                jellyfin_token: jellyfinToken
             };
 
-            if (onConfirm) { // If onConfirm is provided, it's a confirmation dialog
-                cancelBtn.classList.remove('hidden');
-                cancelBtn.onclick = () => {
-                    modal.classList.add('hidden');
-                    onConfirm(false);
-                };
-            } else { // Otherwise, it's just an info/error message
-                cancelBtn.classList.add('hidden');
+            if (taskType === 'analysis') {
+                // Collect Analysis Parameters
+                payload.num_recent_albums = parseInt(document.getElementById('config-num_recent_albums').value);
+                payload.top_n_moods = parseInt(document.getElementById('config-top_n_moods').value);
+            } else if (taskType === 'clustering') {
+                // Hide and clear playlists section when starting a new clustering task
+                playlistsSection.style.display = 'none';
+                playlistsContainer.innerHTML = '';
+                // Collect Clustering Parameters
+                payload.clustering_method = clusterAlgorithmSelect.value;
+                payload.max_distance = parseFloat(document.getElementById('config-max_distance').value);
+                payload.max_songs_per_cluster = parseInt(document.getElementById('config-max_songs_per_cluster').value);
+                payload.pca_components_min = parseInt(document.getElementById('config-pca_components_min').value);
+                payload.pca_components_max = parseInt(document.getElementById('config-pca_components_max').value);
+                payload.clustering_runs = parseInt(document.getElementById('config-clustering_runs').value);
+
+                // Add algorithm-specific parameters to payload based on current selection
+                if (payload.clustering_method === 'dbscan') {
+                    payload.dbscan_eps_min = parseFloat(document.getElementById('config-dbscan_eps_min').value);
+                    payload.dbscan_eps_max = parseFloat(document.getElementById('config-dbscan_eps_max').value);
+                    payload.dbscan_min_samples_min = parseInt(document.getElementById('config-dbscan_min_samples_min').value);
+                    payload.dbscan_min_samples_max = parseInt(document.getElementById('config-dbscan_min_samples_max').value);
+                } else if (payload.clustering_method === 'kmeans') {
+                    payload.num_clusters_min = parseInt(document.getElementById('config-num_clusters_min').value);
+                    payload.num_clusters_max = parseInt(document.getElementById('config-num_clusters_max').value);
+                } else if (payload.clustering_method === 'gmm') {
+                    payload.gmm_n_components_min = parseInt(document.getElementById('config-gmm_n_components_min').value);
+                    payload.gmm_n_components_max = parseInt(document.getElementById('config-gmm_n_components_max').value);
+                }
             }
 
-            modal.classList.remove('hidden');
-        }
-
-
-        // --- Event Listeners ---
-
-        analysisForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            startAnalysisBtn.disabled = true;
-            generatePlaylistsBtn.disabled = true; // Disable clustering button too
-            fetchPlaylistsBtn.disabled = true; // Disable fetch button
-            cancelAnalysisBtn.disabled = false;
-            cancelClusteringBtn.disabled = true; // Ensure clustering cancel is disabled
-
-            analysisLogOutput.textContent = '';
-            analysisProgressBar.style.width = '0%';
-            currentAlbumName.textContent = 'N/A';
-            currentAlbumProgress.textContent = '0/0';
-            setStatus('analysis', 'Initiating...', 'PENDING');
-            showProgressContainer('analysis', true);
-            showProgressContainer('clustering', false); // Hide clustering progress
-
-            const formData = new FormData(analysisForm);
-            const data = Object.fromEntries(formData.entries());
-
-            data.num_recent_albums = parseInt(data.num_recent_albums, 10);
-            data.top_n_moods = parseInt(data.top_n_moods, 10);
-
             try {
-                const response = await fetch(`${API_BASE_URL}/analysis/start`, {
+                const response = await fetch(`/api/${taskType}/start`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
                 });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-                }
                 const result = await response.json();
-                currentTaskId = result.task_id;
-                currentTaskType = result.task_type;
-                analysisTaskIdDisplay.textContent = currentTaskId;
-                pollStatus(currentTaskId, currentTaskType);
-                displayMessageModal("Analysis started successfully!", "Success");
-            } catch (error) {
-                console.error("Error starting analysis:", error);
-                displayMessageModal(`Failed to start analysis: ${error.message || error}`, "Error");
-                setStatus('analysis', 'Failed to start', 'FAILURE');
-                startAnalysisBtn.disabled = false;
-                generatePlaylistsBtn.disabled = false;
-                fetchPlaylistsBtn.disabled = false; // Re-enable fetch button
-                cancelAnalysisBtn.disabled = true;
-                showProgressContainer('analysis', false);
-            }
-        });
-
-        cancelAnalysisBtn.addEventListener('click', () => {
-            if (!currentTaskId || currentTaskType !== 'analysis') {
-                displayMessageModal("No active analysis to cancel.", "Info");
-                return;
-            }
-
-            displayMessageModal(`Are you sure you want to cancel analysis task ${currentTaskId}?`, 'Confirm', async (confirmed) => {
-                if (!confirmed) {
-                    return;
-                }
-
-                try {
-                    const response = await fetch(`${API_BASE_URL}/cancel/${currentTaskId}`, {
-                        method: 'POST'
+                if (response.ok && result.task_id) { // Ensure task_id is present
+                    currentTaskId = result.task_id;
+                    displayTaskStatus({
+                        task_id: result.task_id,
+                        task_type: result.task_type,
+                        state: result.state || result.status || 'PENDING', // Use result.state or result.status
+                        progress: 0,
+                        details: { message: 'Task enqueued successfully.' }
                     });
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-                    }
-                    const result = await response.json();
-                    displayMessageModal(result.message, "Success");
-                    if (pollingInterval) {
-                        clearInterval(pollingInterval);
-                        pollingInterval = null;
-                    }
-                    setStatus('analysis', 'Cancelled', 'REVOKED');
-                    startAnalysisBtn.disabled = false;
-                    cancelAnalysisBtn.disabled = true;
-                    generatePlaylistsBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    fetchPlaylistsBtn.disabled = false; // Re-enable fetch button
-                    currentTaskId = null;
-                    currentTaskType = null;
-                } catch (error) {
-                    console.error("Error cancelling analysis:", error);
-                    displayMessageModal(`Failed to cancel analysis: ${error.message || error}`, "Error");
-                }
-            });
-        });
-
-
-        playlistForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            generatePlaylistsBtn.disabled = true;
-            fetchPlaylistsBtn.disabled = true;
-            startAnalysisBtn.disabled = true; // Disable analysis button too
-            cancelClusteringBtn.disabled = false;
-            cancelAnalysisBtn.disabled = true; // Ensure analysis cancel is disabled
-
-            clusteringLogOutput.textContent = ''; // Clear previous logs
-            clusteringProgressBar.style.width = '0%';
-            setStatus('clustering', 'Initiating...', 'PENDING');
-            showProgressContainer('clustering', true);
-            showProgressContainer('analysis', false); // Hide analysis progress
-
-
-            const formData = new FormData(playlistForm);
-            const data = Object.fromEntries(formData.entries());
-
-            // Parse min/max values for parameters
-            data.num_clusters_min = parseInt(data.num_clusters_min, 10);
-            data.num_clusters_max = parseInt(data.num_clusters_max, 10);
-            data.dbscan_eps_min = parseFloat(data.dbscan_eps_min);
-            data.dbscan_eps_max = parseFloat(data.dbscan_eps_max);
-            data.dbscan_min_samples_min = parseInt(data.dbscan_min_samples_min, 10);
-            data.dbscan_min_samples_max = parseInt(data.dbscan_min_samples_max, 10);
-            data.gmm_n_components_min = parseInt(data.gmm_n_components_min, 10); // Parse new GMM field
-            data.gmm_n_components_max = parseInt(data.gmm_n_components_max, 10); // Parse new GMM field
-            data.pca_components_min = parseInt(data.pca_components_min, 10);
-            data.pca_components_max = parseInt(data.pca_components_max, 10);
-            data.max_songs_per_cluster = parseInt(data.max_songs_per_cluster, 10);
-            data.clustering_runs = parseInt(data.clustering_runs, 10);
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/clustering/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                currentTaskId = result.task_id;
-                currentTaskType = result.task_type;
-                clusteringTaskIdDisplay.textContent = currentTaskId;
-                pollStatus(currentTaskId, currentTaskType);
-                displayMessageModal("Clustering started successfully!", "Success");
-            } catch (error) {
-                console.error("Error generating playlists:", error);
-                displayMessageModal(`Failed to generate playlists: ${error.message || error}`, "Error");
-                setStatus('clustering', 'Failed to start', 'FAILURE');
-                generatePlaylistsBtn.disabled = false;
-                fetchPlaylistsBtn.disabled = false;
-                startAnalysisBtn.disabled = false;
-                cancelClusteringBtn.disabled = true;
-                showProgressContainer('clustering', false);
-            }
-        });
-
-        cancelClusteringBtn.addEventListener('click', () => {
-            if (!currentTaskId || currentTaskType !== 'clustering') {
-                displayMessageModal("No active clustering to cancel.", "Info");
-                return;
-            }
-
-            displayMessageModal(`Are you sure you want to cancel clustering task ${currentTaskId}?`, 'Confirm', async (confirmed) => {
-                if (!confirmed) {
-                    return;
-                }
-
-                try {
-                    const response = await fetch(`${API_BASE_URL}/cancel/${currentTaskId}`, {
-                        method: 'POST'
-                    });
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-                    }
-                    const result = await response.json();
-                    displayMessageModal(result.message, "Success");
-                    if (pollingInterval) {
-                        clearInterval(pollingInterval);
-                        pollingInterval = null;
-                    }
-                    setStatus('clustering', 'Cancelled', 'REVOKED');
-                    generatePlaylistsBtn.disabled = false;
-                    fetchPlaylistsBtn.disabled = false;
-                    startAnalysisBtn.disabled = false;
-                    cancelClusteringBtn.disabled = true;
-                    currentTaskId = null;
-                    currentTaskType = null;
-                } catch (error) {
-                    console.error("Error cancelling clustering:", error);
-                    displayMessageModal(`Failed to cancel clustering: ${error.message || error}`, "Error");
-                }
-            });
-        });
-
-
-        clusteringMethodSelect.addEventListener('change', toggleClusteringOptions);
-
-        async function fetchPlaylists() {
-            playlistsDisplay.classList.add('hidden');
-            playlistList.innerHTML = ''; // Clear existing list
-            try {
-                const response = await fetch(`${API_BASE_URL}/playlists`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const playlists = await response.json();
-                if (Object.keys(playlists).length === 0) {
-                    playlistList.innerHTML = '<li class="text-center text-gray-400">No playlists found. Run analysis and generate playlists first.</li>';
+                    lastPolledTaskDetails[result.task_id] = { state: result.state || result.status || 'PENDING', task_type: result.task_type, task_id: result.task_id }; // Prime for alert logic
+                    updateCancelButtonState(false); // Enable cancel once task is enqueued
                 } else {
-                    for (const playlistName in playlists) {
-                        const li = document.createElement('li');
-                        const toggleBtn = document.createElement('button');
-                        toggleBtn.className = 'playlist-toggle';
-                        toggleBtn.textContent = 'Show Tracks';
-                        
-                        const h3 = document.createElement('h3');
-                        h3.innerHTML = `${playlistName} (${playlists[playlistName].length} tracks) `;
-                        h3.appendChild(toggleBtn); // Append button to h3
-
-                        const tracksDiv = document.createElement('div');
-                        tracksDiv.className = 'playlist-tracks hidden'; // Hidden by default
-                        playlists[playlistName].forEach(track => {
-                            const p = document.createElement('p');
-                            p.textContent = `${track.title} by ${track.author}`;
-                            tracksDiv.appendChild(p);
-                        });
-                        
-                        li.appendChild(h3); // Append h3 (which contains the button) to li
-                        li.appendChild(tracksDiv); // Append tracksDiv to li
-
-                        // Corrected onclick function to reference tracksDiv via its parent (li)
-                        toggleBtn.onclick = function() {
-                            // 'this' refers to the toggleBtn
-                            // 'this.closest("li")' finds the nearest parent <li> element
-                            // 'tracksDiv' is the second child of the <li> (after the h3)
-                            const parentLi = this.closest("li");
-                            if (parentLi) {
-                                const tracksDiv = parentLi.querySelector('.playlist-tracks'); // Find tracksDiv within this specific li
-                                if (tracksDiv) {
-                                    if (tracksDiv.classList.contains('hidden')) {
-                                        tracksDiv.classList.remove('hidden');
-                                        this.textContent = 'Hide Tracks';
-                                    } else {
-                                        tracksDiv.classList.add('hidden');
-                                        this.textContent = 'Show Tracks';
-                                    }
-                                } else {
-                                    console.error("Could not find tracksDiv for playlist toggle button in parent li:", parentLi);
-                                }
-                            } else {
-                                console.error("Could not find parent li for playlist toggle button:", this);
-                            }
-                        };
-
-
-                        playlistList.appendChild(li);
-                    }
+                    throw new Error(result.message || 'Failed to start task. No task ID received.');
                 }
-                playlistsDisplay.classList.remove('hidden');
             } catch (error) {
-                console.error("Error fetching playlists:", error);
-                playlistList.innerHTML = `<li class="text-center text-red-400">Failed to load playlists: ${error.message}</li>`;
-                playlistsDisplay.classList.remove('hidden');
+                console.error(`Error starting ${taskType} task:`, error);
+                showMessageBox('Error', `Failed to start ${taskType} task: ${error.message}`);
+                disableTaskButtons(false); // Re-enable buttons on failure
+                updateCancelButtonState(true);
+                fetchPlaylistsBtn.disabled = false; // Re-enable fetch playlists on failure
+                fetchPlaylistsBtn.style.opacity = '1';
+                fetchPlaylistsBtn.style.cursor = 'pointer';
+                currentTaskId = null;
             }
         }
 
-        fetchPlaylistsBtn.addEventListener('click', fetchPlaylists);
+        // Cancels the currently active task
+        async function cancelTask() {
+            if (!currentTaskId) {
+                showMessageBox('Info', 'No active task to cancel.');
+                return;
+            }
 
-        // --- Initial Load ---
+            updateCancelButtonState(true); // Disable button during cancellation attempt
+            try {
+                const response = await fetch(`/api/cancel/${currentTaskId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showMessageBox('Success', result.message);
+                    await checkActiveTasks(); // Force a status update immediately after cancellation
+                } else {
+                    throw new Error(result.message || 'Failed to cancel task.');
+                }
+            } catch (error) {
+                console.error('Error cancelling task:', error);
+                showMessageBox('Error', `Failed to cancel task: ${error.message}`);
+            } finally {
+                // checkActiveTasks will update currentTaskId if the task is truly gone
+                updateCancelButtonState(!currentTaskId); // Disable if no current task ID, enable if there might still be one
+            }
+        }
+
+        // Fetches and renders playlists
+        async function fetchPlaylists() {
+            playlistsContainer.innerHTML = '<p style="color: #9ca3af;">Fetching playlists...</p>';
+            playlistsSection.style.display = 'block';
+            try {
+                const response = await fetch('/api/playlists');
+                const playlistsData = await response.json();
+                renderPlaylists(playlistsData);
+            } catch (error) {
+                console.error('Error fetching playlists:', error);
+                playlistsContainer.innerHTML = `<p style="color: #f87171;">Error fetching playlists: ${error.message}</p>`;
+            }
+        }
+
+        // Renders the fetched playlists into the UI
+        function renderPlaylists(playlistsData) {
+            playlistsContainer.innerHTML = ''; // Clear previous content
+            if (Object.keys(playlistsData).length === 0) {
+                playlistsContainer.innerHTML = '<p style="color: #9ca3af;">No playlists found.</p>';
+                return;
+            }
+
+            for (const playlistName in playlistsData) {
+                const songs = playlistsData[playlistName];
+                const playlistDiv = document.createElement('div');
+                playlistDiv.style.marginBottom = '1rem';
+                playlistDiv.style.padding = '1rem';
+                playlistDiv.style.backgroundColor = '#1f2937'; // Gray-800
+                playlistDiv.style.borderRadius = '0.375rem';
+
+                const headerP = document.createElement('p');
+                headerP.style.color = '#93c5fd'; // Blue-300
+                headerP.innerHTML = `
+                    <strong style="color: #e5e7eb;">${playlistName}</strong> - (${songs.length} songs)
+                    <button class="show-songs-btn" style="margin-left: 0.5rem; background-color: #3b82f6; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;">SHOW</button>
+                `;
+
+                const songListUl = document.createElement('ul');
+                songListUl.style.display = 'none';
+                songListUl.style.marginTop = '0.5rem';
+                songListUl.style.listStyleType = 'disc';
+                songListUl.style.paddingLeft = '1.5rem';
+
+                songs.forEach(song => {
+                    const songLi = document.createElement('li');
+                    songLi.textContent = `${song.title} by ${song.author}`;
+                    songListUl.appendChild(songLi);
+                });
+
+                headerP.querySelector('.show-songs-btn').addEventListener('click', () => {
+                    songListUl.style.display = songListUl.style.display === 'none' ? 'block' : 'none';
+                });
+
+                playlistDiv.appendChild(headerP);
+                playlistDiv.appendChild(songListUl);
+                playlistsContainer.appendChild(playlistDiv);
+            }
+        }
+
+        // Custom message box function (replaces alert)
+        function showMessageBox(title, message) {
+            // Remove any existing message box first
+            const existingBox = document.getElementById('custom-message-box');
+            if (existingBox) {
+                existingBox.remove();
+            }
+
+            const messageBox = document.createElement('div');
+            messageBox.id = 'custom-message-box'; // Add an ID for potential removal
+            messageBox.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background-color: #333;
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                z-index: 1000;
+                border: 1px solid #3b82f6; /* Blue-500 */
+                max-width: 400px;
+                text-align: center;
+            `;
+            messageBox.innerHTML = `
+                <h3 style="font-weight: bold; margin-bottom: 10px; color: #93c5fd;">${title}</h3>
+                <p>${message}</p>
+                <button style="margin-top: 15px; padding: 8px 15px; background-color: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;" onclick="this.parentNode.remove()">OK</button>
+            `;
+            document.body.appendChild(messageBox);
+        }
+        
+        // Fetches and displays the status of the overall last significant task from the backend
+        async function fetchAndDisplayOverallLastTask() {
+            try {
+                // Ensure this endpoint exists on your backend and returns the last significant task
+                // This endpoint should provide the status of the most recent task that reached a terminal state.
+                const response = await fetch('/api/last_task'); // Assuming this is your endpoint for the last task
+                if (response.ok) {
+                    const lastTask = await response.json();
+                    if (lastTask && lastTask.task_id && (lastTask.state || lastTask.status)) {
+                        // Display whatever the last task is, regardless of its state,
+                        // as this is the "last known state" if no task is active.
+                        console.log('Displaying overall last task from /api/last_task:', lastTask);
+                        displayTaskStatus(lastTask);
+                        // If it's a terminal state, it will be colored appropriately by displayTaskStatus.
+                        // If it's somehow an old PENDING/STARTED task that got stuck, it will show that.
+                    } else {
+                        console.log('No significant last task found from /api/last_task or state/status missing.');
+                        displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. No last task data.' });
+                    }
+                } else {
+                    console.warn('Failed to fetch /api/last_task. Displaying IDLE.');
+                    displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. Could not fetch last task status.' });
+                }
+            } catch (error) {
+                console.error('Error fetching overall last task status:', error);
+                displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. Error fetching last task status.' });
+            }
+        }
+
+        // Event Listeners
         document.addEventListener('DOMContentLoaded', async () => {
-            await populateConfig();
-            await fetchLastAnalysisStatus(); // Check for ongoing or last task
+            await fetchConfig(); // Loads config and shows main content
+
+            // Initial check for active tasks.
+            // checkActiveTasks returns true if it found and handled an active task from /api/active_tasks
+            // or handled a task that just finished (was previouslyTrackedTaskId).
+            const isActiveTaskRunningOrJustFinished = await checkActiveTasks();
+
+            if (!isActiveTaskRunningOrJustFinished) {
+                // If no task is currently running AND no task just finished in this session,
+                // then fetch and display the status of the overall last task from the backend.
+                await fetchAndDisplayOverallLastTask();
+                updateCancelButtonState(true); // No active task, so cancel should be disabled
+            }
+
+            setInterval(checkActiveTasks, 3000); // Poll for active tasks every 3 seconds
+            clusterAlgorithmSelect.addEventListener('change', toggleClusteringParams);
         });
+
+        startAnalysisBtn.addEventListener('click', () => startTask('analysis'));
+        startClusteringBtn.addEventListener('click', () => startTask('clustering'));
+        fetchPlaylistsBtn.addEventListener('click', fetchPlaylists);
+        cancelTaskBtn.addEventListener('click', cancelTask);
     </script>
 </body>
 </html>
