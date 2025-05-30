@@ -933,6 +933,20 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                     if job_id_processed in active_jobs_map:
                         del active_jobs_map[job_id_processed]
 
+                # If any jobs just completed, check their results for a new best_score
+                if processed_in_this_cycle_ids:
+                    for job_id_just_completed in processed_in_this_cycle_ids:
+                        # Fetch result of the just-completed job to update best_score intermediately
+                        temp_run_result_data = get_job_result_safely(job_id_just_completed, current_task_id, "single_clustering_run")
+                        if temp_run_result_data:
+                            current_child_diversity_score = temp_run_result_data.get("diversity_score", -1.0)
+                            if current_child_diversity_score > best_diversity_score:
+                                best_diversity_score = current_child_diversity_score
+                                _main_task_accumulated_details["best_score"] = best_diversity_score # Update shared details
+                                # The log_and_update_main_clustering call below will include this new best_score
+                                print(f"[MainClusteringTask-{current_task_id}] Intermediate new best score found: {best_diversity_score:.2f} from run {job_id_just_completed}")
+
+
                 can_launch_more_runs = next_run_idx_to_launch < num_clustering_runs
                 if can_launch_more_runs:
                     num_slots_to_fill = MAX_CONCURRENT_CLUSTERING_RUNS - len(active_jobs_map)
@@ -991,12 +1005,13 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 current_progress_val = 5 + current_launch_progress + current_execution_progress
                 
                 log_and_update_main_clustering(
-                    f"Launched: {next_run_idx_to_launch}/{num_clustering_runs}. Active: {len(active_jobs_map)}. Completed: {runs_completed_count}/{num_clustering_runs}.",
+                    f"Launched: {next_run_idx_to_launch}/{num_clustering_runs}. Active: {len(active_jobs_map)}. Completed: {runs_completed_count}/{num_clustering_runs}. Best Score: {best_diversity_score:.2f}",
                     current_progress_val,
                     details_to_add_or_update={
                         "runs_completed": runs_completed_count,
                         "runs_launched": next_run_idx_to_launch,
-                        "active_runs_count": len(active_jobs_map)
+                        "active_runs_count": len(active_jobs_map),
+                        "best_score": best_diversity_score # Ensure current best_score is part of the update
                         # "clustering_run_job_ids" is already updated in _main_task_accumulated_details
                     }
                 )
@@ -1007,8 +1022,8 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 time.sleep(3)
 
             log_and_update_main_clustering("All clustering runs completed. Aggregating results...", 90)
-            
             for job_instance_result_phase in all_launched_child_jobs_instances:
+                current_progress = 90 # Keep progress at 90 during this aggregation loop
                 if current_job: # Cooperative cancellation check during result aggregation
                     with app.app_context():
                         main_task_db_info = get_task_info_from_db(current_task_id)
@@ -1024,7 +1039,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                         if current_diversity_score > best_diversity_score:
                             best_diversity_score = current_diversity_score
                             best_clustering_results = run_result_data
-                            log_and_update_main_clustering(f"New best clustering iteration found (Run ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Diversity: {current_diversity_score:.2f})", current_progress, details_to_add_or_update={"best_score": best_diversity_score})
+                            log_and_update_main_clustering(f"Aggregating: New best run found (ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Score: {current_diversity_score:.2f})", current_progress, details_to_add_or_update={"best_score": best_diversity_score})
                     else: 
                         failed_job_id = job_instance_result_phase.id if job_instance_result_phase else "Unknown_ID"
                         job_status_for_failed_log = "UNKNOWN (Result not found)"
@@ -1060,16 +1075,19 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE)
                 return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
 
-            log_and_update_main_clustering(f"Best clustering found with diversity score: {best_diversity_score:.2f}.", 90, details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")})
+            current_progress = 92 # Progress after successful aggregation
+            log_and_update_main_clustering(f"Best clustering found with diversity score: {best_diversity_score:.2f}. Preparing to create playlists.", current_progress, details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")})
             
             final_named_playlists = best_clustering_results["named_playlists"]
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
             final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
 
-            log_and_update_main_clustering("Updating playlist database...", 95, print_console=False)
+            current_progress = 95
+            log_and_update_main_clustering("Updating playlist database...", current_progress, print_console=False)
             update_playlist_table(final_named_playlists) 
             
-            log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", 98, print_console=False)
+            current_progress = 98
+            log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", current_progress, print_console=False)
             create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS, final_max_songs_per_cluster)
             
             final_db_summary = {
@@ -1077,7 +1095,8 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 "best_params": best_clustering_results.get("parameters"),
                 "num_playlists_created": len(final_named_playlists)
             }
-            log_and_update_main_clustering(f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}.", 100, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
+            current_progress = 100 # Final success
+            log_and_update_main_clustering(f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}.", current_progress, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
             
             return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had diversity score of {best_diversity_score:.2f}."}
 
@@ -1102,5 +1121,44 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             if 'all_tracks_data_json' in locals(): # Check if defined in local scope
                 try:
                     del all_tracks_data_json
-                except NameError: # Should not happen if 'in locals()' check passes but good for safety
+                except NameError: 
                     pass
+
+# --- Helper to get job result safely from RQ or DB ---
+def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_type_for_logging="child task"):
+    """
+    Safely retrieves the result of a job, checking RQ and then the database.
+    Assumes child tasks store their full result in details['full_result'] if successful.
+    """
+    run_result_data = None
+    job_instance = None
+    try:
+        job_instance = Job.fetch(job_id_for_result, connection=redis_conn)
+        job_instance.refresh() # Get the latest status
+        if job_instance.is_finished and isinstance(job_instance.result, dict):
+            run_result_data = job_instance.result
+            # print(f"[ParentTask-{parent_task_id_for_logging}] Fetched result for {task_type_for_logging} {job_id_for_result} from RQ job.result.")
+    except NoSuchJobError:
+        print(f"[ParentTask-{parent_task_id_for_logging}] Warning: {task_type_for_logging} {job_id_for_result} not found in RQ. Checking DB.")
+    except Exception as e_rq_fetch:
+        print(f"[ParentTask-{parent_task_id_for_logging}] Error fetching {task_type_for_logging} {job_id_for_result} from RQ: {e_rq_fetch}. Will check DB.")
+
+    if run_result_data is None: # If not found in RQ or RQ fetch failed
+        with app.app_context(): # Ensure DB access
+            db_task_info = get_task_info_from_db(job_id_for_result)
+        if db_task_info:
+            db_status = db_task_info.get('status')
+            if db_status in [TASK_STATUS_SUCCESS, JobStatus.FINISHED]: # Check for success status in DB
+                if db_task_info.get('details'):
+                    try:
+                        details_dict = json.loads(db_task_info.get('details'))
+                        if 'full_result' in details_dict: # Child task should save its result here
+                            run_result_data = details_dict['full_result']
+                            # print(f"[ParentTask-{parent_task_id_for_logging}] Fetched result for {task_type_for_logging} {job_id_for_result} from DB details.full_result.")
+                        else:
+                            print(f"[ParentTask-{parent_task_id_for_logging}] Warning: {task_type_for_logging} {job_id_for_result} (DB status: {db_status}) has no 'full_result' in details.")
+                    except (json.JSONDecodeError, TypeError) as e_json:
+                        print(f"[ParentTask-{parent_task_id_for_logging}] Warning: Could not parse 'full_result' from details for {task_type_for_logging} {job_id_for_result} from DB: {e_json}")
+            elif db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
+                print(f"[ParentTask-{parent_task_id_for_logging}] Info: {task_type_for_logging} {job_id_for_result} (DB status: {db_status}) did not succeed. No result to process.")
+    return run_result_data
