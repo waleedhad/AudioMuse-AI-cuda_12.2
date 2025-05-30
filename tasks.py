@@ -795,319 +795,268 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
 
     with app.app_context():
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main clustering task started."
-        initial_details = {"message": "Initializing clustering...", "log": [initial_log_message]}
-        save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=initial_details)
+        # _main_task_accumulated_details will hold all details that need to be persisted.
+        # Initialize it with values that are known at the start or will be updated.
+        _main_task_accumulated_details = {
+            "message": "Initializing clustering...",
+            "log": [initial_log_message],
+            "total_runs": num_clustering_runs, # Known at start
+            "runs_completed": 0,             # Will be incremented
+            "runs_launched": 0,              # Will be incremented
+            "active_runs_count": 0,          # Will be updated
+            "best_score": -1.0,              # Default best score
+            "clustering_run_job_ids": []     # List of child job IDs
+        }
+        save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
+        
         current_progress = 0
-        current_task_logs = list(initial_details["log"]) # Ensure it's a mutable copy
-        _main_task_accumulated_details = {} # To store and update details like total_runs, runs_completed, best_score
+        # current_task_logs is now part of _main_task_accumulated_details['log']
 
         def log_and_update_main_clustering(message, progress, details_to_add_or_update=None, task_state=TASK_STATUS_PROGRESS, print_console=True):
             nonlocal current_progress
-            nonlocal current_task_logs
-            nonlocal _main_task_accumulated_details
+            nonlocal _main_task_accumulated_details # Directly modify the shared details dictionary
+            
             current_progress = progress
             if print_console:
                 print(f"[MainClusteringTask-{current_task_id}] {message}")
 
+            # Update the accumulated details with any new information
             if details_to_add_or_update:
                 _main_task_accumulated_details.update(details_to_add_or_update)
             
-            current_details_for_db = dict(_main_task_accumulated_details) # Use accumulated details
-            current_details_for_db["status_message"] = message # Ensure current message is set
+            # Always ensure the current status message is set in the accumulated details
+            _main_task_accumulated_details["status_message"] = message
 
+            # Manage the log list within accumulated_details
             log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
+            current_log_list = _main_task_accumulated_details.get("log", [])
+            
             if task_state == TASK_STATUS_SUCCESS:
-                current_details_for_db["log"] = [f"Task completed successfully. Final status: {message}"]
-                current_details_for_db.pop('log_storage_info', None)
+                # For success, replace log with a final message
+                _main_task_accumulated_details["log"] = [f"Task completed successfully. Final status: {message}"]
+                _main_task_accumulated_details.pop('log_storage_info', None) # Clean up truncation info
             elif task_state == TASK_STATUS_FAILURE or task_state == TASK_STATUS_REVOKED:
-                current_task_logs.append(log_entry)
-                current_details_for_db["log"] = current_task_logs
-                if "error" not in current_details_for_db and task_state == TASK_STATUS_FAILURE : current_details_for_db["error"] = message
+                current_log_list.append(log_entry) # Add the final error/revoked message
+                _main_task_accumulated_details["log"] = current_log_list # Keep all logs
+                if "error" not in _main_task_accumulated_details and task_state == TASK_STATUS_FAILURE:
+                    _main_task_accumulated_details["error"] = message # Ensure error message is captured
             else: # PROGRESS or STARTED
-                current_task_logs.append(log_entry)
-                current_details_for_db["log"] = current_task_logs
+                current_log_list.append(log_entry)
+                _main_task_accumulated_details["log"] = current_log_list
 
-            meta_details = {"status_message": message} # Leaner for RQ
+            # Prepare details for RQ job.meta (can be a leaner version if needed)
+            meta_details = {"status_message": message}
             # Populate meta_details from _main_task_accumulated_details for specific keys
-            for key in ["runs_completed", "total_runs", "best_score", "best_params", "clustering_run_job_ids"]:
+            for key in ["runs_completed", "total_runs", "best_score", "best_params", "clustering_run_job_ids", "runs_launched", "active_runs_count"]:
                 if key in _main_task_accumulated_details:
                     meta_details[key] = _main_task_accumulated_details[key]
 
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
-                current_job.meta['details'] = meta_details
+                current_job.meta['details'] = meta_details # Persist to RQ meta
                 current_job.save_meta()
-            save_task_status(current_task_id, "main_clustering", task_state, progress=progress, details=current_details_for_db)
+            
+            # Save the full _main_task_accumulated_details to the database
+            save_task_status(current_task_id, "main_clustering", task_state, progress=progress, details=_main_task_accumulated_details)
 
         try:
             log_and_update_main_clustering("📊 Starting main clustering process...", 0)
             rows = get_all_tracks()
             
-            # Determine minimum required tracks based on all relevant min parameters
             min_tracks_for_kmeans = num_clusters_min if clustering_method == "kmeans" else 2
             min_tracks_for_gmm = gmm_n_components_min if clustering_method == "gmm" else 2
-            # DBSCAN doesn't have a strict min track count related to its params in the same way, but needs some points.
-            # PCA also needs at least 2 samples for n_components=1 if enabled.
-            min_req_overall = max(2, min_tracks_for_kmeans, min_tracks_for_gmm, (pca_components_min +1) if pca_components_min > 0 else 2)
+            min_req_overall = max(2, min_tracks_for_kmeans, min_tracks_for_gmm, (pca_components_min + 1) if pca_components_min > 0 else 2)
 
             if len(rows) < min_req_overall:
-                min_req = max(2, num_clusters_min, gmm_n_components_min, pca_components_min if pca_components_min > 0 else 2)
-                err_msg = f"Not enough analyzed tracks ({len(rows)}) for clustering. Minimum required: {min_req}."
+                err_msg = f"Not enough analyzed tracks ({len(rows)}) for clustering. Minimum required for selected parameters: {min_req_overall}."
                 log_and_update_main_clustering(err_msg, 100, details_to_add_or_update={"error": "Insufficient data"}, task_state=TASK_STATUS_FAILURE)
                 return {"status": "FAILURE", "message": err_msg}
             
-            initial_clustering_stats = {"total_runs": num_clustering_runs, "runs_completed": 0, "best_score": -1.0}
-            log_and_update_main_clustering(f"Fetched {len(rows)} tracks for clustering. Preparing {num_clustering_runs} runs.", 5, details_to_add_or_update=initial_clustering_stats)
+            if num_clustering_runs == 0:
+                log_and_update_main_clustering("Number of clustering runs is 0. Nothing to do.", 100, task_state=TASK_STATUS_SUCCESS)
+                return {"status": "SUCCESS", "message": "Number of clustering runs was 0."}
 
-            serializable_rows = [dict(row) for row in rows] # Convert DictRow to dict for JSON
+            # Initial status update after fetching tracks and basic checks
+            log_and_update_main_clustering(f"Fetched {len(rows)} tracks for clustering. Preparing {num_clustering_runs} runs.", 5)
+
+            serializable_rows = [dict(row) for row in rows]
             all_tracks_data_json = json.dumps(serializable_rows)
 
-            best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0) # Initialize from accumulated
+            best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
             best_clustering_results = None
-            clustering_run_jobs = []
-            clustering_run_job_ids = []
             
-            from app import rq_queue as main_rq_queue # Import queue for enqueuing
+            # This list will store all Job objects for later result fetching
+            all_launched_child_jobs_instances = [] 
+            
+            from app import rq_queue as main_rq_queue
 
-            ENQUEUE_BATCH_SIZE = 50 # Configurable batch size for enqueuing
-            num_enqueued_successfully = 0
-            effective_num_runs = 0
+            MAX_CONCURRENT_CLUSTERING_RUNS = 10 
+            active_jobs_map = {} # {job_id: job_instance}
+            
+            runs_completed_count = 0
+            next_run_idx_to_launch = 0
 
-            for i in range(0, num_clustering_runs, ENQUEUE_BATCH_SIZE):
-                # === Cooperative Cancellation Check for Main Clustering Task (during enqueueing) ===
+            while runs_completed_count < num_clustering_runs:
                 if current_job:
                     with app.app_context():
                         main_task_db_info = get_task_info_from_db(current_task_id)
                         if main_task_db_info and main_task_db_info.get('status') == TASK_STATUS_REVOKED:
-                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} REVOKED during job enqueueing. Stopping.", current_progress, task_state=TASK_STATUS_REVOKED)
-                            return {"status": "REVOKED", "message": "Main clustering task revoked during enqueueing."}
-                # === End Cooperative Cancellation Check ===
+                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} REVOKED. Stopping.", current_progress, task_state=TASK_STATUS_REVOKED)
+                            # Child cancellation will be handled by children checking parent status or by a dedicated cancel call
+                            return {"status": "REVOKED", "message": "Main clustering task revoked."}
 
-                jobs_to_enqueue_in_batch_data = []
-                current_batch_job_ids_temp = []
-
-                for run_idx_offset in range(ENQUEUE_BATCH_SIZE):
-                    run_idx = i + run_idx_offset
-                    if run_idx >= num_clustering_runs:
-                        break
-
-                    method_params = {}
-                    if clustering_method == "kmeans":
-                        current_num_clusters = random.randint(num_clusters_min, min(num_clusters_max, len(rows)))
-                        method_params = {"method": "kmeans", "params": {"n_clusters": max(1, current_num_clusters)}}
-                    elif clustering_method == "dbscan":
-                        current_dbscan_eps = round(random.uniform(dbscan_eps_min, dbscan_eps_max), 2)
-                        current_dbscan_min_samples = random.randint(dbscan_min_samples_min, dbscan_min_samples_max)
-                        method_params = {"method": "dbscan", "params": {"eps": current_dbscan_eps, "min_samples": current_dbscan_min_samples}}
-                    elif clustering_method == "gmm":
-                        current_gmm_n_components = random.randint(gmm_n_components_min, min(gmm_n_components_max, len(rows)))
-                        method_params = {"method": "gmm", "params": {"n_components": max(1, current_gmm_n_components)}}
-                    else:
-                        log_and_update_main_clustering(f"Unsupported clustering algorithm: {clustering_method}", 100, details_to_add_or_update={"error": "Unsupported algorithm"}, task_state=TASK_STATUS_FAILURE)
-                        return {"status": "FAILURE", "message": f"Unsupported clustering algorithm: {clustering_method}"}
-
-                    sampled_pca_components = random.randint(pca_components_min, pca_components_max)
-                    max_allowable_pca = min(sampled_pca_components, len(MOOD_LABELS) + 1, len(rows) -1 if len(rows) > 1 else 1)
-                    pca_config = {"enabled": max_allowable_pca > 0, "components": max_allowable_pca}
-                    
-                    sub_task_id = str(uuid.uuid4())
-                    save_task_status(sub_task_id, "single_clustering_run", "PENDING", parent_task_id=current_task_id, sub_type_identifier=str(run_idx), details={"params": method_params, "pca_config": pca_config})
-                    
-                    job_data = {
-                        'func': run_single_clustering_iteration_task,
-                        'args': (run_idx, all_tracks_data_json, method_params, pca_config, max_songs_per_cluster, current_task_id),
-                        'job_id': sub_task_id,
-                        'description': f"Clustering Iteration {run_idx}",
-                        'job_timeout': 3600,  # 1 hour timeout for a single run
-                        'meta': {'parent_task_id': current_task_id}
-                    }
-                    jobs_to_enqueue_in_batch_data.append(job_data)
-                    current_batch_job_ids_temp.append(sub_task_id)
-
-                if jobs_to_enqueue_in_batch_data:
+                processed_in_this_cycle_ids = []
+                for job_id, job_instance_active in list(active_jobs_map.items()):
+                    is_child_truly_completed_this_cycle = False
                     try:
-                        # RQ's Queue.enqueue_many takes a list of Job.prepare_data payloads
-                        prepared_jobs = [main_rq_queue.prepare_data(
-                                            func=jd['func'], args=jd['args'], job_id=jd['job_id'],
-                                            description=jd['description'], meta=jd['meta'], timeout=jd['job_timeout']
-                                         ) for jd in jobs_to_enqueue_in_batch_data]
-                        enqueued_job_objects = main_rq_queue.enqueue_many(prepared_jobs)
-                        
-                        clustering_run_jobs.extend(enqueued_job_objects) # These are actual Job instances
-                        clustering_run_job_ids.extend(current_batch_job_ids_temp)
-                        num_enqueued_successfully += len(enqueued_job_objects)
-                        
-                        enqueue_progress = 5 + int(5 * (num_enqueued_successfully / float(num_clustering_runs))) # Progress from 5% to 10%
-                        log_and_update_main_clustering(
-                            f"Enqueued {num_enqueued_successfully}/{num_clustering_runs} clustering iteration tasks...",
-                            enqueue_progress,
-                            details_to_add_or_update={"clustering_run_job_ids": clustering_run_job_ids}
-                        )
-                    except Exception as e_enqueue:
-                        log_and_update_main_clustering(
-                            f"Error enqueueing batch starting at index {i}: {e_enqueue}. Stopping further enqueueing.",
-                            current_progress,
-                            details_to_add_or_update={"error": f"Enqueueing failed: {e_enqueue}"},
-                            task_state=TASK_STATUS_FAILURE
-                        )
-                        raise # Re-raise to stop the task
-                
-                if num_enqueued_successfully < i + len(jobs_to_enqueue_in_batch_data) and num_enqueued_successfully < num_clustering_runs:
-                    log_and_update_main_clustering(
-                        f"Warning: Not all tasks in batch starting {i} were enqueued. Total enqueued: {num_enqueued_successfully}/{num_clustering_runs}",
-                        current_progress
-                    )
-                    break # Stop enqueueing more batches
-
-            effective_num_runs = len(clustering_run_jobs)
-            if effective_num_runs == 0:
-                 log_and_update_main_clustering("No clustering jobs were successfully enqueued. Aborting.", 100, details_to_add_or_update={"error": "Failed to enqueue any jobs"}, task_state=TASK_STATUS_FAILURE)
-                 return {"status": "FAILURE", "message": "Failed to enqueue any clustering jobs."}
-
-            log_and_update_main_clustering(f"Successfully launched {effective_num_runs} clustering iteration tasks in total.", 10, details_to_add_or_update={"clustering_run_job_ids": clustering_run_job_ids, "total_runs": effective_num_runs})
-
-            while True:
-                # === Cooperative Cancellation Check for Main Clustering Task ===
-                if current_job:
-                    with app.app_context():
-                        main_task_db_info = get_task_info_from_db(current_task_id)
-                        if main_task_db_info and main_task_db_info.get('status') == TASK_STATUS_REVOKED:
-                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} has been REVOKED. Stopping and updating children.", current_progress, task_state=TASK_STATUS_REVOKED)
-                            for child_job_instance in clustering_run_jobs:
-                                try:
-                                    with app.app_context(): # New context for each save
-                                        child_db_info = get_task_info_from_db(child_job_instance.id)
-                                        if child_db_info and child_db_info.get('status') not in [TASK_STATUS_REVOKED, TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, JobStatus.CANCELED]:
-                                            print(f"[MainClusteringTask-{current_task_id}] Marking child job {child_job_instance.id} as REVOKED in DB.")
-                                            save_task_status(child_job_instance.id, "single_clustering_run", TASK_STATUS_REVOKED, parent_task_id=current_task_id, progress=100, details={"message": "Parent task was revoked.", "log": ["Parent task revoked."]})
-                                except Exception as e_cancel_child:
-                                    print(f"[MainClusteringTask-{current_task_id}] Error trying to mark child job {child_job_instance.id} as REVOKED: {e_cancel_child}")
-                            return {"status": "REVOKED", "message": "Main clustering task was revoked."}
-                # === End Cooperative Cancellation Check ===
-
-
-                completed_count = 0
-                all_done = True
-                for job_instance in clustering_run_jobs:
-                    try:
-                        is_child_completed = False
-                        try:
-                            job_instance.refresh()
-                            child_status_rq = job_instance.get_status()
-                            if job_instance.is_finished or job_instance.is_failed or child_status_rq == JobStatus.CANCELED:
-                                is_child_completed = True
-                        except NoSuchJobError:
-                            print(f"[MainClusteringTask-{current_task_id}] Warning: Child job {job_instance.id} not found in Redis during monitoring. Checking DB.")
-                            with app.app_context():
-                                db_task_info = get_task_info_from_db(job_instance.id)
-                            if db_task_info:
-                                db_status = db_task_info.get('status')
-                                if db_status in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FINISHED, JobStatus.FAILED]:
-                                    is_child_completed = True
-                                    if db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
-                                        print(f"[MainClusteringTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) has status: {db_status}.")
-                                else:
-                                    print(f"[MainClusteringTask-{current_task_id}] Warning: Child job {job_instance.id} (from DB) has non-terminal DB status '{db_status}' but missing from RQ. Treating as completed.")
-                                    is_child_completed = True
-                            else:
-                                print(f"[MainClusteringTask-{current_task_id}] CRITICAL: Child job {job_instance.id} not found in Redis or DB during monitoring. Treating as completed.")
-                                is_child_completed = True
-                        
-                        if is_child_completed:
-                            completed_count += 1
-                            # If child_status_rq indicated failure/canceled, it's implicitly handled by not getting its result later.
-                        else:
-                            all_done = False
-                    except Exception as e_monitor_child_cluster:
-                        job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
-                        print(f"[MainClusteringTask-{current_task_id}] ERROR monitoring child clustering job {job_id_for_error}: {e_monitor_child_cluster}. Treating as completed to avoid hanging.")
-                        traceback.print_exc()
-                        completed_count += 1 # Ensure progress
-                
-                progress_while_waiting = 10 + int(80 * (completed_count / float(effective_num_runs))) if effective_num_runs > 0 else 10
-                log_and_update_main_clustering(
-                    f"Processing clustering runs: {completed_count}/{effective_num_runs} completed.",
-                    progress_while_waiting,
-                    details_to_add_or_update={"runs_completed": completed_count, "total_runs": effective_num_runs}
-                )
-                if all_done: break
-                time.sleep(2)
-
-            for job_instance in clustering_run_jobs:
-                run_result_data = None 
-                try: # Wrap processing of each job's result
-                    try:
-                        job_instance.refresh()
-                        if job_instance.is_finished and isinstance(job_instance.result, dict):
-                            run_result_data = job_instance.result
+                        job_instance_active.refresh()
+                        child_status_rq = job_instance_active.get_status()
+                        if job_instance_active.is_finished or job_instance_active.is_failed or child_status_rq == JobStatus.CANCELED:
+                            is_child_truly_completed_this_cycle = True
                     except NoSuchJobError:
-                        print(f"[MainClusteringTask-{current_task_id}] Warning: Final check for job {job_instance.id} - not in Redis. Checking DB.")
-                        with app.app_context():
-                            db_task_info = get_task_info_from_db(job_instance.id)
-                        if db_task_info:
-                            db_status = db_task_info.get('status')
-                            if db_status in [TASK_STATUS_SUCCESS, JobStatus.FINISHED]:
-                                if db_task_info.get('details'):
-                                    try:
-                                        details_dict = json.loads(db_task_info.get('details'))
-                                        if 'full_result' in details_dict: # As saved by child task
-                                            run_result_data = details_dict['full_result']
-                                    except (json.JSONDecodeError, TypeError) as e_json:
-                                        print(f"[MainClusteringTask-{current_task_id}] Warning: Could not parse 'full_result' from details for job {job_instance.id} from DB: {e_json}")
-                            elif db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
-                                print(f"[MainClusteringTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) had final status: {db_status}. No result to process.")
-                            else:
-                                print(f"[MainClusteringTask-{current_task_id}] Warning: Final check for job {job_instance.id} (from DB) - non-terminal status '{db_status}' but not in RQ. No result to process.")
+                        with app.app_context(): db_task_info_child = get_task_info_from_db(job_id)
+                        if db_task_info_child and db_task_info_child.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED]:
+                            is_child_truly_completed_this_cycle = True
                         else:
-                            print(f"[MainClusteringTask-{current_task_id}] CRITICAL: Final check for job {job_instance.id} - not found in Redis or DB. No result to process.")
-                            
+                            print(f"[MainClusteringTask-{current_task_id}] Warning: Active job {job_id} missing from RQ and not terminal in DB. Will re-check.")
+                    except Exception as e_monitor_child_active:
+                        print(f"[MainClusteringTask-{current_task_id}] ERROR monitoring active child job {job_id}: {e_monitor_child_active}. Treating as completed.")
+                        traceback.print_exc()
+                        is_child_truly_completed_this_cycle = True
+                    
+                    if is_child_truly_completed_this_cycle:
+                        processed_in_this_cycle_ids.append(job_id)
+                        runs_completed_count +=1 
+                
+                for job_id_processed in processed_in_this_cycle_ids:
+                    if job_id_processed in active_jobs_map:
+                        del active_jobs_map[job_id_processed]
+
+                can_launch_more_runs = next_run_idx_to_launch < num_clustering_runs
+                if can_launch_more_runs:
+                    num_slots_to_fill = MAX_CONCURRENT_CLUSTERING_RUNS - len(active_jobs_map)
+                    for _ in range(num_slots_to_fill):
+                        if next_run_idx_to_launch >= num_clustering_runs:
+                            break 
+                        
+                        run_idx = next_run_idx_to_launch
+                        
+                        method_params = {}
+                        if clustering_method == "kmeans":
+                            current_num_clusters = random.randint(num_clusters_min, min(num_clusters_max, len(rows)))
+                            method_params = {"method": "kmeans", "params": {"n_clusters": max(1, current_num_clusters)}}
+                        elif clustering_method == "dbscan":
+                            current_dbscan_eps = round(random.uniform(dbscan_eps_min, dbscan_eps_max), 2)
+                            current_dbscan_min_samples = random.randint(dbscan_min_samples_min, dbscan_min_samples_max)
+                            method_params = {"method": "dbscan", "params": {"eps": current_dbscan_eps, "min_samples": current_dbscan_min_samples}}
+                        elif clustering_method == "gmm":
+                            current_gmm_n_components = random.randint(gmm_n_components_min, min(gmm_n_components_max, len(rows)))
+                            method_params = {"method": "gmm", "params": {"n_components": max(1, current_gmm_n_components)}}
+                        else: # Should be validated by API
+                            log_and_update_main_clustering(f"Unsupported clustering algorithm: {clustering_method}", 100, details_to_add_or_update={"error": "Unsupported algorithm"}, task_state=TASK_STATUS_FAILURE)
+                            return {"status": "FAILURE", "message": f"Unsupported clustering algorithm: {clustering_method}"}
+
+                        sampled_pca_components = random.randint(pca_components_min, pca_components_max)
+                        max_allowable_pca = min(sampled_pca_components, len(MOOD_LABELS) + 1, len(rows) -1 if len(rows) > 1 else 1)
+                        pca_config = {"enabled": max_allowable_pca > 0, "components": max_allowable_pca}
+                        
+                        new_sub_task_id = str(uuid.uuid4())
+                        save_task_status(new_sub_task_id, "single_clustering_run", "PENDING", parent_task_id=current_task_id, sub_type_identifier=str(run_idx), details={"params": method_params, "pca_config": pca_config})
+                        
+                        new_job = main_rq_queue.enqueue(
+                            run_single_clustering_iteration_task,
+                            args=(run_idx, all_tracks_data_json, method_params, pca_config, max_songs_per_cluster, current_task_id),
+                            job_id=new_sub_task_id,
+                            description=f"Clustering Iteration {run_idx}",
+                            job_timeout=3600,
+                            meta={'parent_task_id': current_task_id}
+                        )
+                        active_jobs_map[new_job.id] = new_job
+                        all_launched_child_jobs_instances.append(new_job)
+                        _main_task_accumulated_details.setdefault("clustering_run_job_ids", []).append(new_job.id)
+                        next_run_idx_to_launch += 1
+
+                launch_phase_max_progress = 5 
+                execution_phase_max_progress = 80
+                
+                current_launch_progress = 0
+                if num_clustering_runs > 0:
+                    current_launch_progress = int(launch_phase_max_progress * (min(next_run_idx_to_launch, num_clustering_runs) / float(num_clustering_runs)))
+                
+                current_execution_progress = 0
+                if num_clustering_runs > 0:
+                    current_execution_progress = int(execution_phase_max_progress * (runs_completed_count / float(num_clustering_runs)))
+                    
+                current_progress_val = 5 + current_launch_progress + current_execution_progress
+                
+                log_and_update_main_clustering(
+                    f"Launched: {next_run_idx_to_launch}/{num_clustering_runs}. Active: {len(active_jobs_map)}. Completed: {runs_completed_count}/{num_clustering_runs}.",
+                    current_progress_val,
+                    details_to_add_or_update={
+                        "runs_completed": runs_completed_count,
+                        "runs_launched": next_run_idx_to_launch,
+                        "active_runs_count": len(active_jobs_map)
+                        # "clustering_run_job_ids" is already updated in _main_task_accumulated_details
+                    }
+                )
+
+                if runs_completed_count >= num_clustering_runs and not active_jobs_map:
+                    break 
+                
+                time.sleep(3)
+
+            log_and_update_main_clustering("All clustering runs completed. Aggregating results...", 90)
+            
+            for job_instance_result_phase in all_launched_child_jobs_instances:
+                if current_job: # Cooperative cancellation check during result aggregation
+                    with app.app_context():
+                        main_task_db_info = get_task_info_from_db(current_task_id)
+                        if main_task_db_info and main_task_db_info.get('status') == TASK_STATUS_REVOKED:
+                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} REVOKED during result aggregation.", current_progress, task_state=TASK_STATUS_REVOKED)
+                            return {"status": "REVOKED", "message": "Main clustering task revoked during final result aggregation."}
+
+                run_result_data = get_job_result_safely(job_instance_result_phase.id, current_task_id, "single_clustering_run")
+                
+                try:
                     if run_result_data:
                         current_diversity_score = run_result_data.get("diversity_score", -1.0)
                         if current_diversity_score > best_diversity_score:
                             best_diversity_score = current_diversity_score
                             best_clustering_results = run_result_data
                             log_and_update_main_clustering(f"New best clustering iteration found (Run ID: {run_result_data.get('parameters', {}).get('run_id', 'N/A')}, Diversity: {current_diversity_score:.2f})", current_progress, details_to_add_or_update={"best_score": best_diversity_score})
-                    else: # Job failed, was canceled, or result couldn't be retrieved
-                        failed_job_id = job_instance.id if job_instance else "Unknown_ID"
-                        job_status_for_failed_log = "UNKNOWN (Not in RQ, or result missing)"
-                        error_info_str = "No specific error info retrieved from RQ."
-                        try: # For more accurate logging of failure
-                            job_instance.refresh() 
-                            if job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED:
-                                job_status_for_failed_log = job_instance.get_status()
-                                if job_instance.is_failed and job_instance.exc_info:
-                                    # Get the last line of the traceback as a hint
-                                    error_info_str = str(job_instance.exc_info).strip().split('\n')[-1]
+                    else: 
+                        failed_job_id = job_instance_result_phase.id if job_instance_result_phase else "Unknown_ID"
+                        job_status_for_failed_log = "UNKNOWN (Result not found)"
+                        error_info_str = "No specific error info retrieved."
+                        try: 
+                            job_instance_result_phase.refresh() 
+                            job_status_for_failed_log = job_instance_result_phase.get_status()
+                            if job_instance_result_phase.is_failed and job_instance_result_phase.exc_info:
+                                error_info_str = str(job_instance_result_phase.exc_info).strip().split('\n')[-1]
                         except NoSuchJobError:
                             with app.app_context():
-                                db_info_for_log = get_task_info_from_db(job_instance.id)
+                                db_info_for_log = get_task_info_from_db(failed_job_id) # type: ignore
                                 job_status_for_failed_log = f"DB:{db_info_for_log.get('status')}" if db_info_for_log else "MISSING_FROM_RQ_AND_DB"
                                 if db_info_for_log and db_info_for_log.get('details'):
                                     try:
                                         child_details = json.loads(db_info_for_log['details'])
-                                        if 'error' in child_details:
-                                            error_info_str = f"DB error: {child_details['error']}"
+                                        if 'error' in child_details: error_info_str = f"DB error: {child_details['error']}"
                                         elif 'log' in child_details and child_details['log']:
-                                            # Try to get the last relevant log entry if it indicates an error
                                             for log_line in reversed(child_details['log']):
                                                 if "error" in log_line.lower() or "fail" in log_line.lower():
-                                                    error_info_str = f"DB log hint: {log_line}"
-                                                    break
-                                    except Exception:
-                                        pass # Keep default error_info_str
-                        
+                                                    error_info_str = f"DB log hint: {log_line}"; break
+                                    except Exception: pass
                         log_and_update_main_clustering(
                             f"Clustering run task ({failed_job_id}) did not yield a usable result (status: {job_status_for_failed_log}). Error hint: {error_info_str}",
                             current_progress
                         )
                 except Exception as e_final_result_cluster:
-                    job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
+                    job_id_for_error = job_instance_result_phase.id if job_instance_result_phase else "Unknown_ID"
                     print(f"[MainClusteringTask-{current_task_id}] ERROR processing final result for child clustering job {job_id_for_error}: {e_final_result_cluster}. This run will not be considered.")
                     traceback.print_exc()
-                    # This job simply won't contribute to best_clustering_results
 
-            if not best_clustering_results or best_diversity_score < 0: # Check if any valid result was found
+            if not best_clustering_results or best_diversity_score < 0:
                 log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE)
                 return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
 
@@ -1121,31 +1070,37 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             update_playlist_table(final_named_playlists) 
             
             log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", 98, print_console=False)
-            # Use global JELLYFIN_URL, etc. for this call as it's a direct system interaction
             create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN}, final_named_playlists, final_playlist_centroids, MOOD_LABELS, final_max_songs_per_cluster)
+            
             final_db_summary = {
                 "best_score": best_diversity_score, 
                 "best_params": best_clustering_results.get("parameters"),
                 "num_playlists_created": len(final_named_playlists)
             }
             log_and_update_main_clustering(f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}.", 100, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
+            
             return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had diversity score of {best_diversity_score:.2f}."}
 
         except Exception as e:
             error_tb = traceback.format_exc()
             print(f"FATAL ERROR: Clustering failed: {e}\n{error_tb}")
-            with app.app_context(): # Ensure app_context for DB operations in exception handling
+            with app.app_context():
                 log_and_update_main_clustering(f"❌ Main clustering failed: {e}", current_progress, details_to_add_or_update={"error_message": str(e), "traceback": error_tb}, task_state=TASK_STATUS_FAILURE)
-                # Attempt to mark children as REVOKED if the parent fails
-                if 'clustering_run_jobs' in locals() and clustering_run_jobs:
-                    print(f"[MainClusteringTask-{current_task_id}] Parent task failed. Attempting to mark {len(clustering_run_jobs)} children as REVOKED.")
-                    for child_job_instance in clustering_run_jobs:
-                        try: # Guard against issues with individual child job objects
+                if 'all_launched_child_jobs_instances' in locals():
+                    print(f"[MainClusteringTask-{current_task_id}] Parent task failed. Attempting to mark {len(all_launched_child_jobs_instances)} children as REVOKED.")
+                    for child_job_instance in all_launched_child_jobs_instances:
+                        try:
                             if not child_job_instance: continue 
-                            with app.app_context(): # Ensure context for DB ops
+                            with app.app_context():
                                 child_db_info = get_task_info_from_db(child_job_instance.id)
                                 if child_db_info and child_db_info.get('status') not in [TASK_STATUS_REVOKED, TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, JobStatus.CANCELED]:
                                     save_task_status(child_job_instance.id, "single_clustering_run", TASK_STATUS_REVOKED, parent_task_id=current_task_id, progress=100, details={"message": "Parent task failed.", "log": ["Parent task failed."]})
                         except Exception as e_cancel_child_on_fail:
                             print(f"[MainClusteringTask-{current_task_id}] Error marking child job {child_job_instance.id} as REVOKED during parent failure: {e_cancel_child_on_fail}")
             raise
+        finally:
+            if 'all_tracks_data_json' in locals(): # Check if defined in local scope
+                try:
+                    del all_tracks_data_json
+                except NameError: # Should not happen if 'in locals()' check passes but good for safety
+                    pass
