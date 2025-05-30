@@ -722,7 +722,7 @@ def run_single_clustering_iteration_task(run_id, all_tracks_data_json, clusterin
 
             max_dist = raw_distances.max()
             normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-            track_info_list = [{"row": rows[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(rows))]
+            track_info_list = [{"row": all_tracks_data[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(all_tracks_data))]
 
             filtered_clusters = defaultdict(list)
             for cid in set(labels):
