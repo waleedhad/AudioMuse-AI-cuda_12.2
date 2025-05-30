@@ -482,7 +482,8 @@
                 statusStatus.style.color = '#4ade80'; // Green-400
                 // If a clustering task finishes successfully, automatically fetch playlists
                 if ((task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
-                    fetchPlaylistsBtn.click(); // Trigger the button click
+                    console.log('Clustering task successful, automatically fetching playlists...');
+                    fetchPlaylists(); // Call the function directly
                 }
             } else if (taskStateUpper === 'FAILURE' || taskStateUpper === 'FAILED' || taskStateUpper === 'REVOKED' || taskStateUpper === 'CANCELED') {
                 statusStatus.style.color = '#f87171'; // Red-400
