@@ -803,9 +803,6 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             if print_console:
                 print(f"[MainClusteringTask-{current_task_id}] {message}")
 
-            current_details_for_db = dict(details_extra) if details_extra else {}
-            current_details_for_db["status_message"] = message
-
             if details_to_add_or_update:
                 _main_task_accumulated_details.update(details_to_add_or_update)
             
