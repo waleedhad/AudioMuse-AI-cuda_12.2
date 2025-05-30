@@ -433,12 +433,17 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     # Attempt to cancel children based on DB parent_task_id
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
+    
+    # Define terminal statuses for the query
+    terminal_statuses_tuple = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, 
+                               JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED)
+
     # Fetch children that are not already in a terminal state
     cur.execute("""
         SELECT task_id, task_type FROM task_status 
         WHERE parent_task_id = %s 
-        AND status NOT IN (%s, %s, %s, 'FINISHED', 'FAILED', 'CANCELED')
-    """, (job_id,))
+        AND status NOT IN %s
+    """, (job_id, terminal_statuses_tuple))
     children_tasks = cur.fetchall()
     cur.close()
 
