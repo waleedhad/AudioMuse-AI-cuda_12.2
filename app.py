@@ -37,6 +37,15 @@ rq_queue = Queue(connection=redis_conn)  # Default queue
 # DATABASE_URL is now imported from config.py
 MAX_LOG_ENTRIES_STORED = 10 # Max number of recent log entries to store in the database per task
 
+# --- Status Constants ---
+TASK_STATUS_PENDING = "PENDING"
+TASK_STATUS_STARTED = "STARTED"
+TASK_STATUS_PROGRESS = "PROGRESS" # For more granular updates within a task
+TASK_STATUS_SUCCESS = "SUCCESS"
+TASK_STATUS_FAILURE = "FAILURE"
+TASK_STATUS_REVOKED = "REVOKED"
+# RQ JobStatus (JobStatus.FINISHED, JobStatus.FAILED etc.) are used for RQ's direct state
+
 def get_db():
     if 'db' not in g:
         try:
@@ -95,23 +104,80 @@ def init_db():
 with app.app_context():
     init_db()
 
+# --- DB Cleanup Utility ---
+def clean_successful_task_details_on_new_start():
+    """
+    Cleans the 'details' field (specifically 'log' and 'log_storage_info')
+    for all tasks in the database that are marked as SUCCESS.
+    This is typically called when a new main task starts.
+    """
+    db = get_db()
+    cur = db.cursor(cursor_factory=DictCursor)
+    app.logger.info("Starting cleanup of details for previously successful tasks.")
+    try:
+        cur.execute("SELECT task_id, details FROM task_status WHERE status = %s", (TASK_STATUS_SUCCESS,))
+        tasks_to_clean = cur.fetchall()
+        
+        cleaned_count = 0
+        for task_row in tasks_to_clean:
+            task_id = task_row['task_id']
+            details_json = task_row['details']
+            if details_json:
+                try:
+                    details_dict = json.loads(details_json)
+                    needs_update = False
+                    if 'log' in details_dict and (not isinstance(details_dict['log'], list) or len(details_dict['log']) > 1 or (len(details_dict['log']) == 1 and "cleaned" not in details_dict['log'][0].lower() and "success" not in details_dict['log'][0].lower() )):
+                        # Replace log with a summary or remove it, preserving other info
+                        summary_message = details_dict.get("status_message", "Task completed successfully.")
+                        details_dict['log'] = [f"Log cleaned. Original status: {summary_message}"]
+                        needs_update = True
+                    if 'log_storage_info' in details_dict:
+                        del details_dict['log_storage_info']
+                        needs_update = True
+                    
+                    if needs_update:
+                        updated_details_json = json.dumps(details_dict)
+                        with db.cursor() as update_cur:
+                            update_cur.execute("UPDATE task_status SET details = %s WHERE task_id = %s", (updated_details_json, task_id))
+                        cleaned_count += 1
+                except json.JSONDecodeError:
+                    app.logger.warning(f"Could not parse details JSON for successful task {task_id} during cleanup.")
+                except Exception as e_clean_item:
+                    app.logger.error(f"Error cleaning details for successful task {task_id}: {e_clean_item}")
+        
+        if cleaned_count > 0:
+            db.commit()
+            app.logger.info(f"Cleaned details for {cleaned_count} previously successful tasks.")
+        else:
+            app.logger.info("No previously successful tasks required details cleaning.")
+    except Exception as e_main_clean:
+        db.rollback() # Rollback in case of error during the main query or commit
+        app.logger.error(f"Error during the task details cleanup process: {e_main_clean}")
+    finally:
+        cur.close()
+
 # --- DB Utility Functions (used by tasks.py and API) ---
-def save_task_status(task_id, task_type, status="PENDING", parent_task_id=None, sub_type_identifier=None, progress=0, details=None):
-    # This function is now defined in app.py and imported by tasks.py
-    # It needs the app_context to run, which tasks.py will establish using the imported 'app' object.
+def save_task_status(task_id, task_type, status=TASK_STATUS_PENDING, parent_task_id=None, sub_type_identifier=None, progress=0, details=None):
     db = get_db()
     cur = db.cursor()
 
     if details is not None and isinstance(details, dict):
-        if 'log' in details and isinstance(details['log'], list):
+        # Log truncation for non-SUCCESS states; 'log' should be a list from tasks.py helpers.
+        if status != TASK_STATUS_SUCCESS and 'log' in details and isinstance(details['log'], list):
             log_list = details['log']
-            original_log_length = len(log_list)
-            if original_log_length > MAX_LOG_ENTRIES_STORED:
-                # Keep only the most recent MAX_LOG_ENTRIES_STORED entries
+            if len(log_list) > MAX_LOG_ENTRIES_STORED:
+                original_log_length = len(log_list)
                 details['log'] = log_list[-MAX_LOG_ENTRIES_STORED:]
-                # Add a note that the log was truncated for storage
                 details['log_storage_info'] = f"Log in DB truncated to last {MAX_LOG_ENTRIES_STORED} entries. Original length: {original_log_length}."
-    
+            else:
+                # If log is not truncated, ensure no old log_storage_info persists
+                details.pop('log_storage_info', None)
+        elif status == TASK_STATUS_SUCCESS:
+            # For successful tasks, 'log' should be minimal (set by task). Ensure no log_storage_info.
+            details.pop('log_storage_info', None)
+            if 'log' not in details or not isinstance(details.get('log'), list) or not details.get('log'):
+                details['log'] = ["Task completed successfully."] # Default minimal log
+
     details_json = json.dumps(details) if details is not None else None
     cur.execute("""
         INSERT INTO task_status (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp)
@@ -204,7 +270,11 @@ def start_analysis_endpoint():
     top_n_moods = int(data.get('top_n_moods', TOP_N_MOODS))
 
     job_id = str(uuid.uuid4())
-    save_task_status(job_id, "main_analysis", "PENDING", details={"message": "Task enqueued."})
+    
+    # Clean up details of previously successful tasks before starting a new one
+    clean_successful_task_details_on_new_start()
+    save_task_status(job_id, "main_analysis", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
+
     job = rq_queue.enqueue(
         run_analysis_task,
         args=(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods),
@@ -236,7 +306,11 @@ def start_clustering_endpoint():
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
 
     job_id = str(uuid.uuid4())
-    save_task_status(job_id, "main_clustering", "PENDING", details={"message": "Task enqueued."})
+
+    # Clean up details of previously successful tasks before starting a new one
+    clean_successful_task_details_on_new_start()
+    save_task_status(job_id, "main_clustering", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
+
     job = rq_queue.enqueue(
         run_clustering_task,
         args=(
@@ -289,7 +363,7 @@ def get_task_status_endpoint(task_id):
         response['details'] = {**db_details, **response['details']}
         
         # If task is marked REVOKED in DB, this is the most accurate status for cancellation
-        if db_task_info.get('status') == 'REVOKED':
+        if db_task_info.get('status') == TASK_STATUS_REVOKED:
             response['state'] = 'REVOKED'
             response['status_message'] = 'Task revoked.'
             response['progress'] = 100
@@ -354,7 +428,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
         cancelled_count += 1
         
     # Always mark as REVOKED in DB for the current job if its task_type is known
-    save_task_status(job_id, current_task_type, "REVOKED", progress=100, details={"message": "Task cancellation processed by API."})
+    save_task_status(job_id, current_task_type, TASK_STATUS_REVOKED, progress=100, details={"message": "Task cancellation processed by API."})
 
     # Attempt to cancel children based on DB parent_task_id
     db = get_db()
@@ -363,7 +437,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     cur.execute("""
         SELECT task_id, task_type FROM task_status 
         WHERE parent_task_id = %s 
-        AND status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED')
+        AND status NOT IN (%s, %s, %s, 'FINISHED', 'FAILED', 'CANCELED')
     """, (job_id,))
     children_tasks = cur.fetchall()
     cur.close()
@@ -394,7 +468,10 @@ def cancel_task_endpoint(task_id):
 def cancel_all_tasks_by_type_endpoint(task_type_prefix):
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT task_id, task_type FROM task_status WHERE task_type = %s AND status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED')", (task_type_prefix,))
+    # Exclude terminal statuses
+    terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, 
+                         JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED) # JobStatus for completeness if used directly
+    cur.execute("SELECT task_id, task_type FROM task_status WHERE task_type = %s AND status NOT IN %s", (task_type_prefix, terminal_statuses))
     tasks_to_cancel = cur.fetchall()
     cur.close()
 
@@ -424,12 +501,14 @@ def get_last_overall_task_status_endpoint():
             try: last_task_data['details'] = json.loads(last_task_data['details'])
             except json.JSONDecodeError: pass # Keep as string if not valid JSON
         return jsonify(last_task_data), 200
-    return jsonify({"task_id": None, "task_type": None, "status": "NO_PREVIOUS_MAIN_TASK"}), 200
+    return jsonify({"task_id": None, "task_type": None, "status": "NO_PREVIOUS_MAIN_TASK", "details": {"log": ["No previous main task found."] }}), 200
 
 @app.route('/api/active_tasks', methods=['GET'])
 def get_active_tasks_endpoint():
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
+    non_terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
+                             JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED) # JobStatus for completeness
     cur.execute("""
         SELECT task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp
         FROM task_status
@@ -437,7 +516,7 @@ def get_active_tasks_endpoint():
         ORDER BY timestamp DESC
         LIMIT 1
     """)
-    active_main_task_row = cur.fetchone()
+    active_main_task_row = cur.fetchone() # This query was already good, just ensuring constants are used if it were checking status
     cur.close()
 
     if active_main_task_row:
