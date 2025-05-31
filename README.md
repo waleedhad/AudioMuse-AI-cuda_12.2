@@ -56,10 +56,14 @@ The **mandatory** parameter that you need to change from the example are this:
 | Parameter               | Description                                 | Default Value                       |
 | ----------------------- | ------------------------------------------- | ----------------------------------- |
 | `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`      |
-| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID (K8s Secret)    | *(N/A - from Secret)*               |
-| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token (K8s Secret)  | *(N/A - from Secret)*               |
-| `REDIS_URL`             | URL for Redis (your Redis endpoint).        | redis://redis-service.playlist:6379/0|  
-| `DATABASE_URL`          | PostgreSQL connection string.               | postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb |  
+| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.| *(N/A - from Secret)*    |
+| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.| *(N/A - from Secret)*    |
+| `POSTGRES_USER`         | (Required) PostgreSQL username.| *(N/A - from Secret)*    |
+| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.| *(N/A - from Secret)*    |
+| `POSTGRES_DB`           | (Required) PostgreSQL database name.| *(N/A - from Secret)*    |
+| `POSTGRES_HOST`         | (Required) PostgreSQL host.| `postgres-service.playlist` |
+| `POSTGRES_PORT`         | (Required) PostgreSQL port.| `5432`                      |
+| `REDIS_URL`             | (Required) URL for Redis.| `redis://redis-service.playlist:6379/0` |
 
 These parameter can be leave as it is:
 
@@ -116,19 +120,21 @@ The provided deployment will deploy on your cluster **pod:**
 * **redis-service:** is a ClusterIP service needed to reach Redis from the Worker internally to the cluster;
 
 **secret:**
-* **jellyfin-credentials:** which contain api_token and user_id of Jellyfin
-* **postgres-credentials:** which contain PSOTSGRES_PASSWORD, POSTGRES_USER and POSTGRES_DB
+* **jellyfin-credentials:** which contain `api_token` and `user_id` of Jellyfin
+* **postgres-credentials:** which contain `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`
 
 **ConfigMap:**
-* **audiomuse-ai-config:** which will contain your parameter, as default it will contain: DATABASE_URL, JELLYFIN_URL and REDIS_URL.
+* **audiomuse-ai-config:** which will contain your non-sensitive parameters. By default, it includes: `JELLYFIN_URL`, `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL`.
 
 **PVC:**
 * **postgres-pvc:** this is very important because will keep all the data of the database.
 
 
 it will also create the **namespace** playlist and everything will be deployed in it.
-
-**Before Deploying:** edit the secret AND the JELLYFIN_URL in the ConfigMap.Also check the PVC configuration that is very important to don't lose data. I also suggest to keep a dump of the db on weekl  basis.
+**Before Deploying:** 
+1. Edit the `jellyfin-credentials` and `postgres-credentials` Secrets with your actual values.
+2. Edit the `JELLYFIN_URL` in the `audiomuse-ai-config` ConfigMap.
+3. Review and ensure your `postgres-pvc` PersistentVolumeClaim configuration is appropriate for your environment to prevent data loss. Regularly backing up the database is also recommended.
 
 Then you can easily deploy it with:
 ```

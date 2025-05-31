@@ -56,7 +56,15 @@ CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 10
 
 # --- RQ / Redis / Database Configuration ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb")
+
+# Construct DATABASE_URL from individual components for better security in K8s
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "audiomuse")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "audiomusepassword")
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres-service.playlist") # Default for K8s
+POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "audiomusedb")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 # --- Classifier Constant ---
 MOOD_LABELS = [
