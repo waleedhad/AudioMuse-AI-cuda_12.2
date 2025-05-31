@@ -75,6 +75,7 @@ These parameter can be leave as it is:
 This are the default parameters on wich the analysis or clustering task will be lunched. You will be able to change them to another value directly in the front-end:
 
 | Parameter               | Description                                 | Default Value                       |
+| ----------------------- | ------------------------------------------- | ----------------------------------- |
 | **Analysis General** |                                                                             |                    |
 | `NUM_RECENT_ALBUMS`       | Number of recent albums to scan (0 for all).                                | `2000`   |
 | `TOP_N_MOODS`             | Number of top moods per track for feature vector.                           | `5`      |
