@@ -221,7 +221,7 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 **TBD**
 
-## **🛠️ Key Technologies**
+## **Key Technologies**
 
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
