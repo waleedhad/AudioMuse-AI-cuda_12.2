@@ -104,35 +104,40 @@ This are the default parameters on wich the analysis or clustering task will be 
 
 An example K8s deployment is provided in **deployments/deployment.yaml**. Start from it as a template.
 
-The provided deployment will deploy on your cluster this **pod**:
+The provided deployment will deploy on your cluster **pod:**
 * **audiomuse-ai-worker:** The worker at the **minimum number of 2**, you can put more if you have more than 1 node;
 * **audiomuse-ai-flask:** The api server plus the front-end;
 * **postgres-deployment:** The database for saving the analysis of score, playlist created and status of the stad.;
 * **redis-master:** Needed for Redis Queue, is hwere the worker get the task to run.
 
-this **service**:
+**service:**
 * **audiomuse-ai-flask-service:** is a LoadBalancer service to direct access to your fronte-end. You can convert to ClusterIP if you want to add an ingress on top;
 * **postgres-service:** is a ClusterIP service needed toreach PostgreSQL form the worker internally to the cluster;
 * **redis-service:** is a ClusterIP service needed to reach Redis from the Worker internally to the cluster;
 
-this **secret**:
+**secret:**
 * **jellyfin-credentials:** which contain api_token and user_id of Jellyfin
 * **postgres-credentials:** which contain PSOTSGRES_PASSWORD, POSTGRES_USER and POSTGRES_DB
 
-
-also it will create the **ConfigMap**:
+**ConfigMap:**
 * **audiomuse-ai-config:** which will contain your parameter, as default it will contain: DATABASE_URL, JELLYFIN_URL and REDIS_URL.
+
+**PVC:**
+* **postgres-pvc:** this is very important because will keep all the data of the database.
+
 
 it will also create the **namespace** playlist and everything will be deployed in it.
 
-**Before Deploying:** edit the secret AND the JELLYFIN_URL in the ConfigMap.
+**Before Deploying:** edit the secret AND the JELLYFIN_URL in the ConfigMap.Also check the PVC configuration that is very important to don't lose data. I also suggest to keep a dump of the db on weekl  basis.
 
 Then you can easily deploy it with:
 ```
-kubectl apply \-f deployments/deployment.yaml
+kubectl apply -f deployments/deployment.yaml
 ```
 
-Finally you can access the Flask service through the port exposed by your LoadBalancer or service type. For exmaple in my case is **http://192.168.3.15:8000**. You will also have the swagger at **http://192.168.3.15:8000/apidocs**
+When deployed you can access to:
+* **Front-end:** through the port exposed by your LoadBalancer. For exmaple in this templae case is **http://your-ip:8000**;
+* **Flask service and swagger:** You will also have the swagger at **http://your-iè:8000/apidocs** with all the API example.
 
 For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha.
 
