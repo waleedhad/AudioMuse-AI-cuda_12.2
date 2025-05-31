@@ -75,11 +75,7 @@ These parameter can be leave as it is:
 This are the default parameters on wich the analysis or clustering task will be lunched. You will be able to change them to another value directly in the front-end:
 
 | Parameter               | Description                                 | Default Value                       |
-| ----------------------- | ------------------------------------------- | ----------------------------------- |
-| **Analysis General** | 
-| `NUM_RECENT_ALBUMS`     | Albums to fetch from Jellyfin               | `500`                               |
-| `TOP_N_MOODS`           | Number of top moods for naming playlists    | `3`                                 |
-| **Jellyfin & Core** |                                                                             |                    |
+| **Analysis General** |                                                                             |                    |
 | `NUM_RECENT_ALBUMS`       | Number of recent albums to scan (0 for all).                                | `2000`   |
 | `TOP_N_MOODS`             | Number of top moods per track for feature vector.                           | `5`      |
 | **Clustering General** |                                                                             |                    |
@@ -147,6 +143,31 @@ When deployed you can access to:
 
 For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha.
 
+## **🐳 Local Deployment with Docker Compose**
+
+For a quick local setup or for users not using Kubernetes, a `docker-compose.yaml` file is provided in the `deployment/` directory.
+
+**Prerequisites:**
+*   Docker and Docker Compose installed.
+
+**Steps:**
+1.  **Navigate to the `deployment` directory:**
+    ```bash
+    cd deployment
+    ```
+2.  **Review and Customize (Optional):**
+    The `docker-compose.yaml` file is pre-configured with default credentials and settings suitable for local testing. You can edit environment variables within this file directly if needed (e.g., `JELLYFIN_URL`, `JELLYFIN_USER_ID`, `JELLYFIN_TOKEN`).
+3.  **Start the Services:**
+    ```bash
+    docker compose up -d --scale audiomuse-ai-worker=2
+    ```
+    This command starts all services (Flask app, RQ workers, Redis, PostgreSQL) in detached mode (`-d`). The `--scale audiomuse-ai-worker=2` ensures at least two worker instances are running, which is recommended for the task processing architecture.
+4.  **Access the Application:**
+    Once the containers are up, you can access the web UI at `http://localhost:8000`.
+5.  **Stopping the Services:**
+    ```bash
+    docker compose down
+    ```
 ## **🐳 Docker Image Tagging Strategy**
 
 Our GitHub Actions workflow automatically builds and pushes Docker images. Here's how our tags work:
