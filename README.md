@@ -6,6 +6,25 @@ The main scope of this application is testing the clustering algorithm. A front-
 
 **IMPORTANT:** This is an ALPHA open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
 
+## **Table of Contents**
+
+- [Workflow Overview](#workflow-overview)
+- [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
+  - [1. K-Means](#1-k-means)
+  - [2. DBSCAN](#2-dbscan)
+  - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
+- [Configuration Parameters](#configuration-parameters)
+- [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
+- [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
+- [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
+- [Screenshots](#screenshots)
+  - [Analysis task](#analysis-task)
+  - [Clustering task](#clustering-task)
+- [Key Technologies](#key-technologies)
+- [Additional Documentation](#additional-documentation)
+- [Future Possibilities](#future-possibilities)
+- [Contributing](#contributing)
+
 ## **🔄 Workflow Overview**
 
 This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
