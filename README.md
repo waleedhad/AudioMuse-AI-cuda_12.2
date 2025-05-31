@@ -25,7 +25,7 @@ The main scope of this application is testing the clustering algorithm. A front-
 - [Future Possibilities](#future-possibilities)
 - [Contributing](#contributing)
 
-## **🔄 Workflow Overview**
+## **Workflow Overview**
 
 This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
 
@@ -41,7 +41,7 @@ This is the main workflow of how this algorithm works. For an easy way to use it
 
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
 
-## **📊 Clustering Algorithm Deep Dive**
+## **Clustering Algorithm Deep Dive**
 
 AudioMuse-AI offers three algorithms, each suited for different scenarios when clustering music based on tempo and 5 mood scores. This clustering algorithm is executed multiple times (default 1000\) following an Evolutionary Monte Carlo approach: in this way, multiple configurations of parameters are tested, and the best ones are kept.
 
@@ -120,7 +120,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
 | `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
 
-## **☸️ Kubernetes Deployment (K3S Example)**
+## **Kubernetes Deployment (K3S Example)**
 
 An example K8s deployment is provided in **deployments/deployment.yaml**. Start from it as a template.
 
@@ -163,7 +163,7 @@ When deployed you can access to:
 
 For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha.
 
-## **🐳 Local Deployment with Docker Compose**
+## **Local Deployment with Docker Compose**
 
 For a quick local setup or for users not using Kubernetes, a `docker-compose.yaml` file is provided in the `deployment/` directory.
 
@@ -188,7 +188,7 @@ For a quick local setup or for users not using Kubernetes, a `docker-compose.yam
     ```bash
     docker compose down
     ```
-## **🐳 Docker Image Tagging Strategy**
+## **Docker Image Tagging Strategy**
 
 Our GitHub Actions workflow automatically builds and pushes Docker images. Here's how our tags work:
 
@@ -252,7 +252,7 @@ In **audiomuse-ai/docs** you can find additional documentation for this project,
   * **audiomuse-ai/deployment/docker-compose.yaml** - is the docker compose file used in the docker_docs.pdf
   
 
-## **🚀 Future Possibilities**
+## **Future Possibilities**
 
 This MVP lays the groundwork for further development:
 
@@ -260,7 +260,8 @@ This MVP lays the groundwork for further development:
 * 🖥️ **Jellyfin Plugin:** Integration as a Jellyfin plugin to have only one and easy-to-use front-end.  
 * 🔁 **Cross-Platform Sync** Export playlists to .m3u or sync to external platforms.
 
-## **🤝 Contributing**
+## **Contributing**
 
 Contributions, issues, and feature requests are welcome\!  
 This is an ALPHA early release, so expect bugs or functions that are still not implemented.
+
