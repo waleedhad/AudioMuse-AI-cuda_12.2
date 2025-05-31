@@ -28,7 +28,7 @@ services:
 
   # AudioMuse-AI Flask application service
   audiomuse-ai-flask:
-    image: ghcr.io/neptunehub/audiomuse-ai:0.2.0-alpha # Your pre-built image
+    image: ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha # Your pre-built image
     container_name: audiomuse-ai-flask-app
     ports:
       - "8000:8000" # Map host port 8000 to container port 8000
@@ -37,7 +37,12 @@ services:
       JELLYFIN_USER_ID: "0e45c44b3e2e4da7a2be11a72a1c8575" # From jellyfin-credentials secret
       JELLYFIN_TOKEN: "e0b8c325bc1b426c81922b90c0aa2ff1" # From jellyfin-credentials secret
       JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087" # From audiomuse-ai-config ConfigMap
-      DATABASE_URL: "postgresql://audiomuse:audiomusepassword@postgres:5432/audiomusedb" # Connects to the 'postgres' service
+      # DATABASE_URL is now constructed by config.py from the following:
+      POSTGRES_USER: "audiomuse"
+      POSTGRES_PASSWORD: "audiomusepassword"
+      POSTGRES_DB: "audiomusedb"
+      POSTGRES_HOST: "postgres" # Service name of the postgres container
+      POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0" # Connects to the 'redis' service
       TEMP_DIR: "/app/temp_audio"
     volumes:
@@ -49,14 +54,19 @@ services:
 
   # AudioMuse-AI RQ Worker service
   audiomuse-ai-worker:
-    image: ghcr.io/neptunehub/audiomuse-ai:0.2.0-alpha # Your pre-built image
+    image: ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha # Your pre-built image
     container_name: audiomuse-ai-worker-instance
     environment:
       SERVICE_TYPE: "worker" # Tells the container to run the RQ worker
       JELLYFIN_USER_ID: "0e45c44b3e2e4da7a2be11a72a1c8575" # From jellyfin-credentials secret
       JELLYFIN_TOKEN: "e0b8c325bc1b426c81922b90c0aa2ff1" # From jellyfin-credentials secret
       JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087" # From audiomuse-ai-config ConfigMap
-      DATABASE_URL: "postgresql://audiomuse:audiomusepassword@postgres:5432/audiomusedb" # Connects to the 'postgres' service
+      # DATABASE_URL is now constructed by config.py from the following:
+      POSTGRES_USER: "audiomuse"
+      POSTGRES_PASSWORD: "audiomusepassword"
+      POSTGRES_DB: "audiomusedb"
+      POSTGRES_HOST: "postgres" # Service name of the postgres container
+      POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0" # Connects to the 'redis' service
       TEMP_DIR: "/app/temp_audio"
     volumes:
