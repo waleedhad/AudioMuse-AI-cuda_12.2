@@ -28,7 +28,8 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, \
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # For create_or_update_playlists_on_jellyfin
+    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, \
+    MUTATION_KMEANS_COORD_FRACTION # For create_or_update_playlists_on_jellyfin
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
@@ -613,6 +614,66 @@ def _mutate_param(value, min_val, max_val, delta, is_float=False, round_digits=N
     new_value = np.clip(new_value, min_val, max_val)
     return int(new_value) if not is_float else new_value
 
+def _generate_or_mutate_kmeans_initial_centroids(
+    n_clusters_current, data_for_clustering_current,
+    elite_kmeans_params_original, elite_pca_config_original, new_pca_config_current,
+    mutation_coord_fraction=0.05, log_prefix=""):
+    """
+    Generates or mutates initial centroids for KMeans.
+    Centroids are returned as a list of lists.
+    """
+    use_mutated_elite_centroids = False
+    if elite_kmeans_params_original and elite_pca_config_original:
+        elite_initial_centroids_list = elite_kmeans_params_original.get("initial_centroids")
+        elite_n_clusters = elite_kmeans_params_original.get("n_clusters")
+
+        pca_compatible = (elite_pca_config_original.get("enabled") == new_pca_config_current.get("enabled"))
+        if pca_compatible and elite_pca_config_original.get("enabled"): # Both enabled
+            pca_compatible = (elite_pca_config_original.get("components") == new_pca_config_current.get("components"))
+
+        if elite_initial_centroids_list and isinstance(elite_initial_centroids_list, list) and \
+           pca_compatible and elite_n_clusters == n_clusters_current:
+            use_mutated_elite_centroids = True
+
+    if use_mutated_elite_centroids:
+        # print(f"{log_prefix} Attempting to mutate KMeans centroids.")
+        mutated_centroids = []
+        elite_centroids_arr = np.array(elite_initial_centroids_list)
+        
+        if data_for_clustering_current.shape[0] > 0 and data_for_clustering_current.shape[1] > 0 and \
+           elite_centroids_arr.ndim == 2 and elite_centroids_arr.shape[1] == data_for_clustering_current.shape[1]:
+            
+            data_min = np.min(data_for_clustering_current, axis=0)
+            data_max = np.max(data_for_clustering_current, axis=0)
+            data_range = data_max - data_min
+            coord_mutation_deltas = data_range * mutation_coord_fraction
+            
+            for centroid_coords in elite_centroids_arr: # Iterate over rows (centroids)
+                mutation_vector = np.random.uniform(-coord_mutation_deltas, coord_mutation_deltas, size=centroid_coords.shape)
+                mutated_coord = centroid_coords + mutation_vector
+                mutated_coord = np.clip(mutated_coord, data_min, data_max) # Clip to current data bounds
+                mutated_centroids.append(mutated_coord.tolist())
+            # print(f"{log_prefix} Successfully mutated {len(mutated_centroids)} KMeans centroids.")
+            return mutated_centroids
+        else:
+            # print(f"{log_prefix} KMeans centroid mutation condition not met (data shape, elite centroid format, or dim mismatch). Falling back to random.")
+            pass # Fall through to random generation
+
+    # Fallback: Randomly pick from current data
+    # print(f"{log_prefix} Generating random KMeans centroids.")
+    if data_for_clustering_current.shape[0] == 0 or n_clusters_current == 0:
+        # print(f"{log_prefix} No data points or zero clusters requested for KMeans centroid generation.")
+        return [] 
+    
+    num_available_points = data_for_clustering_current.shape[0]
+    actual_n_clusters = min(n_clusters_current, num_available_points) # Cannot pick more unique centroids than available points
+    if actual_n_clusters == 0 and num_available_points > 0: actual_n_clusters = 1 # Ensure at least one if possible
+    if actual_n_clusters == 0: return []
+
+    indices = np.random.choice(num_available_points, actual_n_clusters, replace=(actual_n_clusters > num_available_points))
+    initial_centroids = data_for_clustering_current[indices]
+    return initial_centroids.tolist()
+
 def _perform_single_clustering_iteration(
     run_idx, all_tracks_data_parsed, 
     clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges, 
@@ -630,10 +691,28 @@ def _perform_single_clustering_iteration(
     `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
     try:
-        if elite_solutions_params_list is None: elite_solutions_params_list = []
-        if mutation_config is None: mutation_config = {"int_abs_delta": 2, "float_abs_delta": 0.05}
+        elite_solutions_params_list = elite_solutions_params_list or []
+        mutation_config = mutation_config or {"int_abs_delta": 2, "float_abs_delta": 0.05, "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION}
+        if "coord_mutation_fraction" not in mutation_config: # Ensure default if not passed
+            mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
+
+        # --- Data Preparation ---
+        X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed]
+        X_scaled = np.array(X_original)
+        if X_scaled.shape[0] == 0:
+            print(f"{log_prefix} Iteration {run_idx}: No data to cluster.")
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {}}
+        
+        data_after_pca_for_this_iteration = X_scaled # Default if PCA is off or fails
+        pca_model_for_this_iteration = None
+        # --- End Data Preparation ---
 
         # Parameter generation for this specific iteration
+        # PCA parameters are determined first, then PCA is applied.
+        # Then, clustering method parameters (like n_clusters) are determined,
+        # potentially using the shape of the data *after* PCA.
+        # Finally, for KMeans, initial_centroids are generated/mutated.
+
         method_params_config = {}
         pca_config = {} # Renamed from current_pca_config
         params_generated_by_mutation = False
@@ -641,28 +720,51 @@ def _perform_single_clustering_iteration(
         if elite_solutions_params_list and random.random() < exploitation_probability:
             chosen_elite_params_set = random.choice(elite_solutions_params_list)
             elite_method_config_original = chosen_elite_params_set.get("clustering_method_config")
-            elite_pca_config_original = chosen_elite_params_set.get("pca_config")
+            elite_pca_config_original = chosen_elite_params_set.get("pca_config", {"enabled": False, "components": 0})
 
             if elite_method_config_original and elite_pca_config_original and \
                elite_method_config_original.get("method") == clustering_method:
                 try:
-                    # Mutate PCA components
+                    # 1. Mutate PCA components first
                     elite_pca_comps = elite_pca_config_original.get("components", pca_params_ranges["components_min"])
                     mutated_pca_comps = _mutate_param(
                         elite_pca_comps,
                         pca_params_ranges["components_min"], pca_params_ranges["components_max"],
                         mutation_config.get("int_abs_delta", 2)
                     )
-                    max_allowable_pca_mutated = min(mutated_pca_comps, len(MOOD_LABELS) + 1, len(all_tracks_data_parsed) - 1 if len(all_tracks_data_parsed) > 1 else 1)
+                    # Max PCA components also limited by number of features in X_scaled and number of samples
+                    max_pca_by_features = X_scaled.shape[1]
+                    max_pca_by_samples = (X_scaled.shape[0] - 1) if X_scaled.shape[0] > 1 else 1
+                    
+                    max_allowable_pca_mutated = min(mutated_pca_comps, len(MOOD_LABELS) + 1, max_pca_by_features, max_pca_by_samples)
                     max_allowable_pca_mutated = max(0, max_allowable_pca_mutated) # Ensure not negative
                     temp_pca_config = {"enabled": max_allowable_pca_mutated > 0, "components": max_allowable_pca_mutated}
 
-                    # Mutate clustering method parameters
+                    # 2. Apply this new PCA config to get data for this iteration
+                    if temp_pca_config["enabled"]:
+                        if temp_pca_config["components"] > 0:
+                            pca_model_for_this_iteration = PCA(n_components=temp_pca_config["components"])
+                            data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                            temp_pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual components used
+                        else: # Components somehow became 0
+                            temp_pca_config["enabled"] = False
+                            data_after_pca_for_this_iteration = X_scaled # Fallback
+                    else:
+                        data_after_pca_for_this_iteration = X_scaled # PCA not enabled
+
+                    # 3. Mutate clustering method parameters (e.g., n_clusters)
+                    #    This must happen AFTER PCA, as n_clusters can depend on data_after_pca_for_this_iteration.shape[0]
                     temp_method_params_config = None
+                    max_clusters_or_components = data_after_pca_for_this_iteration.shape[0]
+                    if max_clusters_or_components == 0: # No data points after PCA (should be rare)
+                        raise ValueError("No data points available after PCA to determine cluster parameters.")
+
                     if clustering_method == "kmeans":
                         elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", num_clusters_min_max[0])
                         mutated_n_clusters = _mutate_param(
-                            elite_n_clusters, num_clusters_min_max[0], min(num_clusters_min_max[1], len(all_tracks_data_parsed)),
+                            elite_n_clusters, 
+                            num_clusters_min_max[0], 
+                            min(num_clusters_min_max[1], max_clusters_or_components), # Max clusters capped by available points
                             mutation_config.get("int_abs_delta", 2)
                         )
                         temp_method_params_config = {"method": "kmeans", "params": {"n_clusters": max(1, mutated_n_clusters)}}
@@ -681,20 +783,33 @@ def _perform_single_clustering_iteration(
                     elif clustering_method == "gmm":
                         elite_n_components = elite_method_config_original.get("params", {}).get("n_components", gmm_params_ranges["n_components_min"])
                         mutated_n_components = _mutate_param(
-                            elite_n_components, gmm_params_ranges["n_components_min"], min(gmm_params_ranges["n_components_max"], len(all_tracks_data_parsed)),
+                            elite_n_components, 
+                            gmm_params_ranges["n_components_min"], 
+                            min(gmm_params_ranges["n_components_max"], max_clusters_or_components), # Max components capped
                             mutation_config.get("int_abs_delta", 2)
                         )
                         temp_method_params_config = {"method": "gmm", "params": {"n_components": max(1, mutated_n_components)}}
                     
                     if temp_method_params_config and temp_pca_config is not None:
+                        # 4. For KMeans, generate/mutate initial_centroids
+                        if clustering_method == "kmeans":
+                            kmeans_initial_centroids = _generate_or_mutate_kmeans_initial_centroids(
+                                temp_method_params_config["params"]["n_clusters"],
+                                data_after_pca_for_this_iteration,
+                                elite_method_config_original.get("params"), # Pass full elite Kmeans params
+                                elite_pca_config_original, # Elite's PCA config
+                                temp_pca_config,           # Current iteration's PCA config
+                                mutation_config.get("coord_mutation_fraction"),
+                                log_prefix=f"{log_prefix} Iteration {run_idx} (mutation)"
+                            )
+                            temp_method_params_config["params"]["initial_centroids"] = kmeans_initial_centroids
+
                         method_params_config = temp_method_params_config
                         pca_config = temp_pca_config
                         params_generated_by_mutation = True
-                        # print(f"{log_prefix} Iteration {run_idx}: Mutated from elite. PCA: {pca_config}, Method: {method_params_config}")
                 except Exception as e_mutate:
                     print(f"{log_prefix} Iteration {run_idx}: Error mutating elite params: {e_mutate}. Falling back to random.")
                     params_generated_by_mutation = False
-
         if not params_generated_by_mutation:
             # print(f"{log_prefix} Iteration {run_idx}: Using random parameters.")
             # Original random parameter generation
@@ -702,20 +817,48 @@ def _perform_single_clustering_iteration(
             max_allowable_pca_rand = min(sampled_pca_components_rand, len(MOOD_LABELS) + 1, len(all_tracks_data_parsed) -1 if len(all_tracks_data_parsed) > 1 else 1)
             max_allowable_pca_rand = max(0, max_allowable_pca_rand)
             pca_config = {"enabled": max_allowable_pca_rand > 0, "components": max_allowable_pca_rand}
+            
+            # Apply PCA for random generation path to get data_after_pca_for_this_iteration
+            if pca_config["enabled"]:
+                n_comps_rand = min(pca_config["components"], X_scaled.shape[1], (X_scaled.shape[0] - 1) if X_scaled.shape[0] > 1 else 1)
+                if n_comps_rand > 0:
+                    pca_model_for_this_iteration = PCA(n_components=n_comps_rand)
+                    data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                    pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
+                else:
+                    pca_config["enabled"] = False
+                    data_after_pca_for_this_iteration = X_scaled
+            else:
+                data_after_pca_for_this_iteration = X_scaled
+
+            max_clusters_or_components_rand = data_after_pca_for_this_iteration.shape[0]
+            if max_clusters_or_components_rand == 0: # No data points after PCA
+                 print(f"{log_prefix} Iteration {run_idx}: No data points available after PCA for random parameter generation.")
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"pca_config": pca_config}}
 
             if clustering_method == "kmeans":
-                current_num_clusters_rand = random.randint(num_clusters_min_max[0], min(num_clusters_min_max[1], len(all_tracks_data_parsed)))
-                method_params_config = {"method": "kmeans", "params": {"n_clusters": max(1, current_num_clusters_rand)}}
+                k_rand = random.randint(num_clusters_min_max[0], min(num_clusters_min_max[1], max_clusters_or_components_rand))
+                k_rand = max(1, k_rand)
+                kmeans_initial_centroids_rand = _generate_or_mutate_kmeans_initial_centroids(
+                    k_rand, data_after_pca_for_this_iteration, None, None, pca_config, # No elite for random
+                    log_prefix=f"{log_prefix} Iteration {run_idx} (random)"
+                )
+                method_params_config = {"method": "kmeans", "params": {"n_clusters": k_rand, "initial_centroids": kmeans_initial_centroids_rand}}
             elif clustering_method == "dbscan":
                 current_dbscan_eps_rand = round(random.uniform(dbscan_params_ranges["eps_min"], dbscan_params_ranges["eps_max"]), 2)
                 current_dbscan_min_samples_rand = random.randint(dbscan_params_ranges["samples_min"], dbscan_params_ranges["samples_max"])
                 method_params_config = {"method": "dbscan", "params": {"eps": current_dbscan_eps_rand, "min_samples": current_dbscan_min_samples_rand}}
             elif clustering_method == "gmm":
-                current_gmm_n_components_rand = random.randint(gmm_params_ranges["n_components_min"], min(gmm_params_ranges["n_components_max"], len(all_tracks_data_parsed)))
-                method_params_config = {"method": "gmm", "params": {"n_components": max(1, current_gmm_n_components_rand)}}
+                gmm_n_rand = random.randint(gmm_params_ranges["n_components_min"], min(gmm_params_ranges["n_components_max"], max_clusters_or_components_rand))
+                method_params_config = {"method": "gmm", "params": {"n_components": max(1, gmm_n_rand)}}
             else:
                 print(f"{log_prefix} Iteration {run_idx}: Unsupported clustering method {clustering_method}")
                 return None
+        
+        # Ensure pca_model_for_this_iteration is set if pca_config is enabled but model wasn't created during mutation path
+        if pca_config["enabled"] and pca_model_for_this_iteration is None and pca_config["components"] > 0:
+            pca_model_for_this_iteration = PCA(n_components=pca_config["components"])
+            data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled) # Refit if needed
 
         if not method_params_config or pca_config is None:
             print(f"{log_prefix} Iteration {run_idx}: Critical error: parameters not configured.")
@@ -723,52 +866,60 @@ def _perform_single_clustering_iteration(
 
         # --- Start of core logic from original run_single_clustering_iteration_task ---
         X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed]
-        X_scaled = np.array(X_original)
-        data_for_clustering = X_scaled
-        pca_model = None
-        n_components_actual = 0
-
-        if pca_config["enabled"]:
-            n_components_actual = min(pca_config["components"], X_scaled.shape[1], (len(all_tracks_data_parsed) - 1) if len(all_tracks_data_parsed) > 1 else 1)
-            if n_components_actual > 0:
-                pca_model = PCA(n_components=n_components_actual)
-                data_for_clustering = pca_model.fit_transform(X_scaled)
-            else:
-                pca_config["enabled"] = False # Update if components became 0
-        # print(f"{log_prefix} Iteration {run_idx}: PCA {'enabled with ' + str(n_components_actual) + ' components' if pca_config['enabled'] else 'disabled'}.")
+        # X_scaled, data_after_pca_for_this_iteration, and pca_model_for_this_iteration are already prepared above.
+        # Use data_after_pca_for_this_iteration for clustering.
 
         labels = None
         cluster_centers_map = {}
-        raw_distances = np.zeros(len(data_for_clustering))
+        raw_distances = np.zeros(data_after_pca_for_this_iteration.shape[0])
         method_from_config = method_params_config["method"]
         params_from_config = method_params_config["params"]
 
         if method_from_config == "kmeans":
-            kmeans = KMeans(n_clusters=params_from_config["n_clusters"], random_state=None, n_init='auto')
-            labels = kmeans.fit_predict(data_for_clustering)
+            if not params_from_config.get("initial_centroids") or not isinstance(params_from_config["initial_centroids"], list) or len(params_from_config["initial_centroids"]) == 0:
+                print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids missing or empty. Cannot cluster with KMeans.")
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+            
+            initial_centroids_np = np.array(params_from_config["initial_centroids"])
+            
+            # Ensure n_clusters matches the number of initial centroids provided
+            if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: # Empty array from empty list
+                 print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids resulted in empty numpy array. Cannot cluster.")
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            if initial_centroids_np.shape[0] != params_from_config["n_clusters"]:
+                # print(f"{log_prefix} Iteration {run_idx}: Mismatch n_clusters ({params_from_config['n_clusters']}) and num initial_centroids ({initial_centroids_np.shape[0]}). Adjusting n_clusters.")
+                params_from_config["n_clusters"] = initial_centroids_np.shape[0]
+            
+            if params_from_config["n_clusters"] == 0:
+                print(f"{log_prefix} Iteration {run_idx}: n_clusters is 0 for KMeans after adjustment. Cannot cluster.")
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            kmeans = KMeans(n_clusters=params_from_config["n_clusters"], init=initial_centroids_np, n_init=1)
+            labels = kmeans.fit_predict(data_after_pca_for_this_iteration)
             cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(params_from_config["n_clusters"])}
             centers_for_points = kmeans.cluster_centers_[labels]
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            raw_distances = np.linalg.norm(data_after_pca_for_this_iteration - centers_for_points, axis=1)
         elif method_from_config == "dbscan":
             dbscan = DBSCAN(eps=params_from_config["eps"], min_samples=params_from_config["min_samples"])
-            labels = dbscan.fit_predict(data_for_clustering)
+            labels = dbscan.fit_predict(data_after_pca_for_this_iteration)
             for cluster_id_val in set(labels):
                 if cluster_id_val == -1: continue
                 indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id_val]
-                cluster_points = data_for_clustering[indices]
+                cluster_points = data_after_pca_for_this_iteration[indices]
                 if len(cluster_points) > 0:
                     center = cluster_points.mean(axis=0)
-                    for i_idx in indices: raw_distances[i_idx] = np.linalg.norm(data_for_clustering[i_idx] - center)
+                    for i_idx in indices: raw_distances[i_idx] = np.linalg.norm(data_after_pca_for_this_iteration[i_idx] - center)
                     cluster_centers_map[cluster_id_val] = center
         elif method_from_config == "gmm":
             gmm = GaussianMixture(n_components=params_from_config["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
-            gmm.fit(data_for_clustering)
-            labels = gmm.predict(data_for_clustering)
+            gmm.fit(data_after_pca_for_this_iteration)
+            labels = gmm.predict(data_after_pca_for_this_iteration)
             cluster_centers_map = {i: gmm.means_[i] for i in range(params_from_config["n_components"])}
             centers_for_points = gmm.means_[labels] # type: ignore
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            raw_distances = np.linalg.norm(data_after_pca_for_this_iteration - centers_for_points, axis=1)
         
-        del data_for_clustering
+        del data_after_pca_for_this_iteration # Free memory
         
         if labels is None or len(set(labels) - {-1}) == 0:
             # print(f"{log_prefix} Iteration {run_idx}: No valid clusters found.")
@@ -805,7 +956,7 @@ def _perform_single_clustering_iteration(
             if songs_list:
                 center_val = cluster_centers_map.get(label_val)
                 if center_val is None: continue
-                name, top_scores = name_cluster(center_val, pca_model, pca_config["enabled"], MOOD_LABELS)
+                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], MOOD_LABELS)
                 if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
                     if predominant_mood_key:
@@ -817,7 +968,7 @@ def _perform_single_clustering_iteration(
         diversity_score = sum(unique_predominant_mood_scores.values())
         # print(f"{log_prefix} Iteration {run_idx}: Named {len(current_named_playlists)} playlists. Diversity score: {diversity_score:.2f}")
         
-        pca_model_details = {"n_components": pca_model.n_components_, "explained_variance_ratio": pca_model.explained_variance_ratio_.tolist(), "mean": pca_model.mean_.tolist()} if pca_model and pca_config["enabled"] else None
+        pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
             "diversity_score": float(diversity_score),
             "named_playlists": dict(current_named_playlists), 
@@ -1055,7 +1206,8 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
 
             mutation_config = {
                 "int_abs_delta": MUTATION_INT_ABS_DELTA,
-                "float_abs_delta": MUTATION_FLOAT_ABS_DELTA
+                "float_abs_delta": MUTATION_FLOAT_ABS_DELTA,
+                "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION
             }
             mutation_config_json = json.dumps(mutation_config)
             exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
