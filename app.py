@@ -14,6 +14,9 @@ from rq.exceptions import NoSuchJobError
 from rq.command import send_stop_job_command
 JobStatus = JobStatus # Make JobStatus directly accessible within the app for tasks to import via `from app import JobStatus`
 
+# Swagger imports
+from flasgger import Swagger, swag_from
+
 # Import configuration
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
     REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
@@ -23,6 +26,14 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
 
 # --- Flask App Setup ---
 app = Flask(__name__)
+
+# --- Swagger Setup ---
+app.config['SWAGGER'] = {
+    'title': 'AudioMuse-AI API',
+    'uiversion': 3,
+    'openapi': '3.0.0'
+}
+swagger = Swagger(app)
 
 # --- RQ Setup ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
@@ -260,10 +271,97 @@ def update_playlist_table(playlists): # Removed db_path
 
 @app.route('/')
 def index():
+    """
+    Serve the main HTML page.
+    ---
+    tags:
+      - UI
+    responses:
+      200:
+        description: HTML content of the main page.
+        content:
+          text/html:
+            schema:
+              type: string
+    """
     return render_template('index.html')
 
 @app.route('/api/analysis/start', methods=['POST'])
 def start_analysis_endpoint():
+    """
+    Start the music analysis process for recent albums.
+    This endpoint enqueues a main analysis task.
+    Note: Starting a new analysis task will archive previously successful tasks by setting their status to REVOKED.
+    ---
+    tags:
+      - Analysis
+    requestBody:
+      description: Configuration for the analysis task.
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              jellyfin_url:
+                type: string
+                description: URL of the Jellyfin server.
+                default: "Configured JELLYFIN_URL"
+              jellyfin_user_id:
+                type: string
+                description: Jellyfin User ID.
+                default: "Configured JELLYFIN_USER_ID"
+              jellyfin_token:
+                type: string
+                description: Jellyfin API Token.
+                default: "Configured JELLYFIN_TOKEN"
+              num_recent_albums:
+                type: integer
+                description: Number of recent albums to process.
+                default: "Configured NUM_RECENT_ALBUMS"
+              top_n_moods:
+                type: integer
+                description: Number of top moods to extract per track.
+                default: "Configured TOP_N_MOODS"
+    responses:
+      202:
+        description: Analysis task successfully enqueued.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                  description: The ID of the enqueued main analysis task.
+                task_type:
+                  type: string
+                  description: Type of the task (e.g., main_analysis).
+                  example: main_analysis
+                status:
+                  type: string
+                  description: The initial status of the job in the queue (e.g., queued).
+      400:
+        description: Invalid input.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+      500:
+        description: Server error during task enqueue.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                message:
+                  type: string
+    """
     # Import task function here to break circular dependency
     from tasks import run_analysis_task
 
@@ -292,6 +390,94 @@ def start_analysis_endpoint():
 
 @app.route('/api/clustering/start', methods=['POST'])
 def start_clustering_endpoint():
+    """
+    Start the music clustering and playlist generation process.
+    This endpoint enqueues a main clustering task.
+    Note: Starting a new clustering task will archive previously successful tasks by setting their status to REVOKED.
+    ---
+    tags:
+      - Clustering
+    requestBody:
+      description: Configuration for the clustering task.
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              clustering_method:
+                type: string
+                description: Algorithm to use for clustering (e.g., kmeans, dbscan, gmm).
+                default: "Configured CLUSTER_ALGORITHM"
+              num_clusters_min:
+                type: integer
+                description: Minimum number of clusters (for kmeans/gmm).
+                default: "Configured NUM_CLUSTERS_MIN"
+              num_clusters_max:
+                type: integer
+                description: Maximum number of clusters (for kmeans/gmm).
+                default: "Configured NUM_CLUSTERS_MAX"
+              dbscan_eps_min:
+                type: number
+                format: float
+                description: Minimum epsilon for DBSCAN.
+                default: "Configured DBSCAN_EPS_MIN"
+              dbscan_eps_max:
+                type: number
+                format: float
+                description: Maximum epsilon for DBSCAN.
+                default: "Configured DBSCAN_EPS_MAX"
+              dbscan_min_samples_min:
+                type: integer
+                description: Minimum min_samples for DBSCAN.
+                default: "Configured DBSCAN_MIN_SAMPLES_MIN"
+              dbscan_min_samples_max:
+                type: integer
+                description: Maximum min_samples for DBSCAN.
+                default: "Configured DBSCAN_MIN_SAMPLES_MAX"
+              gmm_n_components_min:
+                type: integer
+                description: Minimum number of components for GMM.
+                default: "Configured GMM_N_COMPONENTS_MIN"
+              gmm_n_components_max:
+                type: integer
+                description: Maximum number of components for GMM.
+                default: "Configured GMM_N_COMPONENTS_MAX"
+              pca_components_min:
+                type: integer
+                description: Minimum number of PCA components.
+                default: "Configured PCA_COMPONENTS_MIN"
+              pca_components_max:
+                type: integer
+                description: Maximum number of PCA components.
+                default: "Configured PCA_COMPONENTS_MAX"
+              clustering_runs:
+                type: integer
+                description: Number of clustering iterations to perform.
+                default: "Configured CLUSTERING_RUNS"
+              max_songs_per_cluster:
+                type: integer
+                description: Maximum number of songs per generated playlist/cluster.
+                default: "Configured MAX_SONGS_PER_CLUSTER"
+    responses:
+      202:
+        description: Clustering task successfully enqueued.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                  description: The ID of the enqueued main clustering task.
+                task_type:
+                  type: string
+                  description: Type of the task (e.g., main_clustering).
+                  example: main_clustering
+                status:
+                  type: string
+                  description: The initial status of the job in the queue (e.g., queued).
+    """
     # Import task function here to break circular dependency
     from tasks import run_clustering_task
 
@@ -333,6 +519,63 @@ def start_clustering_endpoint():
 
 @app.route('/api/status/<task_id>', methods=['GET'])
 def get_task_status_endpoint(task_id):
+    """
+    Get the status of a specific task.
+    Retrieves status information from both RQ and the database.
+    ---
+    tags:
+      - Status
+    parameters:
+      - name: task_id
+        in: path
+        required: true
+        description: The ID of the task.
+        schema:
+          type: string
+    responses:
+      200:
+        description: Status information for the task.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                state:
+                  type: string
+                  description: Current state of the task (e.g., PENDING, STARTED, PROGRESS, SUCCESS, FAILURE, REVOKED, queued, finished, failed, canceled).
+                status_message:
+                  type: string
+                  description: A human-readable status message.
+                progress:
+                  type: integer
+                  description: Task progress percentage (0-100).
+                details:
+                  type: object
+                  description: Detailed information about the task. Structure varies by task type and state.
+                  additionalProperties: true # Indicates the object can have various properties
+                  example: {"log": ["Log message 1"], "current_album": "Album X"}
+                task_type_from_db:
+                  type: string
+                  nullable: true
+                  description: The type of the task as recorded in the database (e.g., main_analysis, album_analysis, main_clustering, clustering_batch).
+      404:
+        description: Task ID not found in RQ or database.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                state:
+                  type: string
+                  example: UNKNOWN
+                status_message:
+                  type: string
+                  example: Task ID not found in RQ or DB.
+    """
     response = {'task_id': task_id, 'state': 'UNKNOWN', 'status_message': 'Task ID not found in RQ or DB.', 'progress': 0, 'details': {}, 'task_type_from_db': None}
     try:
         job = Job.fetch(task_id, connection=redis_conn)
@@ -463,6 +706,38 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
 
 @app.route('/api/cancel/<task_id>', methods=['POST'])
 def cancel_task_endpoint(task_id):
+    """
+    Cancel a specific task and its children.
+    Marks the task and its descendants as REVOKED in the database and attempts to stop/cancel them in RQ.
+    ---
+    tags:
+      - Control
+    parameters:
+      - name: task_id
+        in: path
+        required: true
+        description: The ID of the task to cancel.
+        schema:
+          type: string
+    responses:
+      200:
+        description: Cancellation initiated for the task and its children.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                task_id:
+                  type: string
+                cancelled_jobs_count:
+                  type: integer
+      400:
+        description: Task could not be cancelled (e.g., already completed or not in an active state).
+      404:
+        description: Task ID not found in the database.
+    """
     db_task_info = get_task_info_from_db(task_id)
     if not db_task_info:
         return jsonify({"message": f"Task {task_id} not found in database.", "task_id": task_id}), 404
@@ -476,6 +751,35 @@ def cancel_task_endpoint(task_id):
 
 @app.route('/api/cancel_all/<task_type_prefix>', methods=['POST'])
 def cancel_all_tasks_by_type_endpoint(task_type_prefix):
+    """
+    Cancel all active tasks of a specific type (e.g., main_analysis, main_clustering) and their children.
+    ---
+    tags:
+      - Control
+    parameters:
+      - name: task_type_prefix
+        in: path
+        required: true
+        description: The type of main tasks to cancel (e.g., "main_analysis", "main_clustering").
+        schema:
+          type: string
+    responses:
+      200:
+        description: Cancellation initiated for all matching active tasks and their children.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                cancelled_main_tasks:
+                  type: array
+                  items:
+                    type: string
+      404:
+        description: No active tasks of the specified type found to cancel.
+    """
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
     # Exclude terminal statuses
@@ -499,6 +803,38 @@ def cancel_all_tasks_by_type_endpoint(task_type_prefix):
 
 @app.route('/api/last_task', methods=['GET'])
 def get_last_overall_task_status_endpoint():
+    """
+    Get the status of the most recent overall main task (analysis or clustering).
+    ---
+    tags:
+      - Status
+    responses:
+      200:
+        description: Status information for the last main task.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                  nullable: true
+                task_type:
+                  type: string
+                  nullable: true
+                status:
+                  type: string
+                progress:
+                  type: integer
+                  nullable: true
+                details:
+                  type: object
+                  additionalProperties: true
+                  nullable: true
+      404: # Although current code returns 200 with NO_PREVIOUS_MAIN_TASK
+        description: No previous main task found (current implementation returns 200).
+
+    """
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
     cur.execute("SELECT task_id, task_type, status, progress, details FROM task_status WHERE parent_task_id IS NULL ORDER BY timestamp DESC LIMIT 1")
@@ -515,6 +851,38 @@ def get_last_overall_task_status_endpoint():
 
 @app.route('/api/active_tasks', methods=['GET'])
 def get_active_tasks_endpoint():
+    """
+    Get the status of the currently active main task, if any.
+    An active main task is one that is not in a SUCCESS, FAILURE, or REVOKED state.
+    ---
+    tags:
+      - Status
+    responses:
+      200:
+        description: Status information for the active main task, or an empty object if none.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                task_id:
+                  type: string
+                parent_task_id:
+                  type: string
+                  nullable: true
+                task_type:
+                  type: string
+                sub_type_identifier:
+                  type: string
+                  nullable: true
+                status:
+                  type: string
+                progress:
+                  type: integer
+                details:
+                  type: object
+                  additionalProperties: true
+    """
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
     non_terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
@@ -541,6 +909,64 @@ def get_active_tasks_endpoint():
 
 @app.route('/api/config', methods=['GET'])
 def get_config_endpoint():
+    """
+    Get the current server configuration values.
+    ---
+    tags:
+      - Configuration
+    responses:
+      200:
+        description: A JSON object containing various configuration parameters.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jellyfin_url:
+                  type: string
+                jellyfin_user_id:
+                  type: string
+                jellyfin_token:
+                  type: string
+                num_recent_albums:
+                  type: integer
+                max_distance:
+                  type: number
+                max_songs_per_cluster:
+                  type: integer
+                max_songs_per_artist:
+                  type: integer
+                cluster_algorithm:
+                  type: string
+                num_clusters_min:
+                  type: integer
+                num_clusters_max:
+                  type: integer
+                dbscan_eps_min:
+                  type: number
+                dbscan_eps_max:
+                  type: number
+                dbscan_min_samples_min:
+                  type: integer
+                dbscan_min_samples_max:
+                  type: integer
+                gmm_n_components_min:
+                  type: integer
+                gmm_n_components_max:
+                  type: integer
+                pca_components_min:
+                  type: integer
+                pca_components_max:
+                  type: integer
+                top_n_moods:
+                  type: integer
+                mood_labels:
+                  type: array
+                  items:
+                    type: string
+                clustering_runs:
+                  type: integer
+    """
     return jsonify({
         "jellyfin_url": JELLYFIN_URL, "jellyfin_user_id": JELLYFIN_USER_ID, "jellyfin_token": JELLYFIN_TOKEN,
         "num_recent_albums": NUM_RECENT_ALBUMS, "max_distance": MAX_DISTANCE,
@@ -555,6 +981,36 @@ def get_config_endpoint():
 
 @app.route('/api/playlists', methods=['GET'])
 def get_playlists_endpoint():
+    """
+    Get all generated playlists and their tracks from the database.
+    ---
+    tags:
+      - Playlists
+    responses:
+      200:
+        description: A dictionary of playlists.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    item_id:
+                      type: string
+                      description: The Jellyfin Item ID of the track.
+                    title:
+                      type: string
+                      description: The title of the track.
+                    author:
+                      type: string
+                      description: The artist of the track.
+                example:
+                  "Energetic_Fast_1": [{"item_id": "xyz", "title": "Song A", "author": "Artist X"}]
+
+    """
     from collections import defaultdict # Local import if not used elsewhere globally
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
