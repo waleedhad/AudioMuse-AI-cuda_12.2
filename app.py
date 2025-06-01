@@ -481,6 +481,23 @@ def start_clustering_endpoint():
     # Import task function here to break circular dependency
     from tasks import run_clustering_task
 
+    # Check if a main_clustering task is already active
+    db = get_db()
+    cur = db.cursor(cursor_factory=DictCursor)
+    # Define non-terminal statuses
+    active_statuses = (TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS) # Add any other relevant non-terminal RQ statuses if needed
+    cur.execute("""
+        SELECT task_id, status FROM task_status
+        WHERE task_type = 'main_clustering' AND status IN %s
+        ORDER BY timestamp DESC
+        LIMIT 1
+    """, (active_statuses,))
+    existing_active_task = cur.fetchone()
+    cur.close()
+
+    if existing_active_task:
+        return jsonify({"error": "An active clustering task is already in progress.", "task_id": existing_active_task['task_id'], "status": existing_active_task['status']}), 409 # 409 Conflict
+
     data = request.json
     clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
     num_clusters_min_val = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))

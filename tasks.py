@@ -28,7 +28,8 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, \
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, \
+    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, SCORE_WEIGHT_DIVERSITY, \
+    SCORE_WEIGHT_PURITY, \
     MUTATION_KMEANS_COORD_FRACTION # For create_or_update_playlists_on_jellyfin
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
@@ -965,12 +966,64 @@ def _perform_single_clustering_iteration(
                 current_named_playlists[name].extend(songs_list)
                 current_playlist_centroids[name] = top_scores
         
-        diversity_score = sum(unique_predominant_mood_scores.values())
-        # print(f"{log_prefix} Iteration {run_idx}: Named {len(current_named_playlists)} playlists. Diversity score: {diversity_score:.2f}")
-        
+        # --- Enhanced Score Calculation ---
+        base_diversity_score = sum(unique_predominant_mood_scores.values())
+
+        # Calculate playlist_purity_component
+        all_individual_playlist_purities = []
+        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(all_tracks_data_parsed)}
+
+        if current_named_playlists:
+            for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
+                # playlist_name_key is the generated name like "Rock_Fast"
+                # songs_in_playlist_info_list is list of (item_id, title, author)
+
+                # Get the centroid data for this named playlist
+                playlist_centroid_mood_data = current_playlist_centroids.get(playlist_name_key)
+                if not playlist_centroid_mood_data or not songs_in_playlist_info_list:
+                    continue
+
+                # Determine the predominant mood for THIS specific playlist based on its centroid's mood data
+                predominant_mood_for_this_playlist = None
+                max_score_for_predominant = -1.0
+                for mood_label, mood_score in playlist_centroid_mood_data.items():
+                    if mood_label in MOOD_LABELS: # Ensure it's a mood label
+                        if mood_score > max_score_for_predominant:
+                            max_score_for_predominant = mood_score
+                            predominant_mood_for_this_playlist = mood_label
+                
+                if not predominant_mood_for_this_playlist:
+                    continue
+
+                try:
+                    predominant_mood_index_in_labels = MOOD_LABELS.index(predominant_mood_for_this_playlist)
+                except ValueError:
+                    print(f"{log_prefix} Iteration {run_idx}: Warning: Predominant mood '{predominant_mood_for_this_playlist}' for playlist '{playlist_name_key}' not in MOOD_LABELS list.")
+                    continue
+                    
+                scores_of_predominant_mood_for_songs_in_playlist = []
+                for item_id, _, _ in songs_in_playlist_info_list:
+                    song_original_index = item_id_to_song_index_map.get(item_id)
+                    if song_original_index is not None:
+                        song_mood_scores_vector = X_original[song_original_index][1:] # Get only the mood scores part
+                        if predominant_mood_index_in_labels < len(song_mood_scores_vector):
+                            song_specific_score_for_predominant_mood = song_mood_scores_vector[predominant_mood_index_in_labels]
+                            scores_of_predominant_mood_for_songs_in_playlist.append(song_specific_score_for_predominant_mood)
+
+                if scores_of_predominant_mood_for_songs_in_playlist:
+                    avg_purity_for_this_playlist = sum(scores_of_predominant_mood_for_songs_in_playlist) / len(scores_of_predominant_mood_for_songs_in_playlist)
+                    all_individual_playlist_purities.append(avg_purity_for_this_playlist)
+
+        playlist_purity_component = 0.0
+        if all_individual_playlist_purities:
+            playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
+
+        final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + (SCORE_WEIGHT_PURITY * playlist_purity_component)
+        # print(f"{log_prefix} Iteration {run_idx}: BaseDiv: {base_diversity_score:.2f}, PurityComp: {playlist_purity_component:.2f}, FinalScore: {final_enhanced_score:.2f}")
+
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
-            "diversity_score": float(diversity_score),
+            "diversity_score": float(final_enhanced_score), # Use the new enhanced score
             "named_playlists": dict(current_named_playlists), 
             "playlist_centroids": current_playlist_centroids,
             "pca_model_details": pca_model_details, 
