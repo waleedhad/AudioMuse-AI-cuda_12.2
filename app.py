@@ -251,7 +251,8 @@ def update_playlist_table(playlists): # Removed db_path
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM playlist WHERE playlist_name LIKE '%_automatic%'")
+        # Clear all previous conceptual playlists to reflect only the current run.
+        cur.execute("DELETE FROM playlist")
         for name, cluster in playlists.items():
             for item_id, title, author in cluster:
                 cur.execute("INSERT INTO playlist (playlist_name, item_id, title, author) VALUES (%s, %s, %s, %s) ON CONFLICT (playlist_name, item_id) DO NOTHING", (name, item_id, title, author))
