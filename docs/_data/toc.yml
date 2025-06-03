@@ -1,0 +1,17 @@
+# docs/_data/toc.yml
+- title: Getting Started
+  children:
+    - title: Introduction
+      url: /getting-started/
+    - title: Installation Guide
+      url: /getting-started/installation/
+    - title: Basic Usage
+      url: /getting-started/basic-usage/
+- title: Advanced Topics
+  children:
+    - title: Configuration
+      url: /advanced-topics/configuration/
+    - title: API Reference
+      url: /advanced-topics/api-reference/
+- title: FAQs
+  url: /faqs/

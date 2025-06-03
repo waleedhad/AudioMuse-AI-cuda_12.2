@@ -1,0 +1,39 @@
+# docs/_config.yml
+remote_theme: just-the-docs/just-the-docs # REQUIRED: Specifies the Jekyll theme
+
+title: My Awesome Documentation # Your site's title
+description: A comprehensive guide to my project. # Your site's description
+
+# Theme-specific settings for Just The Docs:
+search_enabled: true
+nav_enabled: true
+nav_fold: true # Collapsible sidebar by default
+
+last_edit_timestamp: true
+aux_links:
+  "GitHub Repo":
+    - "https://github.com/YOUR_USERNAME/YOUR_REPO_NAME" # Replace with your actual repo URL
+aux_links_footer:
+  "About Us":
+    - "https://your-website.com/about" # Adjust or remove
+
+exclude:
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - node_modules/
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
+
+# Base URL for project pages (IMPORTANT!)
+# This refers to the *URL path*, not the internal folder.
+# If your repo is `your-username.github.io` (User/Org Page), leave baseurl commented out or set to "".
+# If your repo is `my-project-docs` (Project Page), uncomment and set it to:
+# baseurl: "/my-project-docs" # Replace with your actual project repo name!
+# (Note: This is still `/my-project-docs`, not `/docs/my-project-docs`)
+
+permalink: pretty
