@@ -63,7 +63,7 @@ SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.4"))    # W
 USE_AI_PLAYLIST_NAMING = os.environ.get("USE_AI_PLAYLIST_NAMING", "False").lower() == "true"
 OLLAMA_SERVER_URL = os.environ.get("OLLAMA_SERVER_URL", "http://192.168.3.15:11434/api/generate") # URL for your Ollama instance
 OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "hermes3:3b-llama3.2-q4_K_M") # Ollama model to use deepseek-r1:1.5b - hermes3:3b-llama3.2-q4_K_M
-# --- RQ / Redis / Database Configuration ---
+OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "mistral:7b") # Ollama model to use deepseek-r1:1.5b - hermes3:3b-llama3.2-q4_K_M - mistral:7b
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
 # Construct DATABASE_URL from individual components for better security in K8s

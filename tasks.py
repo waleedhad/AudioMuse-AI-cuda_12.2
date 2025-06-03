@@ -1444,12 +1444,23 @@ def run_clustering_task(
             print(f"{log_prefix_main_task_ai} Checking AI Naming. use_ai_param={use_ai_playlist_naming_param}, ollama_url_param_is_set={bool(ollama_server_url_param)}")
             if use_ai_playlist_naming_param and ollama_server_url_param: # Use passed-in parameters
                 print(f"{log_prefix_main_task_ai} AI Naming block entered. Attempting to import 'ai' module.")
+
+                # Define the progress range for AI Naming
+                ai_naming_start_progress = 70
+                ai_naming_end_progress = 95
+                ai_naming_progress_range = ai_naming_end_progress - ai_naming_start_progress # 3%
+
+                # Set initial progress for AI naming phase *only if* AI is enabled
+                current_progress = ai_naming_start_progress
+                log_and_update_main_clustering(f"Preparing for AI Naming...", current_progress, print_console=True) # Initial log for AI phase
                 try:
                     from ai import get_ollama_playlist_name, creative_prompt_template # Import the Ollama function
                     print(f"{log_prefix_main_task_ai} 'ai' module with Ollama function imported successfully.")
                     
                     ai_renamed_playlists_final = defaultdict(list)
                     ai_renamed_centroids_final = {}
+                    total_playlists_to_name = len(final_named_playlists)
+                    playlists_named_count = 0
 
                     for original_name, songs_in_playlist in final_named_playlists.items():
                         if not songs_in_playlist:
@@ -1460,33 +1471,42 @@ def run_clustering_task(
 
                         song_list_for_ai = [{'title': s_title, 'author': s_author} for _, s_title, s_author in songs_in_playlist]
                         name_parts = original_name.split('_')
-                        feature1 = name_parts[0] if len(name_parts) > 0 else "Unknown"
-                        feature2 = name_parts[1] if len(name_parts) > 1 and name_parts[-1] in ["Slow", "Medium", "Fast"] else (name_parts[-1] if name_parts[-1] in ["Slow", "Medium", "Fast"] else "General")
-                        if name_parts[-1] in ["Slow", "Medium", "Fast"] and len(name_parts) > 1: # More specific feature extraction
-                            feature2 = name_parts[-1]
-                            feature1 = "_".join(name_parts[:-1])
-                        elif len(name_parts) == 1:
-                            feature1 = name_parts[0]
-                        else: # Multiple parts, last is not tempo
-                            feature1 = name_parts[0]
-                            if len(name_parts) > 1: feature2 = "_".join(name_parts[1:])
+                        
+                        # Updated logic for feature1 and feature2 extraction
+                        feature1 = "Unknown"
+                        feature2 = "General" 
+                        feature3 = "Music" # Default if not enough parts
 
-                        prompt = creative_prompt_template.format(feature1=feature1, feature2=feature2, category_name=original_name)
+                        if len(name_parts) >= 1:
+                            feature1 = name_parts[0]
+                        if len(name_parts) >= 2:
+                            feature2 = name_parts[1]
+                        if len(name_parts) >= 3 and name_parts[2].lower() not in ["slow", "medium", "fast"]: # Ensure 3rd part isn't tempo
+                            feature3 = name_parts[2]
+                        elif len(name_parts) >= 2 and name_parts[1].lower() not in ["slow", "medium", "fast"]: # If only 2 parts and 2nd isn't tempo, use it as f3
+                            feature3 = name_parts[1] # Or keep as "Music" if you prefer a distinct 3rd feature always
+
                         # The prompt variable here is the fully formatted template with feature1, feature2, category_name.
                         # The get_openai_playlist_name function will take this and append the song list.
                         # So, we pass the template itself, and the individual components to the function for Ollama, using passed-in params.
-                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using model '{ollama_model_name_param}'. F1: '{feature1}', F2: '{feature2}'.")
+                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using model '{ollama_model_name_param}'. F1: '{feature1}', F2: '{feature2}', F3: '{feature3}'.")
                         ai_generated_name_str = get_ollama_playlist_name(
                             ollama_server_url_param, ollama_model_name_param, # Use passed-in parameters
                             creative_prompt_template, # Pass the base template
-                            feature1, feature2, original_name, # Pass individual components for the function to format
+                            feature1, feature2, feature3, # Pass all three features
                             song_list_for_ai)
+
                         current_playlist_final_name = original_name
                         if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("An unexpected error"):
                             clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
                             if clean_ai_name:
-                                current_playlist_final_name = clean_ai_name
-                                print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{current_playlist_final_name}'")
+                                # Check if the generated name is significantly different or just the original name
+                                # This helps avoid unnecessary logging if AI just returns the input name
+                                if clean_ai_name.lower() != original_name.lower().strip().replace("_", " "): # Simple check for difference
+                                     print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{clean_ai_name}'")
+                                else:
+                                     # print(f"{log_prefix_main_task_ai} AI returned name similar to original for '{original_name}'. Using original.")
+                                     current_playlist_final_name = original_name # Explicitly keep original if AI name is same after cleaning
                             else:
                                 print(f"{log_prefix_main_task_ai} AI for '{original_name}' returned empty after cleaning. Raw: '{ai_generated_name_str}'. Using original.")
                         else:
@@ -1495,21 +1515,39 @@ def run_clustering_task(
                         ai_renamed_playlists_final[current_playlist_final_name].extend(songs_in_playlist)
                         if original_name in final_playlist_centroids: # Keep original centroid data, just change key
                             ai_renamed_centroids_final[current_playlist_final_name] = final_playlist_centroids[original_name]
+                            
+                        # Update progress after processing each playlist
+                        playlists_named_count += 1
+                        if total_playlists_to_name > 0:
+                            current_ai_progress = ai_naming_start_progress + (playlists_named_count / total_playlists_to_name) * ai_naming_progress_range
+                            log_and_update_main_clustering(
+                                f"AI Naming: Processed {playlists_named_count}/{total_playlists_to_name} playlists.",
+                                int(current_ai_progress), # Progress should be an integer
+                                print_console=False # Avoid spamming console for each playlist
+                            )
                     
                     final_named_playlists = ai_renamed_playlists_final
                     final_playlist_centroids = ai_renamed_centroids_final
-                    print(f"{log_prefix_main_task_ai} AI Naming for best playlist set completed.")
+                    log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming for best playlist set completed.", ai_naming_end_progress, print_console=True)
+                    # After successful AI naming, progress is now at 95.
+                    # The next step is database update, which starts at 95. This is correct.
                 except ImportError:
                     print(f"{log_prefix_main_task_ai} Could not import 'ai' module. Skipping AI naming for final playlists.")
                     traceback.print_exc()
+                    # If AI fails, progress should jump from 70 (or wherever it was) to 95 (start of DB update)
+                    current_progress = ai_naming_end_progress # Set progress to 95
+                    log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming skipped due to import error.", current_progress, print_console=True)
                 except Exception as e_ai_final:
                     print(f"{log_prefix_main_task_ai} Error during final AI playlist naming: {e_ai_final}. Using original names.")
                     traceback.print_exc()
+                    # If AI fails, progress should jump from 70 (or wherever it was) to 95 (start of DB update)
+                    current_progress = ai_naming_end_progress # Set progress to 95
+                    log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming skipped due to error.", current_progress, print_console=True)
             else:
                 if not ollama_server_url_param: print(f"{log_prefix_main_task_ai} AI Naming skipped: Ollama Server URL (param) not set.")
                 elif not use_ai_playlist_naming_param: print(f"{log_prefix_main_task_ai} AI Naming skipped: Use AI Naming (param) is False.")
             # --- End AI Playlist Naming for BEST result ---
-
+            
             current_progress = 95
             log_and_update_main_clustering("Updating playlist database...", current_progress, print_console=False)
             update_playlist_table(final_named_playlists) 

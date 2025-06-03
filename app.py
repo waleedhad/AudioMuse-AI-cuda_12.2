@@ -939,6 +939,17 @@ def get_active_tasks_endpoint():
         if task_item.get('details'):
             try:
                 task_item['details'] = json.loads(task_item['details'])
+                # Prune specific large or internal keys from details
+                if isinstance(task_item['details'], dict):
+                    task_item['details'].pop('clustering_run_job_ids', None)
+                    if 'best_params' in task_item['details'] and \
+                       isinstance(task_item['details']['best_params'], dict) and \
+                       'clustering_method_config' in task_item['details']['best_params'] and \
+                       isinstance(task_item['details']['best_params']['clustering_method_config'], dict) and \
+                       'params' in task_item['details']['best_params']['clustering_method_config'] and \
+                       isinstance(task_item['details']['best_params']['clustering_method_config']['params'], dict):
+                        task_item['details']['best_params']['clustering_method_config']['params'].pop('initial_centroids', None)
+
             except json.JSONDecodeError:
                 task_item['details'] = {"raw_details": task_item['details'], "error": "Failed to parse details JSON."}
         return jsonify(task_item), 200
