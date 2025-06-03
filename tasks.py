@@ -28,7 +28,9 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, \
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, SCORE_WEIGHT_DIVERSITY, \
+    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, USE_AI_PLAYLIST_NAMING, \
+    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, \
+    SCORE_WEIGHT_DIVERSITY, \
     SCORE_WEIGHT_PURITY, \
     MUTATION_KMEANS_COORD_FRACTION # For create_or_update_playlists_on_jellyfin
 from rq.job import Job # Import Job class
@@ -1178,8 +1180,12 @@ EXPLOITATION_START_FRACTION = float(os.environ.get("CLUSTERING_EXPLOITATION_STAR
 EXPLOITATION_PROBABILITY_CONFIG = float(os.environ.get("CLUSTERING_EXPLOITATION_PROBABILITY", "0.7"))
 MUTATION_INT_ABS_DELTA = int(os.environ.get("CLUSTERING_MUTATION_INT_ABS_DELTA", "3"))
 MUTATION_FLOAT_ABS_DELTA = float(os.environ.get("CLUSTERING_MUTATION_FLOAT_ABS_DELTA", "0.05"))
-
-def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, gmm_n_components_min, gmm_n_components_max):
+def run_clustering_task(
+    clustering_method, num_clusters_min, num_clusters_max, 
+    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, 
+    pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, 
+    gmm_n_components_min, gmm_n_components_max,
+    use_ai_playlist_naming_param, ollama_server_url_param, ollama_model_name_param): # Added AI params
     """Main RQ task for clustering and playlist generation."""
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
@@ -1432,6 +1438,77 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             final_named_playlists = best_clustering_results["named_playlists"]
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
             final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
+            
+            # --- AI Playlist Naming for the BEST result ---
+            log_prefix_main_task_ai = f"[MainClusteringTask-{current_task_id} AI Naming]"
+            print(f"{log_prefix_main_task_ai} Checking AI Naming. use_ai_param={use_ai_playlist_naming_param}, ollama_url_param_is_set={bool(ollama_server_url_param)}")
+            if use_ai_playlist_naming_param and ollama_server_url_param: # Use passed-in parameters
+                print(f"{log_prefix_main_task_ai} AI Naming block entered. Attempting to import 'ai' module.")
+                try:
+                    from ai import get_ollama_playlist_name, creative_prompt_template # Import the Ollama function
+                    print(f"{log_prefix_main_task_ai} 'ai' module with Ollama function imported successfully.")
+                    
+                    ai_renamed_playlists_final = defaultdict(list)
+                    ai_renamed_centroids_final = {}
+
+                    for original_name, songs_in_playlist in final_named_playlists.items():
+                        if not songs_in_playlist:
+                            ai_renamed_playlists_final[original_name].extend(songs_in_playlist)
+                            if original_name in final_playlist_centroids:
+                                ai_renamed_centroids_final[original_name] = final_playlist_centroids[original_name]
+                            continue
+
+                        song_list_for_ai = [{'title': s_title, 'author': s_author} for _, s_title, s_author in songs_in_playlist]
+                        name_parts = original_name.split('_')
+                        feature1 = name_parts[0] if len(name_parts) > 0 else "Unknown"
+                        feature2 = name_parts[1] if len(name_parts) > 1 and name_parts[-1] in ["Slow", "Medium", "Fast"] else (name_parts[-1] if name_parts[-1] in ["Slow", "Medium", "Fast"] else "General")
+                        if name_parts[-1] in ["Slow", "Medium", "Fast"] and len(name_parts) > 1: # More specific feature extraction
+                            feature2 = name_parts[-1]
+                            feature1 = "_".join(name_parts[:-1])
+                        elif len(name_parts) == 1:
+                            feature1 = name_parts[0]
+                        else: # Multiple parts, last is not tempo
+                            feature1 = name_parts[0]
+                            if len(name_parts) > 1: feature2 = "_".join(name_parts[1:])
+
+                        prompt = creative_prompt_template.format(feature1=feature1, feature2=feature2, category_name=original_name)
+                        # The prompt variable here is the fully formatted template with feature1, feature2, category_name.
+                        # The get_openai_playlist_name function will take this and append the song list.
+                        # So, we pass the template itself, and the individual components to the function for Ollama, using passed-in params.
+                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using model '{ollama_model_name_param}'. F1: '{feature1}', F2: '{feature2}'.")
+                        ai_generated_name_str = get_ollama_playlist_name(
+                            ollama_server_url_param, ollama_model_name_param, # Use passed-in parameters
+                            creative_prompt_template, # Pass the base template
+                            feature1, feature2, original_name, # Pass individual components for the function to format
+                            song_list_for_ai)
+                        current_playlist_final_name = original_name
+                        if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("An unexpected error"):
+                            clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
+                            if clean_ai_name:
+                                current_playlist_final_name = clean_ai_name
+                                print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{current_playlist_final_name}'")
+                            else:
+                                print(f"{log_prefix_main_task_ai} AI for '{original_name}' returned empty after cleaning. Raw: '{ai_generated_name_str}'. Using original.")
+                        else:
+                            print(f"{log_prefix_main_task_ai} AI naming for '{original_name}' failed or returned error: '{ai_generated_name_str}'. Using original.")
+                        
+                        ai_renamed_playlists_final[current_playlist_final_name].extend(songs_in_playlist)
+                        if original_name in final_playlist_centroids: # Keep original centroid data, just change key
+                            ai_renamed_centroids_final[current_playlist_final_name] = final_playlist_centroids[original_name]
+                    
+                    final_named_playlists = ai_renamed_playlists_final
+                    final_playlist_centroids = ai_renamed_centroids_final
+                    print(f"{log_prefix_main_task_ai} AI Naming for best playlist set completed.")
+                except ImportError:
+                    print(f"{log_prefix_main_task_ai} Could not import 'ai' module. Skipping AI naming for final playlists.")
+                    traceback.print_exc()
+                except Exception as e_ai_final:
+                    print(f"{log_prefix_main_task_ai} Error during final AI playlist naming: {e_ai_final}. Using original names.")
+                    traceback.print_exc()
+            else:
+                if not ollama_server_url_param: print(f"{log_prefix_main_task_ai} AI Naming skipped: Ollama Server URL (param) not set.")
+                elif not use_ai_playlist_naming_param: print(f"{log_prefix_main_task_ai} AI Naming skipped: Use AI Naming (param) is False.")
+            # --- End AI Playlist Naming for BEST result ---
 
             current_progress = 95
             log_and_update_main_clustering("Updating playlist database...", current_progress, print_console=False)

@@ -9,9 +9,6 @@ JELLYFIN_TOKEN = os.environ.get("JELLYFIN_TOKEN", "your_default_token")  # Repla
 # Other variables come from the audiomuse-ai-config ConfigMap
 JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://your_jellyfin_url:8096") # Replace with your default URL
 TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio
-
-
-
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
 # --- General Constants (Read from Environment Variables where applicable) ---
@@ -62,10 +59,10 @@ MUTATION_KMEANS_COORD_FRACTION = float(os.environ.get("CLUSTERING_MUTATION_KMEAN
 SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "0.6")) # Weight for the base diversity (inter-playlist mood diversity)
 SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.4"))    # Weight for playlist purity (intra-playlist mood consistency)
 
-# --- Celery Broker/Backend URLs (No longer used with RQ) ---
-# CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
-# CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
-
+# --- AI Playlist Naming ---
+USE_AI_PLAYLIST_NAMING = os.environ.get("USE_AI_PLAYLIST_NAMING", "False").lower() == "true"
+OLLAMA_SERVER_URL = os.environ.get("OLLAMA_SERVER_URL", "http://192.168.3.15:11434/api/generate") # URL for your Ollama instance
+OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "hermes3:3b-llama3.2-q4_K_M") # Ollama model to use deepseek-r1:1.5b - hermes3:3b-llama3.2-q4_K_M
 # --- RQ / Redis / Database Configuration ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 

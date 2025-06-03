@@ -22,7 +22,8 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
-    PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS
+    PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
+    USE_AI_PLAYLIST_NAMING, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME
 
 # --- Flask App Setup ---
 app = Flask(__name__)
@@ -460,6 +461,18 @@ def start_clustering_endpoint():
                 type: integer
                 description: Maximum number of songs per generated playlist/cluster.
                 default: "Configured MAX_SONGS_PER_CLUSTER"
+              use_ai_playlist_naming:
+                type: boolean
+                description: Override for using AI for playlist naming for this run.
+                default: "Defaults to server-configured USE_AI_PLAYLIST_NAMING"
+              ollama_server_url:
+                type: string
+                description: Override for the Ollama server URL for this run.
+                default: "Defaults to server-configured OLLAMA_SERVER_URL"
+              ollama_model_name:
+                type: string
+                description: Override for the Ollama model name for this run.
+                default: "Defaults to server-configured OLLAMA_MODEL_NAME"
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -513,6 +526,11 @@ def start_clustering_endpoint():
     pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
     num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
+    
+    # Get AI Naming parameters from request, fallback to global config
+    use_ai_naming_param = data.get('use_ai_playlist_naming', USE_AI_PLAYLIST_NAMING)
+    ollama_url_param = data.get('ollama_server_url', OLLAMA_SERVER_URL)
+    ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
 
     job_id = str(uuid.uuid4())
 
@@ -526,7 +544,8 @@ def start_clustering_endpoint():
             clustering_method, num_clusters_min_val, num_clusters_max_val,
             dbscan_eps_min_val, dbscan_eps_max_val, dbscan_min_samples_min_val, dbscan_min_samples_max_val,
             pca_components_min_val, pca_components_max_val, num_clustering_runs_val,
-            max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val
+            max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
+            use_ai_naming_param, ollama_url_param, ollama_model_param # Pass AI params
         ),
         job_id=job_id,
         description="Main Music Clustering", # No timeout
@@ -982,6 +1001,15 @@ def get_config_endpoint():
                   type: array
                   items:
                     type: string
+                use_ai_playlist_naming:
+                  type: boolean
+                  description: Whether to use AI for playlist naming.
+                ollama_server_url:
+                  type: string
+                  description: URL of the Ollama server for AI naming.
+                ollama_model_name:
+                  type: string
+                  description: Name of the Ollama model to use for AI naming.
                 clustering_runs:
                   type: integer
     """
@@ -994,7 +1022,11 @@ def get_config_endpoint():
         "dbscan_min_samples_min": DBSCAN_MIN_SAMPLES_MIN, "dbscan_min_samples_max": DBSCAN_MIN_SAMPLES_MAX,
         "gmm_n_components_min": GMM_N_COMPONENTS_MIN, "gmm_n_components_max": GMM_N_COMPONENTS_MAX,
         "pca_components_min": PCA_COMPONENTS_MIN, "pca_components_max": PCA_COMPONENTS_MAX,
-        "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, "clustering_runs": CLUSTERING_RUNS,
+        "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, 
+        "clustering_runs": CLUSTERING_RUNS,
+        "use_ai_playlist_naming": USE_AI_PLAYLIST_NAMING,
+        "ollama_server_url": OLLAMA_SERVER_URL,
+        "ollama_model_name": OLLAMA_MODEL_NAME,
     })
 
 @app.route('/api/playlists', methods=['GET'])
