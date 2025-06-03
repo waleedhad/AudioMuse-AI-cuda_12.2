@@ -6,7 +6,26 @@ The main scope of this application is testing the clustering algorithm. A front-
 
 **IMPORTANT:** This is an ALPHA open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
 
-## **🔄 Workflow Overview**
+## **Table of Contents**
+
+- [Workflow Overview](#workflow-overview)
+- [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
+  - [1. K-Means](#1-k-means)
+  - [2. DBSCAN](#2-dbscan)
+  - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
+- [Configuration Parameters](#configuration-parameters)
+- [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
+- [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
+- [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
+- [Screenshots](#screenshots)
+  - [Analysis task](#analysis-task)
+  - [Clustering task](#clustering-task)
+- [Key Technologies](#key-technologies)
+- [Additional Documentation](#additional-documentation)
+- [Future Possibilities](#future-possibilities)
+- [Contributing](#contributing)
+
+## **Workflow Overview**
 
 This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
 
@@ -22,7 +41,7 @@ This is the main workflow of how this algorithm works. For an easy way to use it
 
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
 
-## **📊 Clustering Algorithm Deep Dive**
+## **Clustering Algorithm Deep Dive**
 
 AudioMuse-AI offers three algorithms, each suited for different scenarios when clustering music based on tempo and 5 mood scores. This clustering algorithm is executed multiple times (default 1000\) following an Evolutionary Monte Carlo approach: in this way, multiple configurations of parameters are tested, and the best ones are kept.
 
@@ -56,10 +75,14 @@ The **mandatory** parameter that you need to change from the example are this:
 | Parameter               | Description                                 | Default Value                       |
 | ----------------------- | ------------------------------------------- | ----------------------------------- |
 | `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`      |
-| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID (K8s Secret)    | *(N/A - from Secret)*               |
-| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token (K8s Secret)  | *(N/A - from Secret)*               |
-| `REDIS_URL`             | URL for Redis (your Redis endpoint).        | redis://redis-service.playlist:6379/0|  
-| `DATABASE_URL`          | PostgreSQL connection string.               | postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb |  
+| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.| *(N/A - from Secret)*    |
+| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.| *(N/A - from Secret)*    |
+| `POSTGRES_USER`         | (Required) PostgreSQL username.| *(N/A - from Secret)*    |
+| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.| *(N/A - from Secret)*    |
+| `POSTGRES_DB`           | (Required) PostgreSQL database name.| *(N/A - from Secret)*    |
+| `POSTGRES_HOST`         | (Required) PostgreSQL host.| `postgres-service.playlist` |
+| `POSTGRES_PORT`         | (Required) PostgreSQL port.| `5432`                      |
+| `REDIS_URL`             | (Required) URL for Redis.| `redis://redis-service.playlist:6379/0` |
 
 These parameter can be leave as it is:
 
@@ -72,10 +95,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 
 | Parameter               | Description                                 | Default Value                       |
 | ----------------------- | ------------------------------------------- | ----------------------------------- |
-| **Analysis General** | 
-| `NUM_RECENT_ALBUMS`     | Albums to fetch from Jellyfin               | `500`                               |
-| `TOP_N_MOODS`           | Number of top moods for naming playlists    | `3`                                 |
-| **Jellyfin & Core** |                                                                             |                    |
+| **Analysis General** |                                                                             |                    |
 | `NUM_RECENT_ALBUMS`       | Number of recent albums to scan (0 for all).                                | `2000`   |
 | `TOP_N_MOODS`             | Number of top moods per track for feature vector.                           | `5`      |
 | **Clustering General** |                                                                             |                    |
@@ -100,24 +120,75 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
 | `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
 
-## **☸️ Kubernetes Deployment (K3S Example)**
+## **Kubernetes Deployment (K3S Example)**
 
 An example K8s deployment is provided in **deployments/deployment.yaml**. Start from it as a template.
 
-**Before Deploying:**
+The provided deployment will deploy on your cluster **pod:**
+* **audiomuse-ai-worker:** The worker at the **minimum number of 2**, you can put more if you have more than 1 node;
+* **audiomuse-ai-flask:** The api server plus the front-end;
+* **postgres-deployment:** The database for saving the analysis of score, playlist created and status of the stad.;
+* **redis-master:** Needed for Redis Queue, is hwere the worker get the task to run.
 
-* Update the **mandatory** requirements like jellyfin-credentials Secret with real Jellyfin user\_id and api\_token. Set JELLYFIN\_URL, REDIS\_URL, and DATABASE\_URL in the audiomuse-ai-config ConfigMap.  
-* Remember to configure a PVC for the PostgreSQL data.
-* **IMPORTANT** - minim number of worker needed is 2, because first run the main task and the second do the actual analysis/work. For 1 node suggested number of worker is 2. For 3 node is 4 (number of node + 1)
+**service:**
+* **audiomuse-ai-flask-service:** is a LoadBalancer service to direct access to your fronte-end. You can convert to ClusterIP if you want to add an ingress on top;
+* **postgres-service:** is a ClusterIP service needed toreach PostgreSQL form the worker internally to the cluster;
+* **redis-service:** is a ClusterIP service needed to reach Redis from the Worker internally to the cluster;
+
+**secret:**
+* **jellyfin-credentials:** which contain `api_token` and `user_id` of Jellyfin
+* **postgres-credentials:** which contain `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`
+
+**ConfigMap:**
+* **audiomuse-ai-config:** which will contain your non-sensitive parameters. By default, it includes: `JELLYFIN_URL`, `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL`.
+
+**PVC:**
+* **postgres-pvc:** this is very important because will keep all the data of the database.
+
+
+it will also create the **namespace** playlist and everything will be deployed in it.
+**Before Deploying:** 
+1. Edit the `jellyfin-credentials` and `postgres-credentials` Secrets with your actual values.
+2. Edit the `JELLYFIN_URL` in the `audiomuse-ai-config` ConfigMap.
+3. Review and ensure your `postgres-pvc` PersistentVolumeClaim configuration is appropriate for your environment to prevent data loss. Regularly backing up the database is also recommended.
 
 Then you can easily deploy it with:
+```
+kubectl apply -f deployments/deployment.yaml
+```
 
-kubectl apply \-f deployments/deployment.yaml
+When deployed you can access to:
+* **Front-end:** through the port exposed by your LoadBalancer. For exmaple in this templae case is **http://your-ip:8000**;
+* **Flask service and swagger:** You will also have the swagger at **http://your-iè:8000/apidocs** with all the API example.
 
-Access the Flask service through the port exposed by your LoadBalancer or service type.  
-For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.1.1-alpha.
+For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha.
 
-## **🐳 Docker Image Tagging Strategy**
+## **Local Deployment with Docker Compose**
+
+For a quick local setup or for users not using Kubernetes, a `docker-compose.yaml` file is provided in the `deployment/` directory.
+
+**Prerequisites:**
+*   Docker and Docker Compose installed.
+
+**Steps:**
+1.  **Navigate to the `deployment` directory:**
+    ```bash
+    cd deployment
+    ```
+2.  **Review and Customize (Optional):**
+    The `docker-compose.yaml` file is pre-configured with default credentials and settings suitable for local testing. You can edit environment variables within this file directly if needed (e.g., `JELLYFIN_URL`, `JELLYFIN_USER_ID`, `JELLYFIN_TOKEN`).
+3.  **Start the Services:**
+    ```bash
+    docker compose up -d --scale audiomuse-ai-worker=2
+    ```
+    This command starts all services (Flask app, RQ workers, Redis, PostgreSQL) in detached mode (`-d`). The `--scale audiomuse-ai-worker=2` ensures at least two worker instances are running, which is recommended for the task processing architecture.
+4.  **Access the Application:**
+    Once the containers are up, you can access the web UI at `http://localhost:8000`.
+5.  **Stopping the Services:**
+    ```bash
+    docker compose down
+    ```
+## **Docker Image Tagging Strategy**
 
 Our GitHub Actions workflow automatically builds and pushes Docker images. Here's how our tags work:
 
@@ -150,7 +221,7 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 **TBD**
 
-## **🛠️ Key Technologies**
+## **Key Technologies**
 
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
@@ -173,7 +244,15 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * **Mood prediction model** – A TensorFlow-based model trained to map MusiCNN embeddings to mood probabilities (you must provide or train your own compatible model).  
 * **Docker / OCI-compatible Containers** – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
 
-## **🚀 Future Possibilities**
+## **Additional Documentation**
+
+In **audiomuse-ai/docs** you can find additional documentation for this project, in details:
+* **api_doc.pdf** - Is a minimal documentation of the API in case you want to integrate it in your front-end (still work in progress)
+* **docker_docs.pdf** - Is a step-by-step documentation if you want to deploy everything on your local machine (debian) becuase you don't have a K3S (or other kubernetes) cluster avaiable.
+  * **audiomuse-ai/deployment/docker-compose.yaml** - is the docker compose file used in the docker_docs.pdf
+  
+
+## **Future Possibilities**
 
 This MVP lays the groundwork for further development:
 
@@ -181,7 +260,8 @@ This MVP lays the groundwork for further development:
 * 🖥️ **Jellyfin Plugin:** Integration as a Jellyfin plugin to have only one and easy-to-use front-end.  
 * 🔁 **Cross-Platform Sync** Export playlists to .m3u or sync to external platforms.
 
-## **🤝 Contributing**
+## **Contributing**
 
 Contributions, issues, and feature requests are welcome\!  
 This is an ALPHA early release, so expect bugs or functions that are still not implemented.
+

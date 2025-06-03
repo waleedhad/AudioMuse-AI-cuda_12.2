@@ -28,7 +28,11 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, \
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # For create_or_update_playlists_on_jellyfin
+    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, USE_AI_PLAYLIST_NAMING, \
+    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, \
+    SCORE_WEIGHT_DIVERSITY, \
+    SCORE_WEIGHT_PURITY, \
+    MUTATION_KMEANS_COORD_FRACTION # For create_or_update_playlists_on_jellyfin
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
@@ -595,10 +599,89 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                             print(f"[MainAnalysisTask-{current_task_id}] Error marking child job {child_job_instance.id} as REVOKED during parent failure: {e_cancel_child_on_fail}")
             raise
 
+# --- Helper for mutation ---
+def _mutate_param(value, min_val, max_val, delta, is_float=False, round_digits=None):
+    """Mutates a parameter value within its bounds."""
+    if is_float:
+        mutation = random.uniform(-delta, delta)
+        new_value = value + mutation
+        if round_digits is not None:
+            new_value = round(new_value, round_digits)
+    else: # Integer
+        # Ensure delta is at least 1 for integer mutation if it's derived from a float
+        int_delta = max(1, int(delta)) if isinstance(delta, float) else int(delta)
+        mutation = random.randint(-int_delta, int_delta)
+        new_value = value + mutation
+
+    # Clip to min/max bounds; ensure correct type after clipping for integers
+    new_value = np.clip(new_value, min_val, max_val)
+    return int(new_value) if not is_float else new_value
+
+def _generate_or_mutate_kmeans_initial_centroids(
+    n_clusters_current, data_for_clustering_current,
+    elite_kmeans_params_original, elite_pca_config_original, new_pca_config_current,
+    mutation_coord_fraction=0.05, log_prefix=""):
+    """
+    Generates or mutates initial centroids for KMeans.
+    Centroids are returned as a list of lists.
+    """
+    use_mutated_elite_centroids = False
+    if elite_kmeans_params_original and elite_pca_config_original:
+        elite_initial_centroids_list = elite_kmeans_params_original.get("initial_centroids")
+        elite_n_clusters = elite_kmeans_params_original.get("n_clusters")
+
+        pca_compatible = (elite_pca_config_original.get("enabled") == new_pca_config_current.get("enabled"))
+        if pca_compatible and elite_pca_config_original.get("enabled"): # Both enabled
+            pca_compatible = (elite_pca_config_original.get("components") == new_pca_config_current.get("components"))
+
+        if elite_initial_centroids_list and isinstance(elite_initial_centroids_list, list) and \
+           pca_compatible and elite_n_clusters == n_clusters_current:
+            use_mutated_elite_centroids = True
+
+    if use_mutated_elite_centroids:
+        # print(f"{log_prefix} Attempting to mutate KMeans centroids.")
+        mutated_centroids = []
+        elite_centroids_arr = np.array(elite_initial_centroids_list)
+        
+        if data_for_clustering_current.shape[0] > 0 and data_for_clustering_current.shape[1] > 0 and \
+           elite_centroids_arr.ndim == 2 and elite_centroids_arr.shape[1] == data_for_clustering_current.shape[1]:
+            
+            data_min = np.min(data_for_clustering_current, axis=0)
+            data_max = np.max(data_for_clustering_current, axis=0)
+            data_range = data_max - data_min
+            coord_mutation_deltas = data_range * mutation_coord_fraction
+            
+            for centroid_coords in elite_centroids_arr: # Iterate over rows (centroids)
+                mutation_vector = np.random.uniform(-coord_mutation_deltas, coord_mutation_deltas, size=centroid_coords.shape)
+                mutated_coord = centroid_coords + mutation_vector
+                mutated_coord = np.clip(mutated_coord, data_min, data_max) # Clip to current data bounds
+                mutated_centroids.append(mutated_coord.tolist())
+            # print(f"{log_prefix} Successfully mutated {len(mutated_centroids)} KMeans centroids.")
+            return mutated_centroids
+        else:
+            # print(f"{log_prefix} KMeans centroid mutation condition not met (data shape, elite centroid format, or dim mismatch). Falling back to random.")
+            pass # Fall through to random generation
+
+    # Fallback: Randomly pick from current data
+    # print(f"{log_prefix} Generating random KMeans centroids.")
+    if data_for_clustering_current.shape[0] == 0 or n_clusters_current == 0:
+        # print(f"{log_prefix} No data points or zero clusters requested for KMeans centroid generation.")
+        return [] 
+    
+    num_available_points = data_for_clustering_current.shape[0]
+    actual_n_clusters = min(n_clusters_current, num_available_points) # Cannot pick more unique centroids than available points
+    if actual_n_clusters == 0 and num_available_points > 0: actual_n_clusters = 1 # Ensure at least one if possible
+    if actual_n_clusters == 0: return []
+
+    indices = np.random.choice(num_available_points, actual_n_clusters, replace=(actual_n_clusters > num_available_points))
+    initial_centroids = data_for_clustering_current[indices]
+    return initial_centroids.tolist()
+
 def _perform_single_clustering_iteration(
     run_idx, all_tracks_data_parsed, 
     clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges, 
-    max_songs_per_cluster, log_prefix=""):
+    max_songs_per_cluster, log_prefix="",
+    elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None):
     """
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Returns a result dictionary or None on failure.
@@ -606,80 +689,244 @@ def _perform_single_clustering_iteration(
     `dbscan_params_ranges` is a dict like {"eps_min": ..., "eps_max": ..., "samples_min": ..., "samples_max": ...}
     `gmm_params_ranges` is a dict like {"n_components_min": ..., "n_components_max": ...}
     `pca_params_ranges` is a dict like {"components_min": ..., "components_max": ...}
+    `elite_solutions_params_list`: A list of 'parameters' dicts from previous best runs.
+    `exploitation_probability`: Chance to use an elite solution for parameter generation.
+    `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
     try:
-        # Parameter generation for this specific iteration
-        method_params_config = {}
-        if clustering_method == "kmeans":
-            current_num_clusters = random.randint(num_clusters_min_max[0], min(num_clusters_min_max[1], len(all_tracks_data_parsed)))
-            method_params_config = {"method": "kmeans", "params": {"n_clusters": max(1, current_num_clusters)}}
-        elif clustering_method == "dbscan":
-            current_dbscan_eps = round(random.uniform(dbscan_params_ranges["eps_min"], dbscan_params_ranges["eps_max"]), 2)
-            current_dbscan_min_samples = random.randint(dbscan_params_ranges["samples_min"], dbscan_params_ranges["samples_max"])
-            method_params_config = {"method": "dbscan", "params": {"eps": current_dbscan_eps, "min_samples": current_dbscan_min_samples}}
-        elif clustering_method == "gmm":
-            current_gmm_n_components = random.randint(gmm_params_ranges["n_components_min"], min(gmm_params_ranges["n_components_max"], len(all_tracks_data_parsed)))
-            method_params_config = {"method": "gmm", "params": {"n_components": max(1, current_gmm_n_components)}}
-        else:
-            print(f"{log_prefix} Iteration {run_idx}: Unsupported clustering method {clustering_method}")
-            return None # Or raise an error
+        elite_solutions_params_list = elite_solutions_params_list or []
+        mutation_config = mutation_config or {"int_abs_delta": 2, "float_abs_delta": 0.05, "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION}
+        if "coord_mutation_fraction" not in mutation_config: # Ensure default if not passed
+            mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
 
-        sampled_pca_components = random.randint(pca_params_ranges["components_min"], pca_params_ranges["components_max"])
-        max_allowable_pca = min(sampled_pca_components, len(MOOD_LABELS) + 1, len(all_tracks_data_parsed) -1 if len(all_tracks_data_parsed) > 1 else 1)
-        current_pca_config = {"enabled": max_allowable_pca > 0, "components": max_allowable_pca}
-        
-        # --- Start of core logic from original run_single_clustering_iteration_task ---
+        # --- Data Preparation ---
         X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed]
         X_scaled = np.array(X_original)
-        data_for_clustering = X_scaled
-        pca_model = None
-        n_components_actual = 0
+        if X_scaled.shape[0] == 0:
+            print(f"{log_prefix} Iteration {run_idx}: No data to cluster.")
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {}}
+        
+        data_after_pca_for_this_iteration = X_scaled # Default if PCA is off or fails
+        pca_model_for_this_iteration = None
+        # --- End Data Preparation ---
 
-        if current_pca_config["enabled"]:
-            n_components_actual = min(current_pca_config["components"], X_scaled.shape[1], (len(all_tracks_data_parsed) - 1) if len(all_tracks_data_parsed) > 1 else 1)
-            if n_components_actual > 0:
-                pca_model = PCA(n_components=n_components_actual)
-                data_for_clustering = pca_model.fit_transform(X_scaled)
+        # Parameter generation for this specific iteration
+        # PCA parameters are determined first, then PCA is applied.
+        # Then, clustering method parameters (like n_clusters) are determined,
+        # potentially using the shape of the data *after* PCA.
+        # Finally, for KMeans, initial_centroids are generated/mutated.
+
+        method_params_config = {}
+        pca_config = {} # Renamed from current_pca_config
+        params_generated_by_mutation = False
+
+        if elite_solutions_params_list and random.random() < exploitation_probability:
+            chosen_elite_params_set = random.choice(elite_solutions_params_list)
+            elite_method_config_original = chosen_elite_params_set.get("clustering_method_config")
+            elite_pca_config_original = chosen_elite_params_set.get("pca_config", {"enabled": False, "components": 0})
+
+            if elite_method_config_original and elite_pca_config_original and \
+               elite_method_config_original.get("method") == clustering_method:
+                try:
+                    # 1. Mutate PCA components first
+                    elite_pca_comps = elite_pca_config_original.get("components", pca_params_ranges["components_min"])
+                    mutated_pca_comps = _mutate_param(
+                        elite_pca_comps,
+                        pca_params_ranges["components_min"], pca_params_ranges["components_max"],
+                        mutation_config.get("int_abs_delta", 2)
+                    )
+                    # Max PCA components also limited by number of features in X_scaled and number of samples
+                    max_pca_by_features = X_scaled.shape[1]
+                    max_pca_by_samples = (X_scaled.shape[0] - 1) if X_scaled.shape[0] > 1 else 1
+                    
+                    max_allowable_pca_mutated = min(mutated_pca_comps, len(MOOD_LABELS) + 1, max_pca_by_features, max_pca_by_samples)
+                    max_allowable_pca_mutated = max(0, max_allowable_pca_mutated) # Ensure not negative
+                    temp_pca_config = {"enabled": max_allowable_pca_mutated > 0, "components": max_allowable_pca_mutated}
+
+                    # 2. Apply this new PCA config to get data for this iteration
+                    if temp_pca_config["enabled"]:
+                        if temp_pca_config["components"] > 0:
+                            pca_model_for_this_iteration = PCA(n_components=temp_pca_config["components"])
+                            data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                            temp_pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual components used
+                        else: # Components somehow became 0
+                            temp_pca_config["enabled"] = False
+                            data_after_pca_for_this_iteration = X_scaled # Fallback
+                    else:
+                        data_after_pca_for_this_iteration = X_scaled # PCA not enabled
+
+                    # 3. Mutate clustering method parameters (e.g., n_clusters)
+                    #    This must happen AFTER PCA, as n_clusters can depend on data_after_pca_for_this_iteration.shape[0]
+                    temp_method_params_config = None
+                    max_clusters_or_components = data_after_pca_for_this_iteration.shape[0]
+                    if max_clusters_or_components == 0: # No data points after PCA (should be rare)
+                        raise ValueError("No data points available after PCA to determine cluster parameters.")
+
+                    if clustering_method == "kmeans":
+                        elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", num_clusters_min_max[0])
+                        mutated_n_clusters = _mutate_param(
+                            elite_n_clusters, 
+                            num_clusters_min_max[0], 
+                            min(num_clusters_min_max[1], max_clusters_or_components), # Max clusters capped by available points
+                            mutation_config.get("int_abs_delta", 2)
+                        )
+                        temp_method_params_config = {"method": "kmeans", "params": {"n_clusters": max(1, mutated_n_clusters)}}
+                    elif clustering_method == "dbscan":
+                        elite_eps = elite_method_config_original.get("params", {}).get("eps", dbscan_params_ranges["eps_min"])
+                        elite_min_samples = elite_method_config_original.get("params", {}).get("min_samples", dbscan_params_ranges["samples_min"])
+                        mutated_eps = _mutate_param(
+                            elite_eps, dbscan_params_ranges["eps_min"], dbscan_params_ranges["eps_max"],
+                            mutation_config.get("float_abs_delta", 0.05), is_float=True, round_digits=2
+                        )
+                        mutated_min_samples = _mutate_param(
+                            elite_min_samples, dbscan_params_ranges["samples_min"], dbscan_params_ranges["samples_max"],
+                            mutation_config.get("int_abs_delta", 2)
+                        )
+                        temp_method_params_config = {"method": "dbscan", "params": {"eps": mutated_eps, "min_samples": mutated_min_samples}}
+                    elif clustering_method == "gmm":
+                        elite_n_components = elite_method_config_original.get("params", {}).get("n_components", gmm_params_ranges["n_components_min"])
+                        mutated_n_components = _mutate_param(
+                            elite_n_components, 
+                            gmm_params_ranges["n_components_min"], 
+                            min(gmm_params_ranges["n_components_max"], max_clusters_or_components), # Max components capped
+                            mutation_config.get("int_abs_delta", 2)
+                        )
+                        temp_method_params_config = {"method": "gmm", "params": {"n_components": max(1, mutated_n_components)}}
+                    
+                    if temp_method_params_config and temp_pca_config is not None:
+                        # 4. For KMeans, generate/mutate initial_centroids
+                        if clustering_method == "kmeans":
+                            kmeans_initial_centroids = _generate_or_mutate_kmeans_initial_centroids(
+                                temp_method_params_config["params"]["n_clusters"],
+                                data_after_pca_for_this_iteration,
+                                elite_method_config_original.get("params"), # Pass full elite Kmeans params
+                                elite_pca_config_original, # Elite's PCA config
+                                temp_pca_config,           # Current iteration's PCA config
+                                mutation_config.get("coord_mutation_fraction"),
+                                log_prefix=f"{log_prefix} Iteration {run_idx} (mutation)"
+                            )
+                            temp_method_params_config["params"]["initial_centroids"] = kmeans_initial_centroids
+
+                        method_params_config = temp_method_params_config
+                        pca_config = temp_pca_config
+                        params_generated_by_mutation = True
+                except Exception as e_mutate:
+                    print(f"{log_prefix} Iteration {run_idx}: Error mutating elite params: {e_mutate}. Falling back to random.")
+                    params_generated_by_mutation = False
+        if not params_generated_by_mutation:
+            # print(f"{log_prefix} Iteration {run_idx}: Using random parameters.")
+            # Original random parameter generation
+            sampled_pca_components_rand = random.randint(pca_params_ranges["components_min"], pca_params_ranges["components_max"])
+            max_allowable_pca_rand = min(sampled_pca_components_rand, len(MOOD_LABELS) + 1, len(all_tracks_data_parsed) -1 if len(all_tracks_data_parsed) > 1 else 1)
+            max_allowable_pca_rand = max(0, max_allowable_pca_rand)
+            pca_config = {"enabled": max_allowable_pca_rand > 0, "components": max_allowable_pca_rand}
+            
+            # Apply PCA for random generation path to get data_after_pca_for_this_iteration
+            if pca_config["enabled"]:
+                n_comps_rand = min(pca_config["components"], X_scaled.shape[1], (X_scaled.shape[0] - 1) if X_scaled.shape[0] > 1 else 1)
+                if n_comps_rand > 0:
+                    pca_model_for_this_iteration = PCA(n_components=n_comps_rand)
+                    data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                    pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
+                else:
+                    pca_config["enabled"] = False
+                    data_after_pca_for_this_iteration = X_scaled
             else:
-                current_pca_config["enabled"] = False
-        # print(f"{log_prefix} Iteration {run_idx}: PCA {'enabled with ' + str(n_components_actual) + ' components' if current_pca_config['enabled'] else 'disabled'}.")
+                data_after_pca_for_this_iteration = X_scaled
+
+            max_clusters_or_components_rand = data_after_pca_for_this_iteration.shape[0]
+            if max_clusters_or_components_rand == 0: # No data points after PCA
+                 print(f"{log_prefix} Iteration {run_idx}: No data points available after PCA for random parameter generation.")
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"pca_config": pca_config}}
+
+            if clustering_method == "kmeans":
+                k_rand = random.randint(num_clusters_min_max[0], min(num_clusters_min_max[1], max_clusters_or_components_rand))
+                k_rand = max(1, k_rand)
+                kmeans_initial_centroids_rand = _generate_or_mutate_kmeans_initial_centroids(
+                    k_rand, data_after_pca_for_this_iteration, None, None, pca_config, # No elite for random
+                    log_prefix=f"{log_prefix} Iteration {run_idx} (random)"
+                )
+                method_params_config = {"method": "kmeans", "params": {"n_clusters": k_rand, "initial_centroids": kmeans_initial_centroids_rand}}
+            elif clustering_method == "dbscan":
+                current_dbscan_eps_rand = round(random.uniform(dbscan_params_ranges["eps_min"], dbscan_params_ranges["eps_max"]), 2)
+                current_dbscan_min_samples_rand = random.randint(dbscan_params_ranges["samples_min"], dbscan_params_ranges["samples_max"])
+                method_params_config = {"method": "dbscan", "params": {"eps": current_dbscan_eps_rand, "min_samples": current_dbscan_min_samples_rand}}
+            elif clustering_method == "gmm":
+                gmm_n_rand = random.randint(gmm_params_ranges["n_components_min"], min(gmm_params_ranges["n_components_max"], max_clusters_or_components_rand))
+                method_params_config = {"method": "gmm", "params": {"n_components": max(1, gmm_n_rand)}}
+            else:
+                print(f"{log_prefix} Iteration {run_idx}: Unsupported clustering method {clustering_method}")
+                return None
+        
+        # Ensure pca_model_for_this_iteration is set if pca_config is enabled but model wasn't created during mutation path
+        if pca_config["enabled"] and pca_model_for_this_iteration is None and pca_config["components"] > 0:
+            pca_model_for_this_iteration = PCA(n_components=pca_config["components"])
+            data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled) # Refit if needed
+
+        if not method_params_config or pca_config is None:
+            print(f"{log_prefix} Iteration {run_idx}: Critical error: parameters not configured.")
+            return None
+
+        # --- Start of core logic from original run_single_clustering_iteration_task ---
+        X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed]
+        # X_scaled, data_after_pca_for_this_iteration, and pca_model_for_this_iteration are already prepared above.
+        # Use data_after_pca_for_this_iteration for clustering.
 
         labels = None
         cluster_centers_map = {}
-        raw_distances = np.zeros(len(data_for_clustering))
+        raw_distances = np.zeros(data_after_pca_for_this_iteration.shape[0])
         method_from_config = method_params_config["method"]
         params_from_config = method_params_config["params"]
 
         if method_from_config == "kmeans":
-            kmeans = KMeans(n_clusters=params_from_config["n_clusters"], random_state=None, n_init='auto')
-            labels = kmeans.fit_predict(data_for_clustering)
+            if not params_from_config.get("initial_centroids") or not isinstance(params_from_config["initial_centroids"], list) or len(params_from_config["initial_centroids"]) == 0:
+                print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids missing or empty. Cannot cluster with KMeans.")
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+            
+            initial_centroids_np = np.array(params_from_config["initial_centroids"])
+            
+            # Ensure n_clusters matches the number of initial centroids provided
+            if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: # Empty array from empty list
+                 print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids resulted in empty numpy array. Cannot cluster.")
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            if initial_centroids_np.shape[0] != params_from_config["n_clusters"]:
+                # print(f"{log_prefix} Iteration {run_idx}: Mismatch n_clusters ({params_from_config['n_clusters']}) and num initial_centroids ({initial_centroids_np.shape[0]}). Adjusting n_clusters.")
+                params_from_config["n_clusters"] = initial_centroids_np.shape[0]
+            
+            if params_from_config["n_clusters"] == 0:
+                print(f"{log_prefix} Iteration {run_idx}: n_clusters is 0 for KMeans after adjustment. Cannot cluster.")
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            kmeans = KMeans(n_clusters=params_from_config["n_clusters"], init=initial_centroids_np, n_init=1)
+            labels = kmeans.fit_predict(data_after_pca_for_this_iteration)
             cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(params_from_config["n_clusters"])}
             centers_for_points = kmeans.cluster_centers_[labels]
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            raw_distances = np.linalg.norm(data_after_pca_for_this_iteration - centers_for_points, axis=1)
         elif method_from_config == "dbscan":
             dbscan = DBSCAN(eps=params_from_config["eps"], min_samples=params_from_config["min_samples"])
-            labels = dbscan.fit_predict(data_for_clustering)
+            labels = dbscan.fit_predict(data_after_pca_for_this_iteration)
             for cluster_id_val in set(labels):
                 if cluster_id_val == -1: continue
                 indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id_val]
-                cluster_points = data_for_clustering[indices]
+                cluster_points = data_after_pca_for_this_iteration[indices]
                 if len(cluster_points) > 0:
                     center = cluster_points.mean(axis=0)
-                    for i_idx in indices: raw_distances[i_idx] = np.linalg.norm(data_for_clustering[i_idx] - center)
+                    for i_idx in indices: raw_distances[i_idx] = np.linalg.norm(data_after_pca_for_this_iteration[i_idx] - center)
                     cluster_centers_map[cluster_id_val] = center
         elif method_from_config == "gmm":
             gmm = GaussianMixture(n_components=params_from_config["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
-            gmm.fit(data_for_clustering)
-            labels = gmm.predict(data_for_clustering)
+            gmm.fit(data_after_pca_for_this_iteration)
+            labels = gmm.predict(data_after_pca_for_this_iteration)
             cluster_centers_map = {i: gmm.means_[i] for i in range(params_from_config["n_components"])}
             centers_for_points = gmm.means_[labels] # type: ignore
-            raw_distances = np.linalg.norm(data_for_clustering - centers_for_points, axis=1)
+            raw_distances = np.linalg.norm(data_after_pca_for_this_iteration - centers_for_points, axis=1)
         
-        del data_for_clustering
+        del data_after_pca_for_this_iteration # Free memory
         
         if labels is None or len(set(labels) - {-1}) == 0:
             # print(f"{log_prefix} Iteration {run_idx}: No valid clusters found.")
-            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": current_pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
         max_dist = raw_distances.max()
         normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
@@ -712,7 +959,7 @@ def _perform_single_clustering_iteration(
             if songs_list:
                 center_val = cluster_centers_map.get(label_val)
                 if center_val is None: continue
-                name, top_scores = name_cluster(center_val, pca_model, current_pca_config["enabled"], MOOD_LABELS)
+                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], MOOD_LABELS)
                 if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
                     if predominant_mood_key:
@@ -721,16 +968,68 @@ def _perform_single_clustering_iteration(
                 current_named_playlists[name].extend(songs_list)
                 current_playlist_centroids[name] = top_scores
         
-        diversity_score = sum(unique_predominant_mood_scores.values())
-        # print(f"{log_prefix} Iteration {run_idx}: Named {len(current_named_playlists)} playlists. Diversity score: {diversity_score:.2f}")
-        
-        pca_model_details = {"n_components": pca_model.n_components_, "explained_variance_ratio": pca_model.explained_variance_ratio_.tolist(), "mean": pca_model.mean_.tolist()} if pca_model and current_pca_config["enabled"] else None
+        # --- Enhanced Score Calculation ---
+        base_diversity_score = sum(unique_predominant_mood_scores.values())
+
+        # Calculate playlist_purity_component
+        all_individual_playlist_purities = []
+        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(all_tracks_data_parsed)}
+
+        if current_named_playlists:
+            for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
+                # playlist_name_key is the generated name like "Rock_Fast"
+                # songs_in_playlist_info_list is list of (item_id, title, author)
+
+                # Get the centroid data for this named playlist
+                playlist_centroid_mood_data = current_playlist_centroids.get(playlist_name_key)
+                if not playlist_centroid_mood_data or not songs_in_playlist_info_list:
+                    continue
+
+                # Determine the predominant mood for THIS specific playlist based on its centroid's mood data
+                predominant_mood_for_this_playlist = None
+                max_score_for_predominant = -1.0
+                for mood_label, mood_score in playlist_centroid_mood_data.items():
+                    if mood_label in MOOD_LABELS: # Ensure it's a mood label
+                        if mood_score > max_score_for_predominant:
+                            max_score_for_predominant = mood_score
+                            predominant_mood_for_this_playlist = mood_label
+                
+                if not predominant_mood_for_this_playlist:
+                    continue
+
+                try:
+                    predominant_mood_index_in_labels = MOOD_LABELS.index(predominant_mood_for_this_playlist)
+                except ValueError:
+                    print(f"{log_prefix} Iteration {run_idx}: Warning: Predominant mood '{predominant_mood_for_this_playlist}' for playlist '{playlist_name_key}' not in MOOD_LABELS list.")
+                    continue
+                    
+                scores_of_predominant_mood_for_songs_in_playlist = []
+                for item_id, _, _ in songs_in_playlist_info_list:
+                    song_original_index = item_id_to_song_index_map.get(item_id)
+                    if song_original_index is not None:
+                        song_mood_scores_vector = X_original[song_original_index][1:] # Get only the mood scores part
+                        if predominant_mood_index_in_labels < len(song_mood_scores_vector):
+                            song_specific_score_for_predominant_mood = song_mood_scores_vector[predominant_mood_index_in_labels]
+                            scores_of_predominant_mood_for_songs_in_playlist.append(song_specific_score_for_predominant_mood)
+
+                if scores_of_predominant_mood_for_songs_in_playlist:
+                    avg_purity_for_this_playlist = sum(scores_of_predominant_mood_for_songs_in_playlist) / len(scores_of_predominant_mood_for_songs_in_playlist)
+                    all_individual_playlist_purities.append(avg_purity_for_this_playlist)
+
+        playlist_purity_component = 0.0
+        if all_individual_playlist_purities:
+            playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
+
+        final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + (SCORE_WEIGHT_PURITY * playlist_purity_component)
+        # print(f"{log_prefix} Iteration {run_idx}: BaseDiv: {base_diversity_score:.2f}, PurityComp: {playlist_purity_component:.2f}, FinalScore: {final_enhanced_score:.2f}")
+
+        pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
-            "diversity_score": float(diversity_score),
+            "diversity_score": float(final_enhanced_score), # Use the new enhanced score
             "named_playlists": dict(current_named_playlists), 
             "playlist_centroids": current_playlist_centroids,
             "pca_model_details": pca_model_details, 
-            "parameters": {"clustering_method_config": method_params_config, "pca_config": current_pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}
+            "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}
         }
         return result
     except Exception as e_iter:
@@ -741,7 +1040,8 @@ def _perform_single_clustering_iteration(
 def run_clustering_batch_task(
     batch_id_str, start_run_idx, num_iterations_in_batch, all_tracks_data_json,
     clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-    max_songs_per_cluster, parent_task_id):
+    max_songs_per_cluster, parent_task_id,
+    elite_solutions_params_list_json=None, exploitation_probability=0.0, mutation_config_json=None):
     """RQ task to run a batch of clustering iterations."""
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4()) # This is the ID of the batch task itself
@@ -810,6 +1110,20 @@ def run_clustering_batch_task(
             # === End Cooperative Cancellation Check ===
 
             all_tracks_data = json.loads(all_tracks_data_json)
+
+            elite_solutions_params_list_for_iter = []
+            if elite_solutions_params_list_json:
+                try:
+                    elite_solutions_params_list_for_iter = json.loads(elite_solutions_params_list_json)
+                except json.JSONDecodeError:
+                    print(f"{log_prefix_for_iter} Warning: Could not decode elite solutions JSON. Proceeding without elites for this batch.")
+            
+            mutation_config_for_iter = {}
+            if mutation_config_json:
+                try:
+                    mutation_config_for_iter = json.loads(mutation_config_json)
+                except json.JSONDecodeError:
+                    print(f"{log_prefix_for_iter} Warning: Could not decode mutation config JSON. Using default mutation behavior.")
             
             best_result_in_this_batch = None
             best_score_in_this_batch = -1.0
@@ -831,7 +1145,10 @@ def run_clustering_batch_task(
                 iteration_result = _perform_single_clustering_iteration(
                     current_run_global_idx, all_tracks_data, clustering_method,
                     num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-                    max_songs_per_cluster, log_prefix=log_prefix_for_iter
+                    max_songs_per_cluster, log_prefix=log_prefix_for_iter,
+                    elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
+                    exploitation_probability=exploitation_probability,
+                    mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {})
                 )
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
@@ -857,7 +1174,18 @@ def run_clustering_batch_task(
             print(f"ERROR: Clustering batch {batch_id_str} failed: {e}\n{error_tb}")
             raise
 
-def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, gmm_n_components_min, gmm_n_components_max):
+# Constants for guided search (can be moved to config.py later or read from env)
+TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10"))
+EXPLOITATION_START_FRACTION = float(os.environ.get("CLUSTERING_EXPLOITATION_START_FRACTION", "0.2"))
+EXPLOITATION_PROBABILITY_CONFIG = float(os.environ.get("CLUSTERING_EXPLOITATION_PROBABILITY", "0.7"))
+MUTATION_INT_ABS_DELTA = int(os.environ.get("CLUSTERING_MUTATION_INT_ABS_DELTA", "3"))
+MUTATION_FLOAT_ABS_DELTA = float(os.environ.get("CLUSTERING_MUTATION_FLOAT_ABS_DELTA", "0.05"))
+def run_clustering_task(
+    clustering_method, num_clusters_min, num_clusters_max, 
+    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, 
+    pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, 
+    gmm_n_components_min, gmm_n_components_max,
+    use_ai_playlist_naming_param, ollama_server_url_param, ollama_model_name_param): # Added AI params
     """Main RQ task for clustering and playlist generation."""
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
@@ -932,7 +1260,16 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             serializable_rows = [dict(row) for row in rows]
             all_tracks_data_json = json.dumps(serializable_rows)
             best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
-            best_clustering_results = None
+            best_clustering_results = None # Stores the full result dict of the best iteration
+            elite_solutions_list = []      # List of {"score": float, "params": dict}
+
+            mutation_config = {
+                "int_abs_delta": MUTATION_INT_ABS_DELTA,
+                "float_abs_delta": MUTATION_FLOAT_ABS_DELTA,
+                "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION
+            }
+            mutation_config_json = json.dumps(mutation_config)
+            exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
             all_launched_child_jobs_instances = [] 
             from app import rq_queue as main_rq_queue
 
@@ -979,6 +1316,7 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 
                 for job_id_processed in processed_in_this_cycle_ids:
                     if job_id_processed in active_jobs_map: del active_jobs_map[job_id_processed]
+                newly_completed_elite_candidates = []
 
                 if processed_in_this_cycle_ids:
                     for job_id_just_completed in processed_in_this_cycle_ids:
@@ -988,15 +1326,30 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                             iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
                             total_iterations_completed_count += iterations_from_batch
                             best_from_batch = batch_job_result.get("best_result_from_batch")
-                            if best_from_batch:
-                                current_batch_best_score = best_from_batch.get("diversity_score", -1.0)
-                                if current_batch_best_score > best_diversity_score:
-                                    best_diversity_score = current_batch_best_score
+                            if best_from_batch and isinstance(best_from_batch, dict):
+                                batch_best_score = best_from_batch.get("diversity_score", -1.0)
+                                batch_best_params = best_from_batch.get("parameters")
+                                if batch_best_score > -1.0 and batch_best_params:
+                                    newly_completed_elite_candidates.append({"score": batch_best_score, "params": batch_best_params})
+                                
+                                if batch_best_score > best_diversity_score:
+                                    best_diversity_score = batch_best_score
                                     _main_task_accumulated_details["best_score"] = best_diversity_score
+                                    best_clustering_results = best_from_batch # Update overall best
                                     print(f"[MainClusteringTask-{current_task_id}] Intermediate new best score: {best_diversity_score:.2f} from batch job {job_id_just_completed}")
                         else:
                             print(f"[MainClusteringTask-{current_task_id}] Warning: Batch job {job_id_just_completed} completed but no result.")
+                
+                if newly_completed_elite_candidates:
+                    all_potential_elites = elite_solutions_list + newly_completed_elite_candidates
+                    all_potential_elites.sort(key=lambda x: x["score"], reverse=True)
+                    # Simple top N, relying on run_id in params for distinctness of entries
+                    # If multiple runs (different run_ids) yield the same params otherwise, they are treated as distinct elites.
+                    # This is acceptable as the goal is to feed good parameter sets to mutation.
+                    elite_solutions_list = all_potential_elites[:TOP_N_ELITES]
 
+
+                # Launch new jobs if slots are available and more batches are pending
                 can_launch_more_batch_jobs = next_batch_job_idx_to_launch < num_total_batch_jobs
                 if can_launch_more_batch_jobs:
                     num_slots_to_fill = MAX_CONCURRENT_BATCH_JOBS - len(active_jobs_map)
@@ -1020,6 +1373,11 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                         dbscan_params_ranges_dict_for_batch = {"eps_min": dbscan_eps_min, "eps_max": dbscan_eps_max, "samples_min": dbscan_min_samples_min, "samples_max": dbscan_min_samples_max}
                         gmm_params_ranges_dict_for_batch = {"n_components_min": gmm_n_components_min, "n_components_max": gmm_n_components_max}
                         pca_params_ranges_dict_for_batch = {"components_min": pca_components_min, "components_max": pca_components_max}
+
+                        current_elite_params_for_batch_json = json.dumps([item["params"] for item in elite_solutions_list]) if elite_solutions_list else "[]"
+                        should_exploit_for_this_batch = (current_batch_start_run_idx >= exploitation_start_run_idx) and elite_solutions_list
+                        exploitation_prob_for_this_batch = EXPLOITATION_PROBABILITY_CONFIG if should_exploit_for_this_batch else 0.0
+
                         
                         new_job = main_rq_queue.enqueue(
                             run_clustering_batch_task,
@@ -1027,7 +1385,10 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                                 batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch, all_tracks_data_json,
                                 clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch, 
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
-                                max_songs_per_cluster, current_task_id
+                                max_songs_per_cluster, current_task_id,
+                                current_elite_params_for_batch_json,
+                                exploitation_prob_for_this_batch,
+                                mutation_config_json
                             ),
                             job_id=batch_job_task_id,
                             description=f"Clustering Batch {next_batch_job_idx_to_launch} (Runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1})",
@@ -1062,56 +1423,10 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
                 if batches_completed_count >= num_total_batch_jobs and not active_jobs_map: break 
                 time.sleep(3)
 
-            log_and_update_main_clustering("All clustering batch jobs completed. Aggregating results...", 90)
-            for job_instance_result_phase in all_launched_child_jobs_instances:
-                current_progress = 90
-                if current_job:
-                    with app.app_context():
-                        main_task_db_info = get_task_info_from_db(current_task_id)
-                        if main_task_db_info and main_task_db_info.get('status') == TASK_STATUS_REVOKED:
-                            log_and_update_main_clustering(f"🛑 Main clustering task {current_task_id} REVOKED during result aggregation.", current_progress, task_state=TASK_STATUS_REVOKED)
-                            return {"status": "REVOKED", "message": "Main clustering task revoked during final result aggregation."}
-
-                batch_job_final_result = get_job_result_safely(job_instance_result_phase.id, current_task_id, "clustering_batch")
-                try:
-                    if batch_job_final_result and "best_result_from_batch" in batch_job_final_result:
-                        iteration_result_data = batch_job_final_result["best_result_from_batch"]
-                        if not iteration_result_data: continue
-                        current_diversity_score = iteration_result_data.get("diversity_score", -1.0)
-                        if current_diversity_score >= best_diversity_score:
-                            best_diversity_score = current_diversity_score
-                            best_clustering_results = iteration_result_data
-                            log_and_update_main_clustering(f"Aggregating: Batch job {job_instance_result_phase.id} provided best iteration (ID: {iteration_result_data.get('parameters', {}).get('run_id', 'N/A')}, Score: {current_diversity_score:.2f}) matching/exceeding overall best.", current_progress, details_to_add_or_update={"best_score": best_diversity_score})
-                    else: 
-                        failed_job_id = job_instance_result_phase.id if job_instance_result_phase else "Unknown_ID"
-                        job_status_for_failed_log = "UNKNOWN (Batch result not found/invalid)"
-                        error_info_str = "No specific error info retrieved for batch."
-                        try: 
-                            job_instance_result_phase.refresh() 
-                            job_status_for_failed_log = job_instance_result_phase.get_status()
-                            if job_instance_result_phase.is_failed and job_instance_result_phase.exc_info:
-                                error_info_str = str(job_instance_result_phase.exc_info).strip().split('\n')[-1]
-                        except NoSuchJobError:
-                            with app.app_context():
-                                db_info_for_log = get_task_info_from_db(failed_job_id) # type: ignore
-                                job_status_for_failed_log = f"DB:{db_info_for_log.get('status')}" if db_info_for_log else "MISSING_FROM_RQ_AND_DB"
-                                if db_info_for_log and db_info_for_log.get('details'):
-                                    try:
-                                        child_details = json.loads(db_info_for_log['details'])
-                                        if 'error' in child_details: error_info_str = f"DB error: {child_details['error']}"
-                                        elif 'log' in child_details and child_details['log']:
-                                            for log_line in reversed(child_details['log']):
-                                                if "error" in log_line.lower() or "fail" in log_line.lower():
-                                                    error_info_str = f"DB log hint: {log_line}"; break
-                                    except Exception: pass
-                        log_and_update_main_clustering(
-                            f"Clustering batch job ({failed_job_id}) did not yield a usable result (status: {job_status_for_failed_log}). Error hint: {error_info_str}",
-                            current_progress
-                        )
-                except Exception as e_final_result_cluster:
-                    job_id_for_error = job_instance_result_phase.id if job_instance_result_phase else "Unknown_ID"
-                    print(f"[MainClusteringTask-{current_task_id}] ERROR processing final result for batch job {job_id_for_error}: {e_final_result_cluster}. This batch will not contribute.")
-                    traceback.print_exc()
+            # Best result (best_clustering_results and best_diversity_score) is already tracked incrementally.
+            # No need for a separate final aggregation loop over all_launched_child_jobs_instances.
+            log_and_update_main_clustering("All clustering batch jobs completed. Finalizing best result...", 90,
+                                           details_to_add_or_update={"best_score": best_diversity_score})
 
             if not best_clustering_results or best_diversity_score < 0:
                 log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE)
@@ -1123,6 +1438,77 @@ def run_clustering_task(clustering_method, num_clusters_min, num_clusters_max, d
             final_named_playlists = best_clustering_results["named_playlists"]
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
             final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
+            
+            # --- AI Playlist Naming for the BEST result ---
+            log_prefix_main_task_ai = f"[MainClusteringTask-{current_task_id} AI Naming]"
+            print(f"{log_prefix_main_task_ai} Checking AI Naming. use_ai_param={use_ai_playlist_naming_param}, ollama_url_param_is_set={bool(ollama_server_url_param)}")
+            if use_ai_playlist_naming_param and ollama_server_url_param: # Use passed-in parameters
+                print(f"{log_prefix_main_task_ai} AI Naming block entered. Attempting to import 'ai' module.")
+                try:
+                    from ai import get_ollama_playlist_name, creative_prompt_template # Import the Ollama function
+                    print(f"{log_prefix_main_task_ai} 'ai' module with Ollama function imported successfully.")
+                    
+                    ai_renamed_playlists_final = defaultdict(list)
+                    ai_renamed_centroids_final = {}
+
+                    for original_name, songs_in_playlist in final_named_playlists.items():
+                        if not songs_in_playlist:
+                            ai_renamed_playlists_final[original_name].extend(songs_in_playlist)
+                            if original_name in final_playlist_centroids:
+                                ai_renamed_centroids_final[original_name] = final_playlist_centroids[original_name]
+                            continue
+
+                        song_list_for_ai = [{'title': s_title, 'author': s_author} for _, s_title, s_author in songs_in_playlist]
+                        name_parts = original_name.split('_')
+                        feature1 = name_parts[0] if len(name_parts) > 0 else "Unknown"
+                        feature2 = name_parts[1] if len(name_parts) > 1 and name_parts[-1] in ["Slow", "Medium", "Fast"] else (name_parts[-1] if name_parts[-1] in ["Slow", "Medium", "Fast"] else "General")
+                        if name_parts[-1] in ["Slow", "Medium", "Fast"] and len(name_parts) > 1: # More specific feature extraction
+                            feature2 = name_parts[-1]
+                            feature1 = "_".join(name_parts[:-1])
+                        elif len(name_parts) == 1:
+                            feature1 = name_parts[0]
+                        else: # Multiple parts, last is not tempo
+                            feature1 = name_parts[0]
+                            if len(name_parts) > 1: feature2 = "_".join(name_parts[1:])
+
+                        prompt = creative_prompt_template.format(feature1=feature1, feature2=feature2, category_name=original_name)
+                        # The prompt variable here is the fully formatted template with feature1, feature2, category_name.
+                        # The get_openai_playlist_name function will take this and append the song list.
+                        # So, we pass the template itself, and the individual components to the function for Ollama, using passed-in params.
+                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using model '{ollama_model_name_param}'. F1: '{feature1}', F2: '{feature2}'.")
+                        ai_generated_name_str = get_ollama_playlist_name(
+                            ollama_server_url_param, ollama_model_name_param, # Use passed-in parameters
+                            creative_prompt_template, # Pass the base template
+                            feature1, feature2, original_name, # Pass individual components for the function to format
+                            song_list_for_ai)
+                        current_playlist_final_name = original_name
+                        if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("An unexpected error"):
+                            clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
+                            if clean_ai_name:
+                                current_playlist_final_name = clean_ai_name
+                                print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{current_playlist_final_name}'")
+                            else:
+                                print(f"{log_prefix_main_task_ai} AI for '{original_name}' returned empty after cleaning. Raw: '{ai_generated_name_str}'. Using original.")
+                        else:
+                            print(f"{log_prefix_main_task_ai} AI naming for '{original_name}' failed or returned error: '{ai_generated_name_str}'. Using original.")
+                        
+                        ai_renamed_playlists_final[current_playlist_final_name].extend(songs_in_playlist)
+                        if original_name in final_playlist_centroids: # Keep original centroid data, just change key
+                            ai_renamed_centroids_final[current_playlist_final_name] = final_playlist_centroids[original_name]
+                    
+                    final_named_playlists = ai_renamed_playlists_final
+                    final_playlist_centroids = ai_renamed_centroids_final
+                    print(f"{log_prefix_main_task_ai} AI Naming for best playlist set completed.")
+                except ImportError:
+                    print(f"{log_prefix_main_task_ai} Could not import 'ai' module. Skipping AI naming for final playlists.")
+                    traceback.print_exc()
+                except Exception as e_ai_final:
+                    print(f"{log_prefix_main_task_ai} Error during final AI playlist naming: {e_ai_final}. Using original names.")
+                    traceback.print_exc()
+            else:
+                if not ollama_server_url_param: print(f"{log_prefix_main_task_ai} AI Naming skipped: Ollama Server URL (param) not set.")
+                elif not use_ai_playlist_naming_param: print(f"{log_prefix_main_task_ai} AI Naming skipped: Use AI Naming (param) is False.")
+            # --- End AI Playlist Naming for BEST result ---
 
             current_progress = 95
             log_and_update_main_clustering("Updating playlist database...", current_progress, print_console=False)

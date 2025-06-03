@@ -34,10 +34,11 @@ metadata:
   namespace: playlist
 data:
   JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087"
-  DATABASE_URL: "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb"
   # CELERY_BROKER_URL and CELERY_RESULT_BACKEND are no longer needed for RQ.
   # REDIS_URL is used by both app.py and rq_worker.py, and defaults to redis://localhost:6379/0 if not set.
   # We can explicitly set it here to point to our Kubernetes Redis service.
+  POSTGRES_HOST: "postgres-service.playlist" # Database host
+  POSTGRES_PORT: "5432" # Database port
   REDIS_URL: "redis://redis-service.playlist:6379/0"
   TEMP_DIR: "/app/temp_audio" # Updated to match code changes
 ---
@@ -206,6 +207,33 @@ spec:
             secretKeyRef:
               name: jellyfin-credentials
               key: api_token
+        # --- Load PostgreSQL Credentials from Secret ---
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_DB
+        # --- Load non-sensitive DB parts and other config from ConfigMap ---
+        - name: POSTGRES_HOST # Already in configMapRef below, but explicit for clarity if needed
+          valueFrom:
+            configMapKeyRef:
+              name: audiomuse-ai-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT # Already in configMapRef below
+          valueFrom:
+            configMapKeyRef:
+              name: audiomuse-ai-config # Correct: Source from the ConfigMap
+              key: POSTGRES_PORT       # Correct: Use the POSTGRES_PORT key
         # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:
@@ -284,6 +312,33 @@ spec:
             secretKeyRef:
               name: jellyfin-credentials
               key: api_token
+        # --- Load PostgreSQL Credentials from Secret ---
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_DB
+        # --- Load non-sensitive DB parts and other config from ConfigMap ---
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: audiomuse-ai-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: audiomuse-ai-config # Correct: Source from the ConfigMap
+              key: POSTGRES_PORT       # Correct: Use the POSTGRES_PORT key
         # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:

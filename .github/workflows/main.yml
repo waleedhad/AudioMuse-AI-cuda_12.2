@@ -97,7 +97,11 @@ jobs:
           docker run -d --name flask-test-app -p 8000:8000 \
             --link postgres-flask-test:postgres \
             -e SERVICE_TYPE=flask \
-            -e DATABASE_URL=postgresql://testuser:testpass@postgres:5432/testdb \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            -e POSTGRES_HOST=postgres \
+            -e POSTGRES_PORT=5432 \
             ${{ steps.docker_tags.outputs.test_tag }}
 
           echo "Waiting for Flask app to start (max 60 seconds)..."
@@ -150,7 +154,11 @@ jobs:
             --link redis-test:redis --link postgres-rq-test:postgres \
             -e SERVICE_TYPE=worker \
             -e REDIS_URL=redis://redis:6379/0 \
-            -e DATABASE_URL=postgresql://testuser:testpass@postgres:5432/testdb \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            -e POSTGRES_HOST=postgres \
+            -e POSTGRES_PORT=5432 \
             ${{ steps.docker_tags.outputs.test_tag }}
 
           echo "Waiting for RQ worker to start (max 90 seconds)..."

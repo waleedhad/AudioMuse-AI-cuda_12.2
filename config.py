@@ -9,9 +9,6 @@ JELLYFIN_TOKEN = os.environ.get("JELLYFIN_TOKEN", "your_default_token")  # Repla
 # Other variables come from the audiomuse-ai-config ConfigMap
 JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://your_jellyfin_url:8096") # Replace with your default URL
 TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio
-
-
-
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
 # --- General Constants (Read from Environment Variables where applicable) ---
@@ -50,13 +47,33 @@ PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "5")) # Max components 
 # --- Clustering Runs for Diversity (New Constant) ---
 CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 
-# --- Celery Broker/Backend URLs (No longer used with RQ) ---
-# CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis-service.playlist:6379/0")
-# CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis-service.playlist:6379/0")
+# --- Guided Evolutionary Clustering Constants ---
+TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10")) # Number of best solutions to keep as elites
+EXPLOITATION_START_FRACTION = float(os.environ.get("CLUSTERING_EXPLOITATION_START_FRACTION", "0.2")) # Fraction of runs before starting to use elites (e.g., 0.2 means after 20% of runs)
+EXPLOITATION_PROBABILITY_CONFIG = float(os.environ.get("CLUSTERING_EXPLOITATION_PROBABILITY", "0.7")) # Probability of mutating an elite vs. random generation, once exploitation starts
+MUTATION_INT_ABS_DELTA = int(os.environ.get("CLUSTERING_MUTATION_INT_ABS_DELTA", "3")) # Max absolute change for integer parameter mutation
+MUTATION_FLOAT_ABS_DELTA = float(os.environ.get("CLUSTERING_MUTATION_FLOAT_ABS_DELTA", "0.05")) # Max absolute change for float parameter mutation (e.g., for DBSCAN eps)
+MUTATION_KMEANS_COORD_FRACTION = float(os.environ.get("CLUSTERING_MUTATION_KMEANS_COORD_FRACTION", "0.05")) # Fractional change for KMeans centroid coordinates based on data range
 
+# --- Scoring Weights for Enhanced Diversity Score ---
+SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "0.6")) # Weight for the base diversity (inter-playlist mood diversity)
+SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.4"))    # Weight for playlist purity (intra-playlist mood consistency)
+
+# --- AI Playlist Naming ---
+USE_AI_PLAYLIST_NAMING = os.environ.get("USE_AI_PLAYLIST_NAMING", "False").lower() == "true"
+OLLAMA_SERVER_URL = os.environ.get("OLLAMA_SERVER_URL", "http://192.168.3.15:11434/api/generate") # URL for your Ollama instance
+OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "hermes3:3b-llama3.2-q4_K_M") # Ollama model to use deepseek-r1:1.5b - hermes3:3b-llama3.2-q4_K_M
 # --- RQ / Redis / Database Configuration ---
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://audiomuse:audiomusepassword@postgres-service.playlist:5432/audiomusedb")
+
+# Construct DATABASE_URL from individual components for better security in K8s
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "audiomuse")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "audiomusepassword")
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres-service.playlist") # Default for K8s
+POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "audiomusedb")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 # --- Classifier Constant ---
 MOOD_LABELS = [

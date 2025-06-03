@@ -35,7 +35,8 @@ RUN pip3 install --no-cache-dir \
     pyyaml \
     six \
     # Added psycopg2-binary for PostgreSQL connectivity
-    psycopg2-binary
+    psycopg2-binary \
+    flasgger
 
 RUN pip3 install --no-cache-dir essentia-tensorflow
 
