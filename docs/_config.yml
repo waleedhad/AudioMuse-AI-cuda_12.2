@@ -33,7 +33,7 @@ exclude:
 # This refers to the *URL path*, not the internal folder.
 # If your repo is `your-username.github.io` (User/Org Page), leave baseurl commented out or set to "".
 # If your repo is `my-project-docs` (Project Page), uncomment and set it to:
-# baseurl: "/my-project-docs" # Replace with your actual project repo name!
-# (Note: This is still `/my-project-docs`, not `/docs/my-project-docs`)
+baseurl: "/AudioMuse-AI" # <-- THIS LINE IS NOW UNCOMMENTED AND CORRECT!
+# (Note: This is still `/AudioMuse-AI`, not `/docs/AudioMuse-AI`)
 
 permalink: pretty
