@@ -1495,17 +1495,19 @@ def run_clustering_task(
                             creative_prompt_template, # Pass the base template
                             feature1, feature2, feature3, # Pass all three features
                             song_list_for_ai)
-
+                        
                         current_playlist_final_name = original_name
                         if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("An unexpected error"):
                             clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
                             if clean_ai_name:
                                 # Check if the generated name is significantly different or just the original name
                                 # This helps avoid unnecessary logging if AI just returns the input name
-                                if clean_ai_name.lower() != original_name.lower().strip().replace("_", " "): # Simple check for difference
+                                # Also ensure it's not empty after cleaning.
+                                if clean_ai_name.lower() != original_name.lower().strip().replace("_", " ") and clean_ai_name:
                                      print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{clean_ai_name}'")
+                                     current_playlist_final_name = clean_ai_name # <-- THE FIX IS HERE
                                 else:
-                                     # print(f"{log_prefix_main_task_ai} AI returned name similar to original for '{original_name}'. Using original.")
+                                     # print(f"{log_prefix_main_task_ai} AI returned name similar to original or empty for '{original_name}'. Using original.")
                                      current_playlist_final_name = original_name # Explicitly keep original if AI name is same after cleaning
                             else:
                                 print(f"{log_prefix_main_task_ai} AI for '{original_name}' returned empty after cleaning. Raw: '{ai_generated_name_str}'. Using original.")
