@@ -28,6 +28,15 @@ stringData:
   POSTGRES_DB: "audiomusedb" # As used in app.py
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-api-credentials
+  namespace: playlist
+type: Opaque
+stringData:
+  GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE" # Replace with your actual Gemini API Key
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: audiomuse-ai-config
@@ -189,7 +198,7 @@ spec:
         fsGroup: 0
       containers:
       - name: flask-app
-        image: ghcr.io/neptunehub/audiomuse-ai:0.2.0-alpha # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha # Your image from GHCR
         imagePullPolicy: Always
         ports:
         - containerPort: 8000 # Flask app listens on 8000
@@ -233,7 +242,13 @@ spec:
           valueFrom:
             configMapKeyRef:
               name: audiomuse-ai-config # Correct: Source from the ConfigMap
-              key: POSTGRES_PORT       # Correct: Use the POSTGRES_PORT key
+              key: POSTGRES_PORT
+        # --- Load Gemini API Key from Secret ---
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-credentials
+              key: GEMINI_API_KEY
         # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:
@@ -294,7 +309,7 @@ spec:
         fsGroup: 0
       containers:
       - name: rq-worker # Changed from celery-worker
-        image: ghcr.io/neptunehub/audiomuse-ai:0.2.0-alpha # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha # Your image from GHCR
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE
@@ -338,7 +353,13 @@ spec:
           valueFrom:
             configMapKeyRef:
               name: audiomuse-ai-config # Correct: Source from the ConfigMap
-              key: POSTGRES_PORT       # Correct: Use the POSTGRES_PORT key
+              key: POSTGRES_PORT
+        # --- Load Gemini API Key from Secret ---
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-credentials
+              key: GEMINI_API_KEY
         # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:

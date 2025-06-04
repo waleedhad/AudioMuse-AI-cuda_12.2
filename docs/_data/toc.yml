@@ -1,0 +1,7 @@
+# docs/_data/toc.yml
+- title: Getting Started
+  children:
+    - title: Installation Guide
+      url: /getting-started/installation/
+    - title: Parameter # Title from docs/getting-started/parameter.md
+      url: /getting-started/parameter/
