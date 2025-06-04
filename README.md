@@ -9,16 +9,16 @@ The main scope of this application is testing the clustering algorithm. A front-
 ## **Table of Contents**
 
 - [Quick Start on K3S](#quick-start-on-k3s)
+- [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
+- [Configuration Parameters](#configuration-parameters)
+- [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
+- [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
 - [Workflow Overview](#workflow-overview)
 - [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
   - [1. K-Means](#1-k-means)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
   - [AI Playlist Naming](#ai-playlist-naming)
-- [Configuration Parameters](#configuration-parameters)
-- [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
-- [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
-- [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
 - [Screenshots](#screenshots)
   - [Analysis task](#analysis-task)
   - [Clustering task](#clustering-task)
@@ -50,61 +50,38 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
     kubectl apply -f deployments/deployment.yaml
     ```
 4.  **Access:**
-    *   The application front-end will be available via a LoadBalancer service. Check the service's external IP: `kubectl get svc audiomuse-ai-flask-service -n playlist`. Access it at `http://<EXTERNAL-IP>:8000`.
+    *   **Main UI:** Access at `http://<EXTERNAL-IP>:8000`
+    *   **API Docs (Swagger UI):** Explore the API at `http://<EXTERNAL-IP>:8000/apidocs`
 
-## **Workflow Overview**
+## **Kubernetes Deployment (K3S Example)**
 
-This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
+The Quick Start provided in the `playlist` namespace the following resources:
 
-* **Initiate from Frontend:** Start an analysis via the Flask web UI.  
-* **Job Queued on Redis:** Task is sent to Redis Queue.  
-* **RQ Worker Processes:**  
-  * Multiple worker containers are supported for parallel processing. It is suggested to have at least 2 workers (even on the same machine) because one runs the main process and the other runs subprocesses (so with only one worker, it can get stuck).  
-  * Fetch metadata and download audio from Jellyfin.  
-  * Analyze tracks using Essentia and TensorFlow.  
-  * Store results in PostgreSQL.  
-* **Flexible Clustering:** Re-cluster tracks anytime using stored analysis data.  
-* **Jellyfin Playlist Creation:** Create playlists based on clustering results directly in Jellyfin.
+**Pods (Workloads):**
+*   **`audiomuse-ai-worker`**: Runs the background job processors using Redis Queue. It's recommended to run a **minimum of 2 replicas** to ensure one worker can handle main tasks while others manage subprocesses, preventing potential stalls. You can scale this based on your cluster size and workload.
+*   **`audiomuse-ai-flask`**: Hosts the Flask API server and the web front-end. This is the user-facing component.
+*   **`postgres-deployment`**: Manages the PostgreSQL database instance, which persists analyzed track data, playlist structures, and task status.
+*   **`redis-master`**: Provides the Redis instance used by Redis Queue to manage the task queue.
 
-**Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
+**Services (Networking):**
+*   **`audiomuse-ai-flask-service`**: A `LoadBalancer` service that exposes the Flask front-end externally. You can access the web UI via the external IP assigned to this service on port `8000`. Consider changing this to `ClusterIP` if you plan to use an Ingress controller.
+*   **`postgres-service`**: A `ClusterIP` service allowing internal cluster communication to the PostgreSQL database from the worker and flask pods.
+*   **`redis-service`**: A `ClusterIP` service allowing internal cluster communication to the Redis instance from the worker and flask pods.
 
-## **Clustering Algorithm Deep Dive**
+**Secrets (Sensitive Configuration):**
+*   **`jellyfin-credentials`**: Stores your sensitive Jellyfin `api_token` and `user_id`. **You must update this Secret with your actual values.**
+*   **`postgres-credentials`**: Stores the sensitive PostgreSQL `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` credentials. **You must update this Secret with your actual values.**
+*   **`gemini-api-credentials`**: Stores your `GEMINI_API_KEY` if you configure the application to use Google Gemini for AI playlist naming. **Update this Secret if you plan to use Gemini.**
 
-AudioMuse-AI offers three algorithms, each suited for different scenarios when clustering music based on tempo and 5 mood scores. This clustering algorithm is executed multiple times (default 1000\) following an Evolutionary Monte Carlo approach: in this way, multiple configurations of parameters are tested, and the best ones are kept.
+**ConfigMap (Non-Sensitive Configuration):**
+*   **`audiomuse-ai-config`**: Contains non-sensitive application parameters passed as environment variables. By default, this includes `JELLYFIN_URL`, `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL`. **You must update `JELLYFIN_URL` with your Jellyfin server's address.** Ensure `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL` match the internal service names if you modify the deployment structure.
 
-Here's an explanation of the pros and cons of the different algorithms:
+**PersistentVolumeClaim (Data Persistence):**
+*   **`postgres-pvc`**: This is crucial for ensuring your PostgreSQL database data persists across pod restarts or redeployments. **Review and ensure its configuration is appropriate for your environment** to prevent data loss. Regularly backing up the database is also highly recommended.
 
-### **1\. K-Means**
+The deployment file also creates the `playlist` namespace to contain all these resources.
 
-* **Best For:** Speed, simplicity, when clusters are roughly spherical and of similar size.  
-* **Pros:** Very fast, scalable, clear "average" cluster profiles.  
-* **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers.
-
-### **2\. DBSCAN**
-
-* **Best For:** Discovering clusters of arbitrary shapes, handling outliers well, when the number of clusters is unknown.  
-* **Pros:** No need to set K, finds varied shapes, robust to noise.  
-* **Cons:** Sensitive to eps and min\_samples parameters, can struggle with varying cluster densities, no direct "centroids."
-
-### **3\. GMM (Gaussian Mixture Models)**
-
-* **Best For:** Modeling more complex, elliptical cluster shapes and when a probabilistic assignment of tracks to clusters is beneficial.  
-* **Pros:** Flexible cluster shapes, "soft" assignments, model-based insights.  
-* **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
-
-**Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 1000\) helps the integrated evolutionary algorithm to find a good solution.
-
-### **AI Playlist Naming**
-
-After the clustering algorithm has identified groups of similar songs, AudioMuse-AI can optionally use an AI model to generate creative, human-readable names for the resulting playlists. This replaces the default "Mood_Tempo" naming scheme with something more evocative.
-
-1.  **Input to AI:** For each cluster, the system extracts key characteristics derived from the cluster's centroid (like predominant moods and tempo) and provides a sample list of songs from that cluster.
-2.  **AI Model Interaction:** This information is sent to a configured AI model (either a self-hosted **Ollama** instance or **Google Gemini**) along with a carefully crafted prompt.
-3.  **Prompt Engineering:** The prompt guides the AI to act as a music curator and generate a concise playlist name (15-35 characters) that reflects the mood, tempo, and overall vibe of the songs, while adhering to strict formatting rules (standard ASCII characters only, no extra text).
-4.  **Output Processing:** The AI's response is cleaned to ensure it meets the formatting and length constraints before being used as the final playlist name (with the `_automatic` suffix appended later by the task runner).
-
-This step adds a layer of creativity to the purely data-driven clustering process, making the generated playlists more appealing and easier to understand at a glance. The choice of AI provider and model is configurable via environment variables and the frontend.
-
+For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha.
 
 ## **Configuration Parameters**
 
@@ -172,51 +149,6 @@ This are the default parameters on wich the analysis or clustering task will be 
 
 * https://github.com/NeptuneHub/k3s-supreme-waffle/tree/main/ollama
 
-## **Kubernetes Deployment (K3S Example)**
-
-An example K8s deployment is provided in **deployments/deployment.yaml**. Start from it as a template.
-
-The provided deployment will deploy on your cluster **pod:**
-* **audiomuse-ai-worker:** The worker at the **minimum number of 2**, you can put more if you have more than 1 node;
-* **audiomuse-ai-flask:** The api server plus the front-end;
-* **postgres-deployment:** The database for saving the analysis of score, playlist created and status of the stad.;
-* **redis-master:** Needed for Redis Queue, is hwere the worker get the task to run.
-
-**service:**
-* **audiomuse-ai-flask-service:** is a LoadBalancer service to direct access to your fronte-end. You can convert to ClusterIP if you want to add an ingress on top;
-* **postgres-service:** is a ClusterIP service needed toreach PostgreSQL form the worker internally to the cluster;
-* **redis-service:** is a ClusterIP service needed to reach Redis from the Worker internally to the cluster;
-
-**secret:**
-* **jellyfin-credentials:** which contain `api_token` and `user_id` of Jellyfin
-* **postgres-credentials:** which contain `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`
-* **gemini-api-credentials:** which contains your `GEMINI_API_KEY` if you are using Gemini for AI naming.
-
-
-**ConfigMap:**
-* **audiomuse-ai-config:** which will contain your non-sensitive parameters. By default, it includes: `JELLYFIN_URL`, `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL`.
-
-**PVC:**
-* **postgres-pvc:** this is very important because will keep all the data of the database.
-
-
-it will also create the **namespace** playlist and everything will be deployed in it.
-**Before Deploying:** 
-1. Edit the `jellyfin-credentials` and `postgres-credentials` Secrets with your actual values.
-2. Edit the `JELLYFIN_URL` in the `audiomuse-ai-config` ConfigMap.
-3. Review and ensure your `postgres-pvc` PersistentVolumeClaim configuration is appropriate for your environment to prevent data loss. Regularly backing up the database is also recommended.
-
-Then you can easily deploy it with:
-```
-kubectl apply -f deployments/deployment.yaml
-```
-
-When deployed you can access to:
-* **Front-end:** through the port exposed by your LoadBalancer. For exmaple in this templae case is **http://your-ip:8000**;
-* **Flask service and swagger:** You will also have the swagger at **http://your-iè:8000/apidocs** with all the API example.
-
-For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha.
-
 ## **Local Deployment with Docker Compose**
 
 For a quick local setup or for users not using Kubernetes, a `docker-compose.yaml` file is provided in the `deployment/` directory.
@@ -263,6 +195,59 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 * **0.1.5-alpha** - Last version with the use of Sqlite and Celery. Only 1 worker admitted.
   * To deploy you can download the source code from here and use the appropriate deployment.yaml example: https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v0.1.5-alpha
 
+## **Workflow Overview**
+
+This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
+
+* **Initiate from Frontend:** Start an analysis via the Flask web UI.  
+* **Job Queued on Redis:** Task is sent to Redis Queue.  
+* **RQ Worker Processes:**  
+  * Multiple worker containers are supported for parallel processing. It is suggested to have at least 2 workers (even on the same machine) because one runs the main process and the other runs subprocesses (so with only one worker, it can get stuck).  
+  * Fetch metadata and download audio from Jellyfin.  
+  * Analyze tracks using Essentia and TensorFlow.  
+  * Store results in PostgreSQL.  
+* **Flexible Clustering:** Re-cluster tracks anytime using stored analysis data.  
+* **Jellyfin Playlist Creation:** Create playlists based on clustering results directly in Jellyfin.
+
+**Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
+
+## **Clustering Algorithm Deep Dive**
+
+AudioMuse-AI offers three algorithms, each suited for different scenarios when clustering music based on tempo and 5 mood scores. This clustering algorithm is executed multiple times (default 1000\) following an Evolutionary Monte Carlo approach: in this way, multiple configurations of parameters are tested, and the best ones are kept.
+
+Here's an explanation of the pros and cons of the different algorithms:
+
+### **1\. K-Means**
+
+* **Best For:** Speed, simplicity, when clusters are roughly spherical and of similar size.  
+* **Pros:** Very fast, scalable, clear "average" cluster profiles.  
+* **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers.
+
+### **2\. DBSCAN**
+
+* **Best For:** Discovering clusters of arbitrary shapes, handling outliers well, when the number of clusters is unknown.  
+* **Pros:** No need to set K, finds varied shapes, robust to noise.  
+* **Cons:** Sensitive to eps and min\_samples parameters, can struggle with varying cluster densities, no direct "centroids."
+
+### **3\. GMM (Gaussian Mixture Models)**
+
+* **Best For:** Modeling more complex, elliptical cluster shapes and when a probabilistic assignment of tracks to clusters is beneficial.  
+* **Pros:** Flexible cluster shapes, "soft" assignments, model-based insights.  
+* **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
+
+**Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 1000\) helps the integrated evolutionary algorithm to find a good solution.
+
+### **AI Playlist Naming**
+
+After the clustering algorithm has identified groups of similar songs, AudioMuse-AI can optionally use an AI model to generate creative, human-readable names for the resulting playlists. This replaces the default "Mood_Tempo" naming scheme with something more evocative.
+
+1.  **Input to AI:** For each cluster, the system extracts key characteristics derived from the cluster's centroid (like predominant moods and tempo) and provides a sample list of songs from that cluster.
+2.  **AI Model Interaction:** This information is sent to a configured AI model (either a self-hosted **Ollama** instance or **Google Gemini**) along with a carefully crafted prompt.
+3.  **Prompt Engineering:** The prompt guides the AI to act as a music curator and generate a concise playlist name (15-35 characters) that reflects the mood, tempo, and overall vibe of the songs, while adhering to strict formatting rules (standard ASCII characters only, no extra text).
+4.  **Output Processing:** The AI's response is cleaned to ensure it meets the formatting and length constraints before being used as the final playlist name (with the `_automatic` suffix appended later by the task runner).
+
+This step adds a layer of creativity to the purely data-driven clustering process, making the generated playlists more appealing and easier to understand at a glance. The choice of AI provider and model is configurable via environment variables and the frontend.
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
@@ -293,6 +278,8 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  
   * Task status for the web interface.  
+* **Ollama:** Enables self-hosting of various open-source Large Language Models (LLMs) for tasks like intelligent playlist naming.
+* **Google Gemini API:** Provides access to Google's powerful generative AI models, used as an alternative for intelligent playlist naming.
 * [**Jellyfin API**](https://jellyfin.org/) Integrates directly with your Jellyfin server to fetch media, download audio, and create/manage playlists.  
 * **MusiCNN embedding model** – Developed as part of the [AcousticBrainz project](https://acousticbrainz.org/), based on a convolutional neural network trained for music tagging and embedding.  
 * **Mood prediction model** – A TensorFlow-based model trained to map MusiCNN embeddings to mood probabilities (you must provide or train your own compatible model).  

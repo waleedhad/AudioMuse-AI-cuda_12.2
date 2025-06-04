@@ -28,7 +28,7 @@ services:
 
   # AudioMuse-AI Flask application service
   audiomuse-ai-flask:
-    image: ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha # Your pre-built image
+    image: ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha # Reflects deployment.yaml
     container_name: audiomuse-ai-flask-app
     ports:
       - "8000:8000" # Map host port 8000 to container port 8000
@@ -44,6 +44,7 @@ services:
       POSTGRES_HOST: "postgres" # Service name of the postgres container
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0" # Connects to the 'redis' service
+      GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE" # From gemini-api-credentials secret
       TEMP_DIR: "/app/temp_audio"
     volumes:
       - temp-audio-flask:/app/temp_audio # Volume for temporary audio files
@@ -54,7 +55,7 @@ services:
 
   # AudioMuse-AI RQ Worker service
   audiomuse-ai-worker:
-    image: ghcr.io/neptunehub/audiomuse-ai:0.2.1-alpha # Your pre-built image
+    image: ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha # Reflects deployment.yaml
     container_name: audiomuse-ai-worker-instance
     environment:
       SERVICE_TYPE: "worker" # Tells the container to run the RQ worker
@@ -68,6 +69,7 @@ services:
       POSTGRES_HOST: "postgres" # Service name of the postgres container
       POSTGRES_PORT: "5432"
       REDIS_URL: "redis://redis:6379/0" # Connects to the 'redis' service
+      GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE" # From gemini-api-credentials secret
       TEMP_DIR: "/app/temp_audio"
     volumes:
       - temp-audio-worker:/app/temp_audio # Volume for temporary audio files
