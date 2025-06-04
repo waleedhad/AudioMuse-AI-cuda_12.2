@@ -20,7 +20,7 @@ NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
-AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "GEMINI").upper() # Accepted: OLLAMA, GEMINI, NONE
+AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "NONE").upper() # Accepted: OLLAMA, GEMINI, NONE
 
 # --- DBSCAN Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for DBSCAN parameters
