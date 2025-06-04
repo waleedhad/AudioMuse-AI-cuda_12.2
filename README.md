@@ -11,6 +11,7 @@ The main scope of this application is testing the clustering algorithm. A front-
 - [Workflow Overview](#workflow-overview)
 - [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
   - [1. K-Means](#1-k-means)
+  - [AI Playlist Naming](#ai-playlist-naming)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
 - [Configuration Parameters](#configuration-parameters)
@@ -67,6 +68,18 @@ Here's an explanation of the pros and cons of the different algorithms:
 
 **Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 1000\) helps the integrated evolutionary algorithm to find a good solution.
 
+### **AI Playlist Naming**
+
+After the clustering algorithm has identified groups of similar songs, AudioMuse-AI can optionally use an AI model to generate creative, human-readable names for the resulting playlists. This replaces the default "Mood_Tempo" naming scheme with something more evocative.
+
+1.  **Input to AI:** For each cluster, the system extracts key characteristics derived from the cluster's centroid (like predominant moods and tempo) and provides a sample list of songs from that cluster.
+2.  **AI Model Interaction:** This information is sent to a configured AI model (either a self-hosted **Ollama** instance or **Google Gemini**) along with a carefully crafted prompt.
+3.  **Prompt Engineering:** The prompt guides the AI to act as a music curator and generate a concise playlist name (15-35 characters) that reflects the mood, tempo, and overall vibe of the songs, while adhering to strict formatting rules (standard ASCII characters only, no extra text).
+4.  **Output Processing:** The AI's response is cleaned to ensure it meets the formatting and length constraints before being used as the final playlist name (with the `_automatic` suffix appended later by the task runner).
+
+This step adds a layer of creativity to the purely data-driven clustering process, making the generated playlists more appealing and easier to understand at a glance. The choice of AI provider and model is configurable via environment variables and the frontend.
+
+
 ## **Configuration Parameters**
 
 These are the parameters accepted for this script. You can pass them as environment variables using, for example, /deployment/deployment.yaml in this repository.
@@ -83,6 +96,7 @@ The **mandatory** parameter that you need to change from the example are this:
 | `POSTGRES_HOST`         | (Required) PostgreSQL host.| `postgres-service.playlist` |
 | `POSTGRES_PORT`         | (Required) PostgreSQL port.| `5432`                      |
 | `REDIS_URL`             | (Required) URL for Redis.| `redis://redis-service.playlist:6379/0` |
+| `GEMINI_API_KEY`        | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)* |
 
 These parameter can be leave as it is:
 
@@ -119,6 +133,18 @@ This are the default parameters on wich the analysis or clustering task will be 
 | **PCA Ranges** |                                                                             |                    |
 | `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
 | `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
+| **AI Naming (*)** |                                                                             |                    |
+| `AI_MODEL_PROVIDER`       | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                 | `GEMINI` |
+| `OLLAMA_SERVER_URL`       | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).            | `http://<your-ip>11434/api/generate` |
+| `OLLAMA_MODEL_NAME`       | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                     | `mistral:7b` |
+| `GEMINI_MODEL_NAME`       | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                     | `gemini-1.5-flash-latest` |
+| `GEMINI_API_CALL_DELAY_SECONDS` | Seconds to wait between Gemini API calls to respect rate limits.          | `7`      |
+| `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
+| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
+
+**(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
+
+* https://github.com/NeptuneHub/k3s-supreme-waffle/tree/main/ollama
 
 ## **Kubernetes Deployment (K3S Example)**
 
@@ -264,4 +290,3 @@ This MVP lays the groundwork for further development:
 
 Contributions, issues, and feature requests are welcome\!  
 This is an ALPHA early release, so expect bugs or functions that are still not implemented.
-
