@@ -28,6 +28,15 @@ stringData:
   POSTGRES_DB: "audiomusedb" # As used in app.py
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-api-credentials
+  namespace: playlist
+type: Opaque
+stringData:
+  GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE" # Replace with your actual Gemini API Key
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: audiomuse-ai-config
@@ -233,7 +242,13 @@ spec:
           valueFrom:
             configMapKeyRef:
               name: audiomuse-ai-config # Correct: Source from the ConfigMap
-              key: POSTGRES_PORT       # Correct: Use the POSTGRES_PORT key
+              key: POSTGRES_PORT
+        # --- Load Gemini API Key from Secret ---
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-credentials
+              key: GEMINI_API_KEY
         # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:
@@ -338,7 +353,13 @@ spec:
           valueFrom:
             configMapKeyRef:
               name: audiomuse-ai-config # Correct: Source from the ConfigMap
-              key: POSTGRES_PORT       # Correct: Use the POSTGRES_PORT key
+              key: POSTGRES_PORT
+        # --- Load Gemini API Key from Secret ---
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-credentials
+              key: GEMINI_API_KEY
         # --- Load all other environment variables from the ConfigMap ---
         envFrom:
         - configMapRef:

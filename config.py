@@ -1,3 +1,4 @@
+# /home/guido/Music/AudioMuse-AI/config.py
 import os
 
 # --- Jellyfin and DB Constants (Read from Environment Variables first) ---
@@ -17,8 +18,9 @@ MAX_SONGS_PER_CLUSTER = 40
 MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000")) # Convert to int
 
-# --- Algorithm Choose Constant (Read from Environment Variables) ---
+# --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
+AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "GEMINI").upper() # Accepted: OLLAMA, GEMINI, NONE
 
 # --- DBSCAN Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for DBSCAN parameters
@@ -60,10 +62,12 @@ SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "0.6")) 
 SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.4"))    # Weight for playlist purity (intra-playlist mood consistency)
 
 # --- AI Playlist Naming ---
-USE_AI_PLAYLIST_NAMING = os.environ.get("USE_AI_PLAYLIST_NAMING", "False").lower() == "true"
+# USE_AI_PLAYLIST_NAMING is replaced by AI_MODEL_PROVIDER
 OLLAMA_SERVER_URL = os.environ.get("OLLAMA_SERVER_URL", "http://192.168.3.15:11434/api/generate") # URL for your Ollama instance
-OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "hermes3:3b-llama3.2-q4_K_M") # Ollama model to use deepseek-r1:1.5b - hermes3:3b-llama3.2-q4_K_M
-OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "mistral:7b") # Ollama model to use deepseek-r1:1.5b - hermes3:3b-llama3.2-q4_K_M - mistral:7b
+OLLAMA_MODEL_NAME = os.environ.get("OLLAMA_MODEL_NAME", "mistral:7b") # Ollama model to use
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "YOUR-GEMINI-API-KEY-HERE") # Default API key
+GEMINI_MODEL_NAME = os.environ.get("GEMINI_MODEL_NAME", "gemini-1.5-flash-latest") # Default Gemini model
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
 # Construct DATABASE_URL from individual components for better security in K8s

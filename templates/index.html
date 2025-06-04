@@ -47,20 +47,6 @@
                                 <label for="config-jellyfin_token" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin Token:</label>
                                 <input type="text" id="config-jellyfin_token" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem; display: flex; align-items: center;">
-                                <input type="checkbox" id="config-use_ai_playlist_naming" style="margin-right: 0.5rem; height: 1rem; width: 1rem; border-radius: 0.25rem; background-color: #374151; border: 1px solid #4b5563;">
-                                <label for="config-use_ai_playlist_naming" style="font-size: 0.875rem; color: #9ca3af;">Use AI for Playlist Naming</label>
-                            </div>
-                            <div id="ollama-config-section" style="display: none; border-left: 2px solid #1e40af; padding-left: 1rem; margin-left: 0.5rem;">
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label for="config-ollama_server_url" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Ollama Server URL:</label>
-                                    <input type="text" id="config-ollama_server_url" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                                </div>
-                                <div style="margin-bottom: 0.5rem;">
-                                    <label for="config-ollama_model_name" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Ollama Model Name:</label>
-                                    <input type="text" id="config-ollama_model_name" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                                </div>
-                            </div>
                         </div>
                     </fieldset>
 
@@ -159,6 +145,51 @@
                             </div>
                         </div>
                     </fieldset>
+
+                    <!-- START: AI Playlist Naming Parameters -->
+                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                            AI Playlist Naming
+                        </legend>
+                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-ai_model_provider" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">AI Provider:</label>
+                                <select id="config-ai_model_provider" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                    <option value="OLLAMA">Ollama</option>
+                                    <option value="GEMINI">Gemini</option>
+                                    <option value="NONE" selected>None</option>
+                                </select>
+                            </div>
+
+                            <!-- Ollama Config Group -->
+                            <div id="ollama-config-group" style="border: 1px dashed #4b5563; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; background-color: #1f2937; display: none; grid-template-columns: 1fr; gap: 1rem;">
+                                 <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">Ollama Configuration:</h4>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label for="config-ollama_server_url" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Ollama Server URL:</label>
+                                    <input type="text" id="config-ollama_server_url" value="http://127.0.0.1:11434/api/generate" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                </div>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label for="config-ollama_model_name" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Ollama Model Name:</label>
+                                    <input type="text" id="config-ollama_model_name" value="mistral:7b" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                </div>
+                            </div>
+
+                            <!-- Gemini Config Group -->
+                            <div id="gemini-config-group" style="border: 1px dashed #4b5563; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; background-color: #1f2937; display: none; grid-template-columns: 1fr; gap: 1rem;">
+                                 <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">Gemini Configuration:</h4>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label for="config-gemini_api_key" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Gemini API Key:</label>
+                                    <input type="text" id="config-gemini_api_key" value="" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                </div>
+                                <div style="margin-bottom: 0.5rem;">
+                                    <label for="config-gemini_model_name" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Gemini Model Name:</label>
+                                    <input type="text" id="config-gemini_model_name" value="gemini-1.5-flash-latest" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                </div>
+                            </div>
+                        </div>
+                    </fieldset>
+                    <!-- END: AI Playlist Naming Parameters -->
+
                 </form>
             </section>
 
@@ -239,55 +270,50 @@
         const kmeansParamsDiv = document.getElementById('kmeans-params');
         const gmmParamsDiv = document.getElementById('gmm-params');
         const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
-        const useAiNamingCheckbox = document.getElementById('config-use_ai_playlist_naming');
-        const ollamaConfigSection = document.getElementById('ollama-config-section');
+
+        // AI Naming parameter containers
+        const aiModelProviderSelect = document.getElementById('config-ai_model_provider');
+        const ollamaConfigGroup = document.getElementById('ollama-config-group');
+        const geminiConfigGroup = document.getElementById('gemini-config-group');
 
 
-        let currentTaskId = null; // Stores the ID of the currently active task
-        let lastPolledTaskDetails = {}; // Stores { taskId: { state: '...', task_type: '...' } } to track status changes for alerts
+        let currentTaskId = null; 
+        let lastPolledTaskDetails = {}; 
 
-        // Function to show/hide loading spinner
         function showLoading(show) {
             if (show) {
                 loadingSpinner.style.display = 'flex';
                 mainContent.style.display = 'none';
             } else {
                 loadingSpinner.style.display = 'none';
-                mainContent.style.display = 'block'; // Changed from 'flex' to 'block' for main content
+                mainContent.style.display = 'block'; 
             }
         }
 
-        // Fetches configuration from the backend
         async function fetchConfig() {
             showLoading(true);
             try {
                 const response = await fetch('/api/config');
                 const config = await response.json();
                 renderConfig(config);
-                toggleClusteringParams(); // Call after rendering config to set initial visibility
-                toggleOllamaConfigVisibility(); // Call after rendering config for AI naming
+                toggleClusteringParams(); 
+                toggleAiConfig(); // Add this call
             } catch (error) {
                 console.error('Error fetching config:', error);
-                // Use a custom message box instead of alert
                 showMessageBox('Error', 'Failed to load configuration. Please check the backend server.');
             } finally {
                 showLoading(false);
             }
         }
 
-        // Renders configuration fields into their respective sections
         function renderConfig(config) {
-            // Populate General Parameters
             document.getElementById('config-jellyfin_url').value = config.jellyfin_url || '';
             document.getElementById('config-jellyfin_user_id').value = config.jellyfin_user_id || '';
             document.getElementById('config-jellyfin_token').value = config.jellyfin_token || '';
 
-            // Populate Analysis Parameters
             document.getElementById('config-num_recent_albums').value = config.num_recent_albums || 0;
             document.getElementById('config-top_n_moods').value = config.top_n_moods || 0;
 
-            // Populate Clustering Parameters (common ones)
-            // Set K-Means as default if no value from config or if it's not 'dbscan' or 'gmm'
             clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm') ? config.cluster_algorithm : 'kmeans';
 
             document.getElementById('config-max_distance').value = config.max_distance || 0;
@@ -296,7 +322,6 @@
             document.getElementById('config-pca_components_max').value = config.pca_components_max || 0;
             document.getElementById('config-clustering_runs').value = config.clustering_runs || 0;
 
-            // Populate algorithm-specific parameters (they will be hidden/shown by toggleClusteringParams)
             document.getElementById('config-dbscan_eps_min').value = config.dbscan_eps_min || 0;
             document.getElementById('config-dbscan_eps_max').value = config.dbscan_eps_max || 0;
             document.getElementById('config-dbscan_min_samples_min').value = config.dbscan_min_samples_min || 0;
@@ -309,36 +334,43 @@
             document.getElementById('config-gmm_n_components_max').value = config.gmm_n_components_max || 0;
 
             // Populate AI Naming Parameters
-            useAiNamingCheckbox.checked = config.use_ai_playlist_naming === true; // Ensure boolean comparison
-            document.getElementById('config-ollama_server_url').value = config.ollama_server_url || '';
-            document.getElementById('config-ollama_model_name').value = config.ollama_model_name || '';
+            aiModelProviderSelect.value = config.ai_model_provider || 'NONE';
+            document.getElementById('config-ollama_server_url').value = config.ollama_server_url || 'http://127.0.0.1:11434/api/generate';
+            document.getElementById('config-ollama_model_name').value = config.ollama_model_name || 'mistral:7b';
+            document.getElementById('config-gemini_api_key').value = config.gemini_api_key || '';
+            document.getElementById('config-gemini_model_name').value = config.gemini_model_name || 'gemini-1.5-flash-latest';
         }
 
-        // Toggles visibility of clustering parameters based on selected algorithm
         function toggleClusteringParams() {
             const selectedAlgorithm = clusterAlgorithmSelect.value;
-
-            // Hide all algorithm-specific divs
             dbscanParamsDiv.style.display = 'none';
             kmeansParamsDiv.style.display = 'none';
             gmmParamsDiv.style.display = 'none';
 
-            // Show the div for the selected algorithm
             if (selectedAlgorithm === 'dbscan') {
-                dbscanParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
+                dbscanParamsDiv.style.display = 'grid'; 
             } else if (selectedAlgorithm === 'kmeans') {
-                kmeansParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
+                kmeansParamsDiv.style.display = 'grid'; 
             } else if (selectedAlgorithm === 'gmm') {
-                gmmParamsDiv.style.display = 'grid'; // Changed from 'block' to 'grid' to maintain layout
+                gmmParamsDiv.style.display = 'grid'; 
             }
         }
+        
+        // START: Added toggleAiConfig function
+        function toggleAiConfig() {
+            const provider = aiModelProviderSelect.value;
+            ollamaConfigGroup.style.display = 'none';
+            geminiConfigGroup.style.display = 'none';
 
-        // Toggles visibility of Ollama config based on AI naming checkbox
-        function toggleOllamaConfigVisibility() {
-            ollamaConfigSection.style.display = useAiNamingCheckbox.checked ? 'block' : 'none';
+            if (provider === 'OLLAMA') {
+                ollamaConfigGroup.style.display = 'grid'; // Use grid to match other param groups
+            } else if (provider === 'GEMINI') {
+                geminiConfigGroup.style.display = 'grid'; // Use grid to match other param groups
+            }
         }
+        // END: Added toggleAiConfig function
 
-        // Helper function to update cancel button's state and style
+
         function updateCancelButtonState(isDisabled) {
             cancelTaskBtn.disabled = isDisabled;
             if (isDisabled) {
@@ -350,27 +382,20 @@
             }
         }
 
-        // Fetches active tasks and updates UI accordingly
-        // Returns true if an active task was found/handled or a previously active task's final status was processed.
-        // Returns false if no active task was found and no previously active task was processed.
         async function checkActiveTasks() {
             try {
                 const response = await fetch('/api/active_tasks');
-                const mainActiveTask = await response.json(); // Expects a single object or {}
+                const mainActiveTask = await response.json(); 
 
                 if (mainActiveTask && mainActiveTask.task_id) {
-                    // A task is currently active
                     currentTaskId = mainActiveTask.task_id;
                     
                     const previousDetailsForThisTask = lastPolledTaskDetails[currentTaskId];
-                    // Use mainActiveTask.status as per your latest example for /api/active_tasks
-                    // Fallback to .state if .status is not present, then to 'UNKNOWN'
                     const currentStatusUpper = mainActiveTask.status ? mainActiveTask.status.toUpperCase() : (mainActiveTask.state ? mainActiveTask.state.toUpperCase() : 'UNKNOWN');
                     const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
 
-                    displayTaskStatus(mainActiveTask); // Update UI with current task info
+                    displayTaskStatus(mainActiveTask); 
 
-                    // Check if this task just transitioned to a terminal state
                     const currentTaskIsTerminal = terminalStates.includes(currentStatusUpper);
                     const previousTaskStateWasTerminal = previousDetailsForThisTask && previousDetailsForThisTask.state && terminalStates.includes(previousDetailsForThisTask.state.toUpperCase());
     
@@ -385,7 +410,6 @@
                                 showMessageBox(alertTitle, alertMessage);
                             }
                         }
-                    // Store the state using the determined status field for consistency in lastPolledTaskDetails
                     lastPolledTaskDetails[currentTaskId] = { state: currentStatusUpper !== 'UNKNOWN' ? mainActiveTask.status || mainActiveTask.state : 'UNKNOWN', task_type: mainActiveTask.task_type_from_db || mainActiveTask.task_type, task_id: mainActiveTask.task_id };
                     disableTaskButtons(true);
                     fetchPlaylistsBtn.disabled = true;
@@ -393,15 +417,12 @@
                     fetchPlaylistsBtn.style.cursor = 'not-allowed';
                     updateCancelButtonState(false);
 
-                    return true; // Indicate an active task was found and handled
+                    return true; 
                 } else {
-                    const previouslyTrackedTaskId = currentTaskId; // Check if we *were* tracking a task
+                    const previouslyTrackedTaskId = currentTaskId; 
                     currentTaskId = null;
 
                     if (previouslyTrackedTaskId) {
-                        // A task was being tracked, and now it's gone from active_tasks (or never appeared if it was too fast).
-                        // This means it finished or was cancelled.
-                        // Fetch its final status to be sure and for the alert.
                         try {
                             const finalStatusResponse = await fetch(`/api/status/${previouslyTrackedTaskId}`);
                             if (finalStatusResponse.ok) {
@@ -424,7 +445,7 @@
                                             showMessageBox(alertTitle, alertMessage);
                                         }
                                     }
-                                displayTaskStatus(finalStatusData); // Display its final status
+                                displayTaskStatus(finalStatusData); 
                             } else {
                                 console.warn(`Could not fetch final status for ${previouslyTrackedTaskId}. Displaying IDLE.`);
                                 displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Previously active task finished or cleared.' });
@@ -433,18 +454,14 @@
                             console.error(`Error fetching final status for ${previouslyTrackedTaskId}:`, e);
                             displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Error fetching status of previously active task.' });
                         }
-                        delete lastPolledTaskDetails[previouslyTrackedTaskId]; // Clean up
-                        // Even if fetching final status failed, we handled the end of a task.
-                        // Common UI updates for no active task (or task just finished)
+                        delete lastPolledTaskDetails[previouslyTrackedTaskId]; 
                         disableTaskButtons(false);
                         fetchPlaylistsBtn.disabled = false;
                         fetchPlaylistsBtn.style.opacity = '1';
                         fetchPlaylistsBtn.style.cursor = 'pointer';
                         updateCancelButtonState(true);
-                        return true; // A previously tracked task was processed
+                        return true; 
                     } else {
-                        // No task was being tracked, and no task is active.
-                        // Common UI updates for no active task
                         disableTaskButtons(false);
                         fetchPlaylistsBtn.disabled = false;
                         fetchPlaylistsBtn.style.opacity = '1';
@@ -452,32 +469,29 @@
                         updateCancelButtonState(true);
                     }
                 }
-                return false; // Indicate no active task was found by /api/active_tasks and no previously tracked task was processed
+                return false; 
             } catch (error) {
                 console.error('Error checking active tasks:', error);
                 displayTaskStatus({
                     task_id: 'Error',
                     task_type: 'Error',
-                    state: 'ERROR', // Consistent with displayTaskStatus
+                    state: 'ERROR', 
                     progress: 0,
                     details: `Failed to check active main task: ${error.message}. Polling will continue.`
                 });
-                disableTaskButtons(false); // Re-enable buttons on error, allow retries
+                disableTaskButtons(false); 
                 fetchPlaylistsBtn.disabled = false;
                 fetchPlaylistsBtn.style.opacity = '1';
                 fetchPlaylistsBtn.style.cursor = 'pointer';
                 updateCancelButtonState(true);
-                currentTaskId = null; // Reset on error
+                currentTaskId = null; 
             }
-            return false; // Default to no active task found/handled
+            return false; 
         }
 
-        // Disables/enables task initiation buttons
         function disableTaskButtons(isDisabled) {
             startAnalysisBtn.disabled = isDisabled;
             startClusteringBtn.disabled = isDisabled;
-            // fetchPlaylistsBtn is handled separately in checkActiveTasks or when a task starts/ends
-            // Apply disabled styles manually since pseudo-classes are not available
             if (isDisabled) {
                 startAnalysisBtn.style.opacity = '0.5';
                 startAnalysisBtn.style.cursor = 'not-allowed';
@@ -491,32 +505,28 @@
             }
         }
 
-        // Displays the status of a given task
         function displayTaskStatus(task) {
             statusTaskId.textContent = task.task_id;
-            statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A'; // Prefer task_type_from_db
-            // Prioritize 'status' if present (from /api/active_tasks example), then 'state', then 'UNKNOWN'
+            statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A'; 
             const taskStateUpper = task.status ? task.status.toUpperCase() : (task.state ? task.state.toUpperCase() : 'UNKNOWN');
             statusStatus.textContent = taskStateUpper;
             statusProgress.textContent = task.progress;
             progressBar.style.width = `${task.progress}%`;
 
-            // Update status text color based on status
-            statusStatus.style.color = ''; // Reset color
+            statusStatus.style.color = ''; 
             if (taskStateUpper === 'PENDING' || taskStateUpper === 'STARTED' || taskStateUpper === 'QUEUED' || taskStateUpper === 'PROGRESS') {
-                statusStatus.style.color = '#fbbf24'; // Yellow-400 for ongoing tasks
+                statusStatus.style.color = '#fbbf24'; 
             } else if (taskStateUpper === 'SUCCESS' || taskStateUpper === 'FINISHED') {
-                statusStatus.style.color = '#4ade80'; // Green-400
-                // If a clustering task finishes successfully, automatically fetch playlists
+                statusStatus.style.color = '#4ade80'; 
                 if ((task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
                     console.log('Clustering task successful, automatically fetching playlists...');
-                    fetchPlaylists(); // Call the function directly
+                    fetchPlaylists(); 
                 }
             } else if (taskStateUpper === 'FAILURE' || taskStateUpper === 'FAILED' || taskStateUpper === 'REVOKED' || taskStateUpper === 'CANCELED') {
-                statusStatus.style.color = '#f87171'; // Red-400
-                playlistsSection.style.display = 'none'; // Hide playlists if task failed/revoked
-            } else { // Includes IDLE or other unknown states
-                statusStatus.style.color = '#60a5fa'; // Blue-400 for UNKNOWN/IDLE
+                statusStatus.style.color = '#f87171'; 
+                playlistsSection.style.display = 'none'; 
+            } else { 
+                statusStatus.style.color = '#60a5fa'; 
             }
 
             try {
@@ -528,18 +538,16 @@
             } catch (e) {
                 statusDetails.textContent = `Error parsing details: ${e.message}\nRaw: ${task.details}`;
             }
-            statusDetails.scrollTop = statusDetails.scrollHeight; // Scroll to bottom
+            statusDetails.scrollTop = statusDetails.scrollHeight; 
         }
 
-        // Starts a new task (analysis or clustering)
         async function startTask(taskType) {
-            disableTaskButtons(true); // Immediately disable to prevent double clicks
-            updateCancelButtonState(true); // Disable cancel until we get a task ID
-            fetchPlaylistsBtn.disabled = true; // Disable fetch playlists during task execution
+            disableTaskButtons(true); 
+            updateCancelButtonState(true); 
+            fetchPlaylistsBtn.disabled = true; 
             fetchPlaylistsBtn.style.opacity = '0.5';
             fetchPlaylistsBtn.style.cursor = 'not-allowed';
 
-            // Collect General Parameters
             const jellyfinUrl = document.getElementById('config-jellyfin_url').value;
             const jellyfinUserId = document.getElementById('config-jellyfin_user_id').value;
             const jellyfinToken = document.getElementById('config-jellyfin_token').value;
@@ -551,14 +559,11 @@
             };
 
             if (taskType === 'analysis') {
-                // Collect Analysis Parameters
                 payload.num_recent_albums = parseInt(document.getElementById('config-num_recent_albums').value);
                 payload.top_n_moods = parseInt(document.getElementById('config-top_n_moods').value);
             } else if (taskType === 'clustering') {
-                // Hide and clear playlists section when starting a new clustering task
                 playlistsSection.style.display = 'none';
                 playlistsContainer.innerHTML = '';
-                // Collect Clustering Parameters
                 payload.clustering_method = clusterAlgorithmSelect.value;
                 payload.max_distance = parseFloat(document.getElementById('config-max_distance').value);
                 payload.max_songs_per_cluster = parseInt(document.getElementById('config-max_songs_per_cluster').value);
@@ -566,7 +571,6 @@
                 payload.pca_components_max = parseInt(document.getElementById('config-pca_components_max').value);
                 payload.clustering_runs = parseInt(document.getElementById('config-clustering_runs').value);
 
-                // Add algorithm-specific parameters to payload based on current selection
                 if (payload.clustering_method === 'dbscan') {
                     payload.dbscan_eps_min = parseFloat(document.getElementById('config-dbscan_eps_min').value);
                     payload.dbscan_eps_max = parseFloat(document.getElementById('config-dbscan_eps_max').value);
@@ -579,12 +583,16 @@
                     payload.gmm_n_components_min = parseInt(document.getElementById('config-gmm_n_components_min').value);
                     payload.gmm_n_components_max = parseInt(document.getElementById('config-gmm_n_components_max').value);
                 }
-                // Add AI Naming parameters to payload for clustering
-                payload.use_ai_playlist_naming = document.getElementById('config-use_ai_playlist_naming').checked;
-                if (payload.use_ai_playlist_naming) { // Only send these if AI naming is checked
+                // START: Add AI parameters to payload
+                payload.ai_model_provider = aiModelProviderSelect.value;
+                if (payload.ai_model_provider === 'OLLAMA') {
                     payload.ollama_server_url = document.getElementById('config-ollama_server_url').value;
                     payload.ollama_model_name = document.getElementById('config-ollama_model_name').value;
+                } else if (payload.ai_model_provider === 'GEMINI') {
+                    payload.gemini_api_key = document.getElementById('config-gemini_api_key').value;
+                    payload.gemini_model_name = document.getElementById('config-gemini_model_name').value;
                 }
+                // END: Add AI parameters to payload
             }
 
             try {
@@ -596,40 +604,39 @@
                     body: JSON.stringify(payload)
                 });
                 const result = await response.json();
-                if (response.ok && result.task_id) { // Ensure task_id is present
+                if (response.ok && result.task_id) { 
                     currentTaskId = result.task_id;
                     displayTaskStatus({
                         task_id: result.task_id,
                         task_type: result.task_type,
-                        state: result.state || result.status || 'PENDING', // Use result.state or result.status
+                        state: result.state || result.status || 'PENDING', 
                         progress: 0,
                         details: { message: 'Task enqueued successfully.' }
                     });
-                    lastPolledTaskDetails[result.task_id] = { state: result.state || result.status || 'PENDING', task_type: result.task_type, task_id: result.task_id }; // Prime for alert logic
-                    updateCancelButtonState(false); // Enable cancel once task is enqueued
+                    lastPolledTaskDetails[result.task_id] = { state: result.state || result.status || 'PENDING', task_type: result.task_type, task_id: result.task_id }; 
+                    updateCancelButtonState(false); 
                 } else {
                     throw new Error(result.message || 'Failed to start task. No task ID received.');
                 }
             } catch (error) {
                 console.error(`Error starting ${taskType} task:`, error);
                 showMessageBox('Error', `Failed to start ${taskType} task: ${error.message}`);
-                disableTaskButtons(false); // Re-enable buttons on failure
+                disableTaskButtons(false); 
                 updateCancelButtonState(true);
-                fetchPlaylistsBtn.disabled = false; // Re-enable fetch playlists on failure
+                fetchPlaylistsBtn.disabled = false; 
                 fetchPlaylistsBtn.style.opacity = '1';
                 fetchPlaylistsBtn.style.cursor = 'pointer';
                 currentTaskId = null;
             }
         }
 
-        // Cancels the currently active task
         async function cancelTask() {
             if (!currentTaskId) {
                 showMessageBox('Info', 'No active task to cancel.');
                 return;
             }
 
-            updateCancelButtonState(true); // Disable button during cancellation attempt
+            updateCancelButtonState(true); 
             try {
                 const response = await fetch(`/api/cancel/${currentTaskId}`, {
                     method: 'POST',
@@ -640,7 +647,7 @@
                 const result = await response.json();
                 if (response.ok) {
                     showMessageBox('Success', result.message);
-                    await checkActiveTasks(); // Force a status update immediately after cancellation
+                    await checkActiveTasks(); 
                 } else {
                     throw new Error(result.message || 'Failed to cancel task.');
                 }
@@ -648,12 +655,10 @@
                 console.error('Error cancelling task:', error);
                 showMessageBox('Error', `Failed to cancel task: ${error.message}`);
             } finally {
-                // checkActiveTasks will update currentTaskId if the task is truly gone
-                updateCancelButtonState(!currentTaskId); // Disable if no current task ID, enable if there might still be one
+                updateCancelButtonState(!currentTaskId); 
             }
         }
 
-        // Fetches and renders playlists
         async function fetchPlaylists() {
             playlistsContainer.innerHTML = '<p style="color: #9ca3af;">Fetching playlists...</p>';
             playlistsSection.style.display = 'block';
@@ -667,9 +672,8 @@
             }
         }
 
-        // Renders the fetched playlists into the UI
         function renderPlaylists(playlistsData) {
-            playlistsContainer.innerHTML = ''; // Clear previous content
+            playlistsContainer.innerHTML = ''; 
             if (Object.keys(playlistsData).length === 0) {
                 playlistsContainer.innerHTML = '<p style="color: #9ca3af;">No playlists found.</p>';
                 return;
@@ -680,11 +684,11 @@
                 const playlistDiv = document.createElement('div');
                 playlistDiv.style.marginBottom = '1rem';
                 playlistDiv.style.padding = '1rem';
-                playlistDiv.style.backgroundColor = '#1f2937'; // Gray-800
+                playlistDiv.style.backgroundColor = '#1f2937'; 
                 playlistDiv.style.borderRadius = '0.375rem';
 
                 const headerP = document.createElement('p');
-                headerP.style.color = '#93c5fd'; // Blue-300
+                headerP.style.color = '#93c5fd'; 
                 headerP.innerHTML = `
                     <strong style="color: #e5e7eb;">${playlistName}</strong> - (${songs.length} songs)
                     <button class="show-songs-btn" style="margin-left: 0.5rem; background-color: #3b82f6; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;">SHOW</button>
@@ -712,16 +716,14 @@
             }
         }
 
-        // Custom message box function (replaces alert)
         function showMessageBox(title, message) {
-            // Remove any existing message box first
             const existingBox = document.getElementById('custom-message-box');
             if (existingBox) {
                 existingBox.remove();
             }
 
             const messageBox = document.createElement('div');
-            messageBox.id = 'custom-message-box'; // Add an ID for potential removal
+            messageBox.id = 'custom-message-box'; 
             messageBox.style.cssText = `
                 position: fixed;
                 top: 50%;
@@ -733,7 +735,7 @@
                 border-radius: 8px;
                 box-shadow: 0 4px 8px rgba(0,0,0,0.2);
                 z-index: 1000;
-                border: 1px solid #3b82f6; /* Blue-500 */
+                border: 1px solid #3b82f6; 
                 max-width: 400px;
                 text-align: center;
             `;
@@ -745,21 +747,14 @@
             document.body.appendChild(messageBox);
         }
         
-        // Fetches and displays the status of the overall last significant task from the backend
         async function fetchAndDisplayOverallLastTask() {
             try {
-                // Ensure this endpoint exists on your backend and returns the last significant task
-                // This endpoint should provide the status of the most recent task that reached a terminal state.
-                const response = await fetch('/api/last_task'); // Assuming this is your endpoint for the last task
+                const response = await fetch('/api/last_task'); 
                 if (response.ok) {
                     const lastTask = await response.json();
                     if (lastTask && lastTask.task_id && (lastTask.state || lastTask.status)) {
-                        // Display whatever the last task is, regardless of its state,
-                        // as this is the "last known state" if no task is active.
                         console.log('Displaying overall last task from /api/last_task:', lastTask);
                         displayTaskStatus(lastTask);
-                        // If it's a terminal state, it will be colored appropriately by displayTaskStatus.
-                        // If it's somehow an old PENDING/STARTED task that got stuck, it will show that.
                     } else {
                         console.log('No significant last task found from /api/last_task or state/status missing.');
                         displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. No last task data.' });
@@ -774,25 +769,23 @@
             }
         }
 
-        // Event Listeners
         document.addEventListener('DOMContentLoaded', async () => {
-            await fetchConfig(); // Loads config and shows main content
+            await fetchConfig(); 
 
-            // Initial check for active tasks.
-            // checkActiveTasks returns true if it found and handled an active task from /api/active_tasks
-            // or handled a task that just finished (was previouslyTrackedTaskId).
             const isActiveTaskRunningOrJustFinished = await checkActiveTasks();
 
             if (!isActiveTaskRunningOrJustFinished) {
-                // If no task is currently running AND no task just finished in this session,
-                // then fetch and display the status of the overall last task from the backend.
                 await fetchAndDisplayOverallLastTask();
-                updateCancelButtonState(true); // No active task, so cancel should be disabled
+                updateCancelButtonState(true); 
             }
 
-            setInterval(checkActiveTasks, 3000); // Poll for active tasks every 3 seconds
+            setInterval(checkActiveTasks, 3000); 
             clusterAlgorithmSelect.addEventListener('change', toggleClusteringParams);
-            useAiNamingCheckbox.addEventListener('change', toggleOllamaConfigVisibility);
+            // START: Added event listener for AI provider
+            if (aiModelProviderSelect) {
+                aiModelProviderSelect.addEventListener('change', toggleAiConfig);
+            }
+            // END: Added event listener for AI provider
         });
 
         startAnalysisBtn.addEventListener('click', () => startTask('analysis'));

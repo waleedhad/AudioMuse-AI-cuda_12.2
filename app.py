@@ -1,3 +1,4 @@
+# /home/guido/Music/AudioMuse-AI/app.py
 import os
 import psycopg2
 from psycopg2.extras import DictCursor
@@ -10,7 +11,7 @@ import uuid # For generating job IDs if needed directly in API, though tasks han
 from redis import Redis
 from rq import Queue, Retry
 from rq.job import Job, JobStatus
-from rq.exceptions import NoSuchJobError
+from rq.exceptions import NoSuchJobError, InvalidJobOperation
 from rq.command import send_stop_job_command
 JobStatus = JobStatus # Make JobStatus directly accessible within the app for tasks to import via `from app import JobStatus`
 
@@ -20,10 +21,10 @@ from flasgger import Swagger, swag_from
 # Import configuration
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
     REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
-    CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, \
+    CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
-    USE_AI_PLAYLIST_NAMING, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME
+    AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
 
 # --- Flask App Setup ---
 app = Flask(__name__)
@@ -132,13 +133,13 @@ def clean_successful_task_details_on_new_start():
         # Select tasks that are currently marked as SUCCESS
         cur.execute("SELECT task_id, details FROM task_status WHERE status = %s", (TASK_STATUS_SUCCESS,))
         tasks_to_archive = cur.fetchall()
-        
+
         archived_count = 0
         for task_row in tasks_to_archive:
             task_id = task_row['task_id']
             original_details_json = task_row['details']
             original_status_message = "Task completed successfully." # Default
-            
+
             if original_details_json:
                 try:
                     original_details_dict = json.loads(original_details_json)
@@ -157,11 +158,11 @@ def clean_successful_task_details_on_new_start():
             # Update status to REVOKED, set new minimal details, progress to 100, and update timestamp
             with db.cursor() as update_cur:
                 update_cur.execute(
-                    "UPDATE task_status SET status = %s, details = %s, progress = 100, timestamp = NOW() WHERE task_id = %s AND status = %s", 
+                    "UPDATE task_status SET status = %s, details = %s, progress = 100, timestamp = NOW() WHERE task_id = %s AND status = %s",
                     (TASK_STATUS_REVOKED, archived_details_json, task_id, TASK_STATUS_SUCCESS) # Ensure we only update tasks that are still SUCCESS
                 )
             archived_count += 1
-        
+
         if archived_count > 0:
             db.commit()
             app.logger.info(f"Archived (set status to REVOKED and pruned details for) {archived_count} previously successful tasks.")
@@ -375,7 +376,7 @@ def start_analysis_endpoint():
     top_n_moods = int(data.get('top_n_moods', TOP_N_MOODS))
 
     job_id = str(uuid.uuid4())
-    
+
     # Clean up details of previously successful tasks before starting a new one
     clean_successful_task_details_on_new_start()
     save_task_status(job_id, "main_analysis", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
@@ -386,7 +387,7 @@ def start_analysis_endpoint():
         job_id=job_id,
         description="Main Music Analysis", # No timeout
         retry=Retry(max=1), # Optional: retry once if fails
-        job_timeout=-1 
+        job_timeout=-1
     )
     return jsonify({"task_id": job.id, "task_type": "main_analysis", "status": job.get_status()}), 202
 
@@ -461,18 +462,31 @@ def start_clustering_endpoint():
                 type: integer
                 description: Maximum number of songs per generated playlist/cluster.
                 default: "Configured MAX_SONGS_PER_CLUSTER"
-              use_ai_playlist_naming:
-                type: boolean
-                description: Override for using AI for playlist naming for this run.
-                default: "Defaults to server-configured USE_AI_PLAYLIST_NAMING"
+              ai_model_provider:
+                type: string
+                description: AI provider for playlist naming (OLLAMA, GEMINI, NONE).
+                default: "Configured AI_MODEL_PROVIDER"
               ollama_server_url:
                 type: string
                 description: Override for the Ollama server URL for this run.
+                nullable: true
                 default: "Defaults to server-configured OLLAMA_SERVER_URL"
               ollama_model_name:
                 type: string
                 description: Override for the Ollama model name for this run.
+                nullable: true
                 default: "Defaults to server-configured OLLAMA_MODEL_NAME"
+              gemini_api_key:
+                type: string
+                description: Override for the Gemini API key for this run.
+                nullable: true
+                default: "Defaults to server-configured GEMINI_API_KEY"
+                # example: "AIza..."
+              gemini_model_name:
+                type: string
+                description: Override for the Gemini model name for this run.
+                nullable: true
+                default: "Defaults to server-configured GEMINI_MODEL_NAME"
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -526,12 +540,13 @@ def start_clustering_endpoint():
     pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
     num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
-    
+
     # Get AI Naming parameters from request, fallback to global config
-    use_ai_naming_param = data.get('use_ai_playlist_naming', USE_AI_PLAYLIST_NAMING)
+    ai_model_provider_param = data.get('ai_model_provider', AI_MODEL_PROVIDER).upper()
     ollama_url_param = data.get('ollama_server_url', OLLAMA_SERVER_URL)
     ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
-
+    gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
+    gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
     job_id = str(uuid.uuid4())
 
     # Clean up details of previously successful tasks before starting a new one
@@ -545,12 +560,12 @@ def start_clustering_endpoint():
             dbscan_eps_min_val, dbscan_eps_max_val, dbscan_min_samples_min_val, dbscan_min_samples_max_val,
             pca_components_min_val, pca_components_max_val, num_clustering_runs_val,
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
-            use_ai_naming_param, ollama_url_param, ollama_model_param # Pass AI params
+            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param # Pass ALL AI params
         ),
         job_id=job_id,
         description="Main Music Clustering", # No timeout
         retry=Retry(max=1), # Optional
-        job_timeout=-1  
+        job_timeout=-1
     )
     return jsonify({"task_id": job.id, "task_type": "main_clustering", "status": job.get_status()}), 202
 
@@ -641,12 +656,12 @@ def get_task_status_endpoint(task_id):
         # If RQ state is more final (e.g. failed/finished), prefer that, else use DB
         if response['state'] not in [JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED]:
             response['state'] = db_task_info.get('status', response['state']) # Use DB status if RQ is still active
-        
+
         response['progress'] = db_task_info.get('progress', response['progress'])
         db_details = json.loads(db_task_info.get('details')) if db_task_info.get('details') else {}
         # Merge details: RQ meta (live) can override DB details (persisted)
         response['details'] = {**db_details, **response['details']}
-        
+
         # If task is marked REVOKED in DB, this is the most accurate status for cancellation
         if db_task_info.get('status') == TASK_STATUS_REVOKED:
             response['state'] = 'REVOKED'
@@ -660,7 +675,7 @@ def get_task_status_endpoint(task_id):
 def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     """Helper to cancel a job and its children based on DB records."""
     cancelled_count = 0
-    
+
     # First, determine the task_type for the current job_id
     db_task_info = get_task_info_from_db(job_id)
     current_task_type = db_task_info.get('task_type') if db_task_info else task_type_from_db
@@ -703,7 +718,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
             action_taken_in_rq = True
         else:
             print(f"  Job {job_id} is already in a terminal RQ state: {current_rq_status}. No RQ action needed.")
-            
+
     except NoSuchJobError:
         print(f"Job {job_id} (type: {current_task_type}) not found in RQ. Will mark as REVOKED in DB.")
     except Exception as e_rq_interaction:
@@ -711,22 +726,22 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
 
     if action_taken_in_rq:
         cancelled_count += 1
-        
+
     # Always mark as REVOKED in DB for the current job if its task_type is known
     save_task_status(job_id, current_task_type, TASK_STATUS_REVOKED, progress=100, details={"message": "Task cancellation processed by API."})
 
     # Attempt to cancel children based on DB parent_task_id
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
-    
+
     # Define terminal statuses for the query
-    terminal_statuses_tuple = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, 
+    terminal_statuses_tuple = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
                                JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED)
 
     # Fetch children that are not already in a terminal state
     cur.execute("""
-        SELECT task_id, task_type FROM task_status 
-        WHERE parent_task_id = %s 
+        SELECT task_id, task_type FROM task_status
+        WHERE parent_task_id = %s
         AND status NOT IN %s
     """, (job_id, terminal_statuses_tuple))
     children_tasks = cur.fetchall()
@@ -737,8 +752,8 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
         child_task_type = child_task_row['task_type'] # Child's own type
         print(f"Recursively cancelling child job: {child_job_id} of type {child_task_type}")
         # The count from recursive calls will be added
-        cancelled_count += cancel_job_and_children_recursive(child_job_id, child_task_type) 
-    
+        cancelled_count += cancel_job_and_children_recursive(child_job_id, child_task_type)
+
     return cancelled_count
 
 @app.route('/api/cancel/<task_id>', methods=['POST'])
@@ -753,7 +768,7 @@ def cancel_task_endpoint(task_id):
       - name: task_id
         in: path
         required: true
-        description: The ID of the task to cancel.
+        description: The ID of the task.
         schema:
           type: string
     responses:
@@ -820,7 +835,7 @@ def cancel_all_tasks_by_type_endpoint(task_type_prefix):
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
     # Exclude terminal statuses
-    terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, 
+    terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
                          JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED) # JobStatus for completeness if used directly
     cur.execute("SELECT task_id, task_type FROM task_status WHERE task_type = %s AND status NOT IN %s", (task_type_prefix, terminal_statuses))
     tasks_to_cancel = cur.fetchall()
@@ -1012,15 +1027,25 @@ def get_config_endpoint():
                   type: array
                   items:
                     type: string
-                use_ai_playlist_naming:
-                  type: boolean
-                  description: Whether to use AI for playlist naming.
+                ai_model_provider:
+                  type: string
+                  description: Configured AI provider for playlist naming (OLLAMA, GEMINI, NONE).
                 ollama_server_url:
                   type: string
                   description: URL of the Ollama server for AI naming.
+                  nullable: true
                 ollama_model_name:
                   type: string
                   description: Name of the Ollama model to use for AI naming.
+                  nullable: true
+                gemini_api_key:
+                  type: string
+                  description: Configured Gemini API key (may be a default placeholder).
+                  nullable: true
+                gemini_model_name:
+                  type: string
+                  description: Configured Gemini model name.
+                  nullable: true
                 clustering_runs:
                   type: integer
     """
@@ -1029,15 +1054,14 @@ def get_config_endpoint():
         "num_recent_albums": NUM_RECENT_ALBUMS, "max_distance": MAX_DISTANCE,
         "max_songs_per_cluster": MAX_SONGS_PER_CLUSTER, "max_songs_per_artist": MAX_SONGS_PER_ARTIST,
         "cluster_algorithm": CLUSTER_ALGORITHM, "num_clusters_min": NUM_CLUSTERS_MIN, "num_clusters_max": NUM_CLUSTERS_MAX,
-        "dbscan_eps_min": DBSCAN_EPS_MIN, "dbscan_eps_max": DBSCAN_EPS_MAX,
+        "dbscan_eps_min": DBSCAN_EPS_MIN, "dbscan_eps_max": DBSCAN_EPS_MAX, "gmm_covariance_type": GMM_COVARIANCE_TYPE,
         "dbscan_min_samples_min": DBSCAN_MIN_SAMPLES_MIN, "dbscan_min_samples_max": DBSCAN_MIN_SAMPLES_MAX,
         "gmm_n_components_min": GMM_N_COMPONENTS_MIN, "gmm_n_components_max": GMM_N_COMPONENTS_MAX,
         "pca_components_min": PCA_COMPONENTS_MIN, "pca_components_max": PCA_COMPONENTS_MAX,
-        "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, 
-        "clustering_runs": CLUSTERING_RUNS,
-        "use_ai_playlist_naming": USE_AI_PLAYLIST_NAMING,
-        "ollama_server_url": OLLAMA_SERVER_URL,
-        "ollama_model_name": OLLAMA_MODEL_NAME,
+        "ai_model_provider": AI_MODEL_PROVIDER, # New provider config
+        "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
+        "gemini_api_key": GEMINI_API_KEY, "gemini_model_name": GEMINI_MODEL_NAME, # Gemini config
+        "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, "clustering_runs": CLUSTERING_RUNS
     })
 
 @app.route('/api/playlists', methods=['GET'])
