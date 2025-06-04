@@ -164,6 +164,8 @@ The provided deployment will deploy on your cluster **pod:**
 **secret:**
 * **jellyfin-credentials:** which contain `api_token` and `user_id` of Jellyfin
 * **postgres-credentials:** which contain `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`
+* **gemini-api-credentials:** which contains your `GEMINI_API_KEY` if you are using Gemini for AI naming.
+
 
 **ConfigMap:**
 * **audiomuse-ai-config:** which will contain your non-sensitive parameters. By default, it includes: `JELLYFIN_URL`, `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL`.
