@@ -8,6 +8,7 @@ The main scope of this application is testing the clustering algorithm. A front-
 
 ## **Table of Contents**
 
+- [Quick Start on K3S](#quick-start-on-k3s)
 - [Workflow Overview](#workflow-overview)
 - [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
   - [1. K-Means](#1-k-means)
@@ -25,6 +26,31 @@ The main scope of this application is testing the clustering algorithm. A front-
 - [Additional Documentation](#additional-documentation)
 - [Future Possibilities](#future-possibilities)
 - [Contributing](#contributing)
+
+## **Quick Start on K3S**
+
+This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster.
+
+1.  **Prerequisites:**
+    *   A running K3S cluster.
+    *   `kubectl` configured to interact with your cluster.
+
+2.  **Configuration:**
+    *   Navigate to the `deployments/` directory.
+    *   Edit `deployment.yaml` to configure mandatory parameters:
+        *   **Secrets:**
+            *   `jellyfin-credentials`: Update `api_token` and `user_id`.
+            *   `postgres-credentials`: Update `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`.
+            *   `gemini-api-credentials` (if using Gemini for AI Naming): Update `GEMINI_API_KEY`.
+        *   **ConfigMap (`audiomuse-ai-config`):**
+            *   Update `JELLYFIN_URL`.
+            *   Ensure `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL` are correct for your setup (defaults are for in-cluster services).
+3.  **Deploy:**
+    ```bash
+    kubectl apply -f deployments/deployment.yaml
+    ```
+4.  **Access:**
+    *   The application front-end will be available via a LoadBalancer service. Check the service's external IP: `kubectl get svc audiomuse-ai-flask-service -n playlist`. Access it at `http://<EXTERNAL-IP>:8000`.
 
 ## **Workflow Overview**
 
