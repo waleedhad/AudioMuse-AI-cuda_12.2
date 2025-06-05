@@ -88,6 +88,30 @@ def init_db():
             mood_vector TEXT
         )
     """)
+    # Check if the 'energy' column exists and add it if not
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'score' AND column_name = 'energy'
+        )
+    """)
+    column_exists_energy = cur.fetchone()[0]
+    if not column_exists_energy:
+        app.logger.info("Adding 'energy' column to the 'score' table.")
+        cur.execute("ALTER TABLE score ADD COLUMN energy REAL")
+    # Check if the 'other_features' column exists and add it if not
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'score' AND column_name = 'other_features'
+        )
+    """)
+    column_exists = cur.fetchone()[0]
+    if not column_exists:
+        app.logger.info("Adding 'other_features' column to the 'score' table.")
+        cur.execute("ALTER TABLE score ADD COLUMN other_features TEXT")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS playlist (
             id SERIAL PRIMARY KEY,
@@ -219,21 +243,40 @@ def get_task_info_from_db(task_id):
     cur.close()
     return dict(row) if row else None
 
-def track_exists(item_id): # Removed db_path
+def track_exists(item_id):
+    """
+    Checks if a track exists in the database AND has been analyzed for key features.
+    Returns True if the track exists and 'other_features' (not NULL, not empty),
+    'energy' (not NULL), 'mood_vector' (not NULL, not empty), and 'tempo' (not NULL)
+    are all populated. Returns False otherwise.
+    """
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT item_id FROM score WHERE item_id = %s", (item_id,))
+    # Check if the track exists and if key analysis fields are populated
+    cur.execute("SELECT item_id FROM score WHERE item_id = %s AND other_features IS NOT NULL AND other_features != '' AND energy IS NOT NULL AND mood_vector IS NOT NULL AND mood_vector != '' AND tempo IS NOT NULL", (item_id,))
     row = cur.fetchone()
     cur.close()
     return row is not None
 
-def save_track_analysis(item_id, title, author, tempo, key, scale, moods): # Removed db_path
+def save_track_analysis(item_id, title, author, tempo, key, scale, moods, energy=None, other_features=None): # Added energy and other_features
     mood_str = ','.join(f"{k}:{v:.3f}" for k, v in moods.items())
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO score (item_id, title, author, tempo, key, scale, mood_vector) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (item_id) DO NOTHING",
-                    (item_id, title, author, tempo, key, scale, mood_str))
+        # Use ON CONFLICT DO UPDATE to ensure existing records are updated
+        cur.execute("""
+            INSERT INTO score (item_id, title, author, tempo, key, scale, mood_vector, energy, other_features)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (item_id) DO UPDATE SET
+                title = EXCLUDED.title,
+                author = EXCLUDED.author,
+                tempo = EXCLUDED.tempo,
+                key = EXCLUDED.key,
+                scale = EXCLUDED.scale,
+                mood_vector = EXCLUDED.mood_vector,
+                energy = EXCLUDED.energy,
+                other_features = EXCLUDED.other_features
+        """, (item_id, title, author, tempo, key, scale, mood_str, energy, other_features))
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -244,7 +287,7 @@ def save_track_analysis(item_id, title, author, tempo, key, scale, moods): # Rem
 def get_all_tracks(): # Removed db_path
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT item_id, title, author, tempo, key, scale, mood_vector FROM score")
+    cur.execute("SELECT item_id, title, author, tempo, key, scale, mood_vector, energy, other_features FROM score") # Added energy and other_features
     rows = cur.fetchall() # Returns list of DictRow
     cur.close()
     return rows

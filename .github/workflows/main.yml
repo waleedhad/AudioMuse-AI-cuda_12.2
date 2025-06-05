@@ -13,12 +13,14 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
-      packages: write
+      contents: read # Allow checkout to read repository contents
+      packages: write # Allow pushing to GitHub Container Registry
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true # <-- ADDED THIS LINE to ensure LFS files are downloaded
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -107,7 +109,8 @@ jobs:
           echo "Waiting for Flask app to start (max 60 seconds)..."
           # Health check loop: Try to connect to the Flask app's /api/last_task endpoint
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:8000/api/last_task > /dev/null; then
+            # Using -I to fetch only headers, less data transfer, and checking for 2xx or 3xx status
+            if curl -sf -I http://localhost:8000/api/last_task | grep -qE "HTTP/[12](.[01])? (2|3)[0-9]{2}"; then
               echo "Flask app is up and responsive!"
               exit 0
             fi
@@ -124,7 +127,20 @@ jobs:
           docker run -d --name redis-test redis:latest
 
           echo "Waiting for Redis to start..."
-          sleep 5 # Give Redis a few seconds to initialize
+          # Instead of a fixed sleep, check if Redis is ready
+          for i in $(seq 1 30); do
+            if docker exec redis-test redis-cli ping | grep -q PONG; then
+              echo "Redis is ready."
+              break
+            fi
+            echo "Waiting for Redis... ($i/30)"
+            sleep 1
+            if [ $i -eq 30 ]; then
+              echo "Redis did not become ready in time."
+              docker logs redis-test
+              exit 1
+            fi
+          done
 
           echo "Starting temporary PostgreSQL container for RQ worker test..."
           docker run -d --name postgres-rq-test \
@@ -163,17 +179,19 @@ jobs:
 
           echo "Waiting for RQ worker to start (max 90 seconds)..."
           # Check if the RQ worker container is running and if its logs indicate it's "Listening"
-          for i in $(seq 1 30); do
+          for i in $(seq 1 30); do # 30 iterations * 3 seconds = 90 seconds
             if docker ps -f name=rq-test-worker --format '{{.Status}}' | grep -q 'Up'; then
               # Look for the "Listening on" log message which indicates RQ worker startup
               # RQ worker logs typically include "Listening on <queue_name>..."
-              if docker logs rq-test-worker 2>&1 | grep -q "Listening on"; then
+              # Giving a bit more time for logs to appear
+              sleep 2 
+              if docker logs rq-test-worker 2>&1 | grep -E "Listening on|RQ Worker [^ ]+ started"; then # Added alternative RQ startup message
                   echo "RQ worker container is running and listening."
                   exit 0
               fi
             fi
             echo "Waiting... ($i/30)"
-            sleep 3 # Increased sleep duration
+            sleep 3 # Increased sleep duration between checks
           done
           echo "RQ worker container did not start or become ready within the expected time."
           docker logs rq-test-worker # Print logs for debugging
@@ -192,6 +210,7 @@ jobs:
 
       - name: Build and Push AudioMuse AI Image (Final Push)
         # This step only runs if all previous test steps passed
+        if: success() # Only run this step if all previous steps in the job were successful
         uses: docker/build-push-action@v5
         with:
           context: .

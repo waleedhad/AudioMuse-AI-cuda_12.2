@@ -91,3 +91,18 @@ MOOD_LABELS = [
 TOP_N_MOODS = 5
 EMBEDDING_MODEL_PATH = "/app/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/msd-msd-musicnn-1.pb"
+
+# --- Other Essentia Model Paths ---
+# Paths for models used in predict_other_models (VGGish-based)
+VGGISH_EMBEDDING_MODEL_PATH = os.environ.get("VGGISH_EMBEDDING_MODEL_PATH", "/app/audioset-vggish-3.pb")
+DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/danceability-audioset-vggish-1.pb")
+AGGRESSIVE_MODEL_PATH = os.environ.get("AGGRESSIVE_MODEL_PATH", "/app/mood_aggressive-audioset-vggish-1.pb")
+HAPPY_MODEL_PATH = os.environ.get("HAPPY_MODEL_PATH", "/app/mood_happy-audioset-vggish-1.pb")
+PARTY_MODEL_PATH = os.environ.get("PARTY_MODEL_PATH", "/app/mood_party-audioset-vggish-1.pb")
+RELAXED_MODEL_PATH = os.environ.get("RELAXED_MODEL_PATH", "/app/mood_relaxed-audioset-vggish-1.pb")
+SAD_MODEL_PATH = os.environ.get("SAD_MODEL_PATH", "/app/mood_sad-audioset-vggish-1.pb")
+
+# --- Energy Normalization Range ---
+ENERGY_MIN = float(os.getenv("ENERGY_MIN", "0.01"))
+ENERGY_MAX = float(os.getenv("ENERGY_MAX", "0.15"))
+OTHER_FEATURE_LABELS = ['danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad']

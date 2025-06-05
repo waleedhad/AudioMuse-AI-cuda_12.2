@@ -11,7 +11,7 @@ import uuid
 import traceback
 
 # Essentia and ML imports
-from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D
+from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, TensorflowPredictVGGish, Energy # Import Energy
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
@@ -28,9 +28,11 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
-    GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, \
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, \
+    GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX, \
+    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, \
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME, \
+    VGGISH_EMBEDDING_MODEL_PATH, DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, \
+    HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH, \
     SCORE_WEIGHT_DIVERSITY, \
     SCORE_WEIGHT_PURITY, \
     MUTATION_KMEANS_COORD_FRACTION # For create_or_update_playlists_on_jellyfin
@@ -100,9 +102,8 @@ def download_track(jellyfin_url, headers, temp_dir, item):
         print(f"ERROR: download_track {item['Name']}: {e}")
         return None
 
-def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods):
+def predict_moods(audio, embedding_model_path, prediction_model_path, mood_labels_list):
     """Predicts moods for an audio file using pre-trained models."""
-    audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
     embedding_model = TensorflowPredictMusiCNN(
         graphFilename=embedding_model_path, output="model/dense/BiasAdd"
     )
@@ -112,22 +113,78 @@ def predict_moods(file_path, embedding_model_path, prediction_model_path, mood_l
         input="serving_default_model_Placeholder",
         output="PartitionedCall"
     )
-    predictions = model(embeddings)[0]
-    results = dict(zip(mood_labels_list, predictions))
-    return {label: float(score) for label, score in sorted(results.items(), key=lambda x: -x[1])[:top_n_moods]}
+    mood_predictions = model(embeddings)[0]
+    mood_results = dict(zip(mood_labels_list, mood_predictions))
+    return {label: float(score) for label, score in mood_results.items()}
 
-def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods):
-    """Analyzes a single track for tempo, key, scale, and moods."""
-    audio = MonoLoader(filename=file_path)()
+def predict_other_models(audio):
+    """Predicts danceability, aggression, happiness, party, relaxed, and sadness using VGGish embeddings."""
+    embedding_model = TensorflowPredictVGGish(graphFilename=VGGISH_EMBEDDING_MODEL_PATH, output="model/vggish/embeddings")
+    embeddings = embedding_model(audio)
+
+    model_paths = {
+        "danceable": DANCEABILITY_MODEL_PATH,
+        "aggressive": AGGRESSIVE_MODEL_PATH,
+        "happy": HAPPY_MODEL_PATH,
+        "party": PARTY_MODEL_PATH,
+        "relaxed": RELAXED_MODEL_PATH,
+        "sad": SAD_MODEL_PATH,
+    }
+    predictions = {}
+    for mood, path in model_paths.items():
+        try:
+            model = TensorflowPredict2D(graphFilename=path, output="model/Softmax")
+            prediction = model(embeddings)
+            if prediction is not None and prediction.size > 0 and len(prediction) > 0 and len(prediction[0]) == 2:  # Assuming binary classification
+                predictions[mood] = float(prediction[0][0])  # Probability of the positive class
+            else:
+                predictions[mood] = 0.0  # Default value if prediction is invalid
+        except Exception as e:
+            print(f"Error predicting {mood}: {e}")
+            predictions[mood] = 0.0  # Default value in case of error
+
+    return predictions
+
+
+def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list):
+    """Analyzes a single track for tempo, key, scale, moods, and other models."""
+    audio = MonoLoader(filename=file_path, sampleRate=44100, resampleQuality=4)() # Load audio once (use 44100 for Energy)
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(file_path, embedding_model_path, prediction_model_path, mood_labels_list, top_n_moods)
-    return tempo, key, scale, moods
+    moods = predict_moods(audio, embedding_model_path, prediction_model_path, mood_labels_list)
 
-def score_vector(row, mood_labels_list):
+    # Calculate raw total energy
+    raw_total_energy = Energy()(audio)
+    num_samples = len(audio)
+
+    # Calculate average energy per sample
+    if num_samples > 0:
+        average_energy_per_sample = raw_total_energy / float(num_samples)
+    else:
+        average_energy_per_sample = 0.0 # Should not happen for valid audio
+
+    other_predictions = predict_other_models(audio)
+
+    # Combine all predictions into a single dictionary
+    all_predictions = {
+        "tempo": tempo,
+        "key": key,
+        "scale": scale,
+        "moods": moods,
+        "energy": float(average_energy_per_sample), # Store average energy per sample
+        **other_predictions  # Include danceable, aggressive, etc. directly
+    }
+
+    return all_predictions
+
+def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feature_labels_list is now passed
     """Converts a database row into a numerical feature vector for clustering."""
+    # Extract features from the database row
     tempo = float(row['tempo']) if row['tempo'] is not None else 0.0
+    energy = float(row['energy']) if row['energy'] is not None else 0.0 # Get energy
     mood_str = row['mood_vector'] or ""
+
+    # Normalize tempo and energy
     tempo_norm = (tempo - 40) / (200 - 40)
     tempo_norm = np.clip(tempo_norm, 0.0, 1.0)
     mood_scores = np.zeros(len(mood_labels_list))
@@ -141,9 +198,29 @@ def score_vector(row, mood_labels_list):
                     mood_scores[mood_labels_list.index(label)] = float(score_str)
                 except ValueError:
                     continue
-    full_vector = [tempo_norm] + list(mood_scores)
+
+    energy_norm = (energy - ENERGY_MIN) / (ENERGY_MAX - ENERGY_MIN) if (ENERGY_MAX - ENERGY_MIN) > 0 else 0.0
+    energy_norm = np.clip(energy_norm, 0.0, 1.0)
+
+    # Parse and prepare other features
+    other_feature_scores = np.zeros(len(other_feature_labels_list))
+    other_features_str = row.get('other_features', "") # Get the new field
+    if other_features_str:
+        for pair in other_features_str.split(","):
+            if ":" not in pair:
+                continue
+            label, score_str = pair.split(":")
+            if label in other_feature_labels_list:
+                try:
+                    other_feature_scores[other_feature_labels_list.index(label)] = float(score_str)
+                except ValueError:
+                    continue
+
+    # Construct the full feature vector: [tempo, energy, moods..., other_features...]
+    full_vector = [tempo_norm, energy_norm] + list(mood_scores) + list(other_feature_scores)
     return full_vector
 
+# OTHER_FEATURE_LABELS is imported from config.py
 def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_list):
     """Generates a human-readable name for a cluster."""
     if pca_enabled and pca_model is not None:
@@ -155,13 +232,28 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     else:
         scaled_vector = centroid_scaled_vector
 
+    # Adjust slicing based on the new vector structure [tempo, energy, moods..., other_features...]
     tempo_norm = scaled_vector[0]
-    mood_values = scaled_vector[1:]
+    energy_norm = scaled_vector[1] # Get energy
+    mood_values = scaled_vector[2 : 2 + len(mood_labels_list)] # Correctly slice mood values
+
+    # Extract scores for the other features (danceable, etc.)
+    other_feature_values = scaled_vector[2 + len(mood_labels_list):]
+    other_feature_scores_dict = {}
+    if len(other_feature_values) == len(OTHER_FEATURE_LABELS):
+        other_feature_scores_dict = dict(zip(OTHER_FEATURE_LABELS, other_feature_values))
+    else:
+        print(f"Warning: Mismatch between other_feature_values length ({len(other_feature_values)}) and OTHER_FEATURE_LABELS length ({len(OTHER_FEATURE_LABELS)}). Cannot map scores for AI naming.")
+
     tempo = tempo_norm * (200 - 40) + 40
     if tempo < 80: tempo_label = "Slow"
     elif tempo < 130: tempo_label = "Medium"
     else: tempo_label = "Fast"
 
+    # Add energy label (example)
+    energy_label = "Low Energy" if energy_norm < 0.3 else ("Medium Energy" if energy_norm < 0.7 else "High Energy")
+
+    # Determine top moods
     if len(mood_values) == 0 or np.sum(mood_values) == 0: top_indices = []
     else: top_indices = np.argsort(mood_values)[::-1][:3]
 
@@ -170,7 +262,7 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     full_name = f"{mood_part}_{tempo_label}"
 
     top_mood_scores = {mood_labels_list[i]: mood_values[i] for i in top_indices if i < len(mood_labels_list)}
-    extra_info = {"tempo": round(tempo_norm, 2)}
+    extra_info = {"tempo": round(tempo_norm, 2), "energy": round(energy_norm, 2)} # Include energy in extra info
 
     return full_name, {**top_mood_scores, **extra_info}
 
@@ -321,7 +413,23 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     continue
 
                 try:
-                    tempo, key, scale, moods = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS, top_n_moods)
+                    analysis_results = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
+                    tempo = analysis_results.get("tempo", 0.0)
+                    key = analysis_results.get("key", "")
+                    scale = analysis_results.get("scale", "")
+                    moods = analysis_results.get("moods", {})
+                    # Include new predictions directly
+                    danceable = analysis_results.get("danceable", 0.0)
+                    energy = analysis_results.get("energy", 0.0) # Get energy
+                    aggressive = analysis_results.get("aggressive", 0.0)
+                    happy = analysis_results.get("happy", 0.0)
+                    party = analysis_results.get("party", 0.0)
+                    relaxed = analysis_results.get("relaxed", 0.0)
+                    sad = analysis_results.get("sad", 0.0)
+
+                    # Prepare for database storage
+                    other_features_str = f"danceable:{danceable:.2f},aggressive:{aggressive:.2f},happy:{happy:.2f},party:{party:.2f},relaxed:{relaxed:.2f},sad:{sad:.2f}" # Ensure no spaces for easier parsing
+
                     current_track_details_for_api = {
                         "name": track_name_full,
                         "tempo": round(tempo, 2),
@@ -329,14 +437,21 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         "scale": scale,
                         "moods": {k: round(v, 2) for k, v in moods.items()}
                     }
-                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods)
+
+                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods, energy=energy, other_features=other_features_str) # Pass energy
                     tracks_analyzed_count += 1
                     mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
+
+                    # Prepare for logging: Get top N moods
+                    sorted_moods = sorted(moods.items(), key=lambda item: item[1], reverse=True)
+                    top_n_moods_for_log = sorted_moods[:top_n_moods] # Use the function argument
+                    mood_details_str_log = ', '.join(f'{k}:{v:.2f}' for k,v in top_n_moods_for_log)
+
+                    # Prepare for logging: New features
+                    other_features_log_str = f"Energy: {energy:.2f}, Danceable: {danceable:.2f}, Aggressive: {aggressive:.2f}, Happy: {happy:.2f}, Party: {party:.2f}, Relaxed: {relaxed:.2f}, Sad: {sad:.2f}" # Include energy in log
+
                     analysis_summary_msg = f"Tempo: {tempo:.2f}, Key: {key} {scale}."
-                    if mood_details_str:
-                        analysis_summary_msg += f" Moods: {mood_details_str}"
-                    else:
-                        analysis_summary_msg += " Moods: (No moods reported or TOP_N_MOODS is low/zero)"
+                    analysis_summary_msg += f" Top {top_n_moods} Moods: {mood_details_str_log}. Other Features: {other_features_log_str}"
                     log_and_update_album_task(
                         f"Analyzed '{track_name_full}'. {analysis_summary_msg}",
                         current_progress_val,
@@ -700,7 +815,7 @@ def _perform_single_clustering_iteration(
     """
     try:
         elite_solutions_params_list = elite_solutions_params_list or []
-        mutation_config = mutation_config or {"int_abs_delta": 2, "float_abs_delta": 0.05, "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION}
+        mutation_config = mutation_config or {"int_abs_delta": MUTATION_INT_ABS_DELTA, "float_abs_delta": MUTATION_FLOAT_ABS_DELTA, "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION}
         if "coord_mutation_fraction" not in mutation_config: # Ensure default if not passed
             mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
 
@@ -738,7 +853,7 @@ def _perform_single_clustering_iteration(
                     mutated_pca_comps = _mutate_param(
                         elite_pca_comps,
                         pca_params_ranges["components_min"], pca_params_ranges["components_max"],
-                        mutation_config.get("int_abs_delta", 2)
+                        mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA)
                     )
                     # Max PCA components also limited by number of features in X_scaled and number of samples
                     max_pca_by_features = X_scaled.shape[1]
@@ -771,7 +886,7 @@ def _perform_single_clustering_iteration(
                         elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", num_clusters_min_max[0])
                         mutated_n_clusters = _mutate_param(
                             elite_n_clusters,
-                            num_clusters_min_max[0],
+                            max(1, num_clusters_min_max[0]), # Ensure min clusters is at least 1
                             min(num_clusters_min_max[1], max_clusters_or_components), # Max clusters capped by available points
                             mutation_config.get("int_abs_delta", 2)
                         )
@@ -781,12 +896,12 @@ def _perform_single_clustering_iteration(
                         elite_min_samples = elite_method_config_original.get("params", {}).get("min_samples", dbscan_params_ranges["samples_min"])
                         mutated_eps = _mutate_param(
                             elite_eps, dbscan_params_ranges["eps_min"], dbscan_params_ranges["eps_max"],
-                            mutation_config.get("float_abs_delta", 0.05), is_float=True, round_digits=2
+                            mutation_config.get("float_abs_delta", MUTATION_FLOAT_ABS_DELTA), is_float=True, round_digits=2
                         )
                         mutated_min_samples = _mutate_param(
                             elite_min_samples, dbscan_params_ranges["samples_min"], dbscan_params_ranges["samples_max"],
-                            mutation_config.get("int_abs_delta", 2)
-                        )
+                            mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA)
+                        ) # min_samples should be at least 1
                         temp_method_params_config = {"method": "dbscan", "params": {"eps": mutated_eps, "min_samples": mutated_min_samples}}
                     elif clustering_method == "gmm":
                         elite_n_components = elite_method_config_original.get("params", {}).get("n_components", gmm_params_ranges["n_components_min"])
@@ -794,7 +909,7 @@ def _perform_single_clustering_iteration(
                             elite_n_components,
                             gmm_params_ranges["n_components_min"],
                             min(gmm_params_ranges["n_components_max"], max_clusters_or_components), # Max components capped
-                            mutation_config.get("int_abs_delta", 2)
+                            mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA)
                         )
                         temp_method_params_config = {"method": "gmm", "params": {"n_components": max(1, mutated_n_components)}}
 
@@ -824,7 +939,7 @@ def _perform_single_clustering_iteration(
             # Original random parameter generation
             sampled_pca_components_rand = random.randint(pca_params_ranges["components_min"], pca_params_ranges["components_max"])
             max_allowable_pca_rand = min(sampled_pca_components_rand, len(MOOD_LABELS) + 1, len(all_tracks_data_parsed) -1 if len(all_tracks_data_parsed) > 1 else 1)
-            max_allowable_pca_rand = max(0, max_allowable_pca_rand)
+            max_allowable_pca_rand = max(0, max_allowable_pca_rand) # Ensure not negative
             pca_config = {"enabled": max_allowable_pca_rand > 0, "components": max_allowable_pca_rand}
 
             # Apply PCA for random generation path to get data_after_pca_for_this_iteration
@@ -846,7 +961,7 @@ def _perform_single_clustering_iteration(
                  return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"pca_config": pca_config}}
 
             if clustering_method == "kmeans":
-                k_rand = random.randint(num_clusters_min_max[0], min(num_clusters_min_max[1], max_clusters_or_components_rand))
+                k_rand = random.randint(max(1, num_clusters_min_max[0]), min(num_clusters_min_max[1], max_clusters_or_components_rand)) # Ensure min clusters is at least 1
                 k_rand = max(1, k_rand)
                 kmeans_initial_centroids_rand = _generate_or_mutate_kmeans_initial_centroids(
                     k_rand, data_after_pca_for_this_iteration, None, None, pca_config, # No elite for random
@@ -857,7 +972,7 @@ def _perform_single_clustering_iteration(
                 current_dbscan_eps_rand = round(random.uniform(dbscan_params_ranges["eps_min"], dbscan_params_ranges["eps_max"]), 2)
                 current_dbscan_min_samples_rand = random.randint(dbscan_params_ranges["samples_min"], dbscan_params_ranges["samples_max"])
                 method_params_config = {"method": "dbscan", "params": {"eps": current_dbscan_eps_rand, "min_samples": current_dbscan_min_samples_rand}}
-            elif clustering_method == "gmm":
+            elif clustering_method == "gmm": # GMM also needs at least 1 component
                 gmm_n_rand = random.randint(gmm_params_ranges["n_components_min"], min(gmm_params_ranges["n_components_max"], max_clusters_or_components_rand))
                 method_params_config = {"method": "gmm", "params": {"n_components": max(1, gmm_n_rand)}}
             else:
@@ -886,7 +1001,7 @@ def _perform_single_clustering_iteration(
 
         # --- Start of core logic from original run_single_clustering_iteration_task ---
         # X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed] # Already done above
-        # X_scaled, data_after_pca_for_this_iteration, and pca_model_for_this_iteration are already prepared above.
+        # X_scaled, data_after_pca_for_this_iteration, and pca_model_for_this_iteration are already prepared above using score_vector
         # Use data_after_pca_for_this_iteration for clustering.
 
         labels = None
@@ -975,7 +1090,7 @@ def _perform_single_clustering_iteration(
         for label_val, songs_list in filtered_clusters.items():
             if songs_list:
                 center_val = cluster_centers_map.get(label_val)
-                if center_val is None: continue
+                if center_val is None or len(center_val) == 0: continue # Ensure centroid exists and is not empty
                 name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], MOOD_LABELS)
                 if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
@@ -1032,7 +1147,7 @@ def _perform_single_clustering_iteration(
                 if scores_of_predominant_mood_for_songs_in_playlist:
                     avg_purity_for_this_playlist = sum(scores_of_predominant_mood_for_songs_in_playlist) / len(scores_of_predominant_mood_for_songs_in_playlist)
                     all_individual_playlist_purities.append(avg_purity_for_this_playlist)
-
+        # --- End Enhanced Score Calculation ---
         playlist_purity_component = 0.0
         if all_individual_playlist_purities:
             playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
@@ -1109,7 +1224,7 @@ def run_clustering_batch_task(
 
         try:
             log_and_update_batch_task(f"Processing {num_iterations_in_batch} iterations.", 5)
-
+            all_tracks_data = json.loads(all_tracks_data_json) # Load data once per batch task
             # === Cooperative Cancellation Check for Batch Task ===
             if current_job:
                 with app.app_context():
@@ -1125,8 +1240,6 @@ def run_clustering_batch_task(
                         log_and_update_batch_task(f"🛑 Batch task {batch_id_str} stopping because {revocation_reason}.", current_progress_batch, task_state=TASK_STATUS_REVOKED)
                         return {"status": "REVOKED", "message": f"Batch task {batch_id_str} stopped.", "iterations_completed_in_batch": 0, "best_result_from_batch": None}
             # === End Cooperative Cancellation Check ===
-
-            all_tracks_data = json.loads(all_tracks_data_json)
 
             elite_solutions_params_list_for_iter = []
             if elite_solutions_params_list_json:
@@ -1162,7 +1275,7 @@ def run_clustering_batch_task(
                 iteration_result = _perform_single_clustering_iteration(
                     current_run_global_idx, all_tracks_data, clustering_method,
                     num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-                    max_songs_per_cluster, log_prefix=log_prefix_for_iter,
+                    max_songs_per_cluster, log_prefix=log_prefix_for_iter, # Pass max_songs_per_cluster
                     elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
                     exploitation_probability=exploitation_probability,
                     mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {})
@@ -1191,13 +1304,6 @@ def run_clustering_batch_task(
             print(f"ERROR: Clustering batch {batch_id_str} failed: {e}\n{error_tb}")
             raise
 
-# Constants for guided search (can be moved to config.py later or read from env)
-TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10"))
-EXPLOITATION_START_FRACTION = float(os.environ.get("CLUSTERING_EXPLOITATION_START_FRACTION", "0.2"))
-EXPLOITATION_PROBABILITY_CONFIG = float(os.environ.get("CLUSTERING_EXPLOITATION_PROBABILITY", "0.7"))
-MUTATION_INT_ABS_DELTA = int(os.environ.get("CLUSTERING_MUTATION_INT_ABS_DELTA", "3"))
-MUTATION_FLOAT_ABS_DELTA = float(os.environ.get("CLUSTERING_MUTATION_FLOAT_ABS_DELTA", "0.05"))
-MUTATION_KMEANS_COORD_FRACTION = float(os.environ.get("CLUSTERING_MUTATION_KMEANS_COORD_FRACTION", "0.05")) # Ensure this is defined or imported
 
 def run_clustering_task(
     clustering_method, num_clusters_min, num_clusters_max,
@@ -1304,7 +1410,7 @@ def run_clustering_task(
             mutation_config_json = json.dumps(mutation_config)
             exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
             all_launched_child_jobs_instances = []
-            from app import rq_queue as main_rq_queue
+            from app import rq_queue as main_rq_queue # Ensure we use the main queue
 
             MAX_CONCURRENT_BATCH_JOBS = 10
             ITERATIONS_PER_BATCH_JOB = 10
@@ -1420,7 +1526,7 @@ def run_clustering_task(
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
                                 current_elite_params_for_batch_json,
-                                exploitation_prob_for_this_batch,
+                                exploitation_prob_for_this_batch, # Pass exploitation probability
                                 mutation_config_json
                             ),
                             job_id=batch_job_task_id,
@@ -1523,7 +1629,7 @@ def run_clustering_task(
                             feature3 = name_parts[1] # Or keep as "Music" if you prefer a distinct 3rd feature always
 
                         # The prompt variable here is the fully formatted template with feature1, feature2, category_name.
-                        # The get_openai_playlist_name function will take this and append the song list.
+                        # The get_ai_playlist_name function will take this and append the song list.
                         # So, we pass the template itself, and the individual components to the function for Ollama, using passed-in params.
                         print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using provider '{ai_model_provider_for_run}'. F1: '{feature1}', F2: '{feature2}', F3: '{feature3}'.")
                         ai_generated_name_str = get_ai_playlist_name(
