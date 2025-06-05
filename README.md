@@ -305,3 +305,17 @@ This MVP lays the groundwork for further development:
 
 Contributions, issues, and feature requests are welcome\!  
 This is an ALPHA early release, so expect bugs or functions that are still not implemented.
+
+If you want to clone this repository remember that **GIT LARGE FILE** is used for the essentia-tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
+
+```
+sudo apt-get install git-lfs
+git clone --branch devel https://github.com/NeptuneHub/AudioMuse-AI.git
+```
+
+The large file was created in this way (in case you need to add more):
+```
+git lfs install
+git lfs track "*.pb"
+git add .gitattributes
+```
