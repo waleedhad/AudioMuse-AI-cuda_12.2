@@ -1,10 +1,33 @@
 site_name: AudioMuse-AI Documentation
-docs_dir: web
+docs_dir: web 
 
-# Your project's live website URL and GitHub repository details.
 site_url: https://neptunehub.github.io/AudioMuse-AI/
 repo_url: https://github.com/NeptuneHub/AudioMuse-AI
 repo_name: GitHub
+
+# --- NAVIGATION MENU DEFINITION ---
+# This 'nav' section explicitly defines the structure of your menu.
+# The filenames MUST EXACTLY MATCH what mdsplit generates in your 'web' folder
+# when splitting at Level 1 headings.
 nav:
-  - Home: toc.md
-theme: readthedocs
+  - Home: 'toc.md' # This links to the overall Table of Contents
+  - '1 - AudioMuse-AI': '1---AudioMuse-AI.md'
+  - '2 - Deployment and Parameters': '2---Deployment-and-Parameters.md'
+  - '3 - Algorithm details': '3---Algorithm-details.md'
+  - '4 - Screenshots': '4---Screenshots.md'
+  - '5 - Key Technologies': '5---Key-Technologies.md'
+  - '6 - Additional Documentation': '6---Additional-Documentation.md'
+  - '7 - Future Possibilities': '7---Future-Possibilities.md'
+
+theme:
+  name: readthedocs # Keeping your chosen 'readthedocs' theme
+
+# --- MARKDOWN EXTENSIONS ---
+# These extensions enhance Markdown's capabilities for richer content.
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - attr_list
+  - md_in_html
