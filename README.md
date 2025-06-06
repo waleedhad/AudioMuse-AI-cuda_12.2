@@ -4,6 +4,7 @@ title: Home
 multipage: true
 ---
 
+
 # **AudioMuse-AI**
 
 AudioMuse-AI is a Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using deep audio analysis via [Essentia](https://essentia.upf.edu/) with TensorFlow. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo, you also have a /deployment/deployment.yaml example that you need to configure following the configuration parameter chapter.
