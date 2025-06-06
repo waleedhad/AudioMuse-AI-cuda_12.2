@@ -45,13 +45,12 @@ def generate_mkdocs_config(web_dir, template_file, output_file):
     nav_structure = []
     nav_structure.append({"Home": "toc.md"}) # Always include toc.md as Home
 
-    # --- CRITICAL FIX: Ensure 'top_level_items' is defined here ---
-    # This list will collect all the top-level pages and categories before sorting them.
-    top_level_items = [] 
-    # -----------------------------------------------------------------
+    top_level_items = [] # Collect all top-level items (files and categories)
+
+    print(f"DEBUG: Starting nav generation from '{web_dir}'")
 
     # Walk the 'web_dir' to discover structure
-    for entry in sorted(os.listdir(web_dir)): # Sorted for consistent order in menu
+    for entry in sorted(os.listdir(web_dir)): # Sort entries for consistent order
         full_path = os.path.join(web_dir, entry)
         
         # Exclude toc.md as it's handled separately
@@ -64,8 +63,10 @@ def generate_mkdocs_config(web_dir, template_file, output_file):
 
         if os.path.isdir(full_path):
             # This is a category folder (e.g., '2---Deployment-and-Parameters')
-            category_display_name = get_display_name_from_path(entry, is_folder=True) # Use is_folder to apply folder naming rules
+            category_display_name = get_display_name_from_path(entry, is_folder=True)
             category_items = []
+            
+            print(f"DEBUG: Processing category folder: '{entry}' (Order: {order_key}, Display: '{category_display_name}')")
             
             # Populate category items by walking through files inside this directory
             for item_name in sorted(os.listdir(full_path)): # Sort children for consistent order
@@ -74,6 +75,7 @@ def generate_mkdocs_config(web_dir, template_file, output_file):
                     item_relative_path = os.path.join(entry, item_name) # Path relative to web_dir
                     item_display_name = get_display_name_from_path(item_relative_path)
                     category_items.append({item_display_name: item_relative_path})
+                    print(f"DEBUG:   - Added sub-item: '{item_name}' (Display: '{item_display_name}')")
             
             # Add category to top_level_items if it has children
             if category_items:
@@ -89,22 +91,29 @@ def generate_mkdocs_config(web_dir, template_file, output_file):
         elif os.path.isfile(full_path) and entry.endswith(".md"):
             # This is a top-level Markdown file (e.g., '1---AudioMuse-AI.md', '5---Key-Technologies.md')
             file_display_name = get_display_name_from_path(entry)
+            print(f"DEBUG: Processing top-level file: '{entry}' (Order: {order_key}, Display: '{file_display_name}')")
             top_level_items.append({
                 "order_key": order_key, 
                 "type": "page", 
                 "display_name": file_display_name, 
                 "path": entry
             })
+        else:
+            print(f"Warning: Unrecognized entry type in '{web_dir}': '{entry}'. Skipping.")
 
-    # Sort all collected top-level items by their numerical order_key
-    top_level_items.sort(key=lambda x: x["order_key"])
+    print(f"DEBUG: Collected top-level items before sort: {top_level_items}")
+    top_level_items.sort(key=lambda x: x["order_key"]) # Sort items by the extracted numerical prefix
+    print(f"DEBUG: Collected top-level items AFTER sort: {top_level_items}")
 
     # Assemble the final navigation structure by adding sorted top-level items after 'Home'
+    final_sorted_nav_items = []
     for item in top_level_items:
         if item["type"] == "page":
-            nav_structure.append({item["display_name"]: item["path"]})
+            final_sorted_nav_items.append({item["display_name"]: item["path"]})
         elif item["type"] == "category":
-            nav_structure.append({item["display_name"]: item["items"]})
+            final_sorted_nav_items.append({item["display_name"]: item["items"]})
+
+    nav_structure = [nav_structure[0]] + final_sorted_nav_items # Prepend 'Home'
 
     # Add the generated nav list to the config dictionary
     config['nav'] = nav_structure
