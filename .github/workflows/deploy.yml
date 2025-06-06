@@ -1,48 +1,47 @@
 # This is the name of the workflow
-name: Build and Deploy Site from main/docs to gh-pages
+name: Build and Deploy Site from web dir to gh-pages
 
-# This workflow runs automatically on a push to main or docs, or can be run manually.
+# This workflow runs automatically on a push to the main branch.
 on:
   push:
     branches:
       - main
-      - docs
   workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Check out the 'docs' branch. This branch contains all the
-      # Jekyll configuration files (_config.yml, layouts, etc.).
-      - name: Checkout docs branch (for site configuration)
+      # Step 1: Check out the 'main' branch to access all files.
+      - name: Checkout main branch
         uses: actions/checkout@v3
-        with:
-          ref: 'docs'
 
-      # Step 2: Set up Ruby, install dependencies from the Gemfile in the
-      # 'docs' branch, and cache them for faster future builds.
+      # Step 2: Copy the root README.md into the 'web' directory so Jekyll can find it.
+      - name: Copy README to build directory
+        run: cp README.md web/
+
+      # Step 3: Set up Ruby and install gems, targeting the Gemfile inside './web'.
       - name: Setup Ruby and Bundler
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: 3.1
-          bundler-cache: true # Caches gems
+          bundler-cache: true
+          working-directory: ./web
 
-      # Step 3: Build the Jekyll site. Jekyll itself will now fetch README.md
-      # from the main branch based on the updated _config.yml.
+      # Step 4: Build the Jekyll site from within the 'web' directory.
       - name: Build the Jekyll site
-        run: bundle exec jekyll build
+        run: bundle exec jekyll build --destination ./_site
+        working-directory: ./web
         env:
           JEKYLL_ENV: production
 
-      # Step 4: Deploy the final, built website from the `_site` directory
-      # to the `gh-pages` branch.
+      # Step 5: Deploy the contents of 'web/_site' to the gh-pages branch.
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
-          publish_dir: ./_site
+          publish_dir: ./web/_site
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_message: "Deploy site from commit ${{ github.sha }}"
