@@ -1,0 +1,65 @@
+name: Deploy Docs to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # This workflow will trigger on pushes to the 'main' branch
+
+# Configure permissions for the workflow
+permissions:
+  contents: write   # Required to allow actions/checkout and for deployment
+  pages: write      # Required to deploy to GitHub Pages
+  id-token: write   # Required to authenticate with GitHub Pages
+
+# Define the deployment job
+jobs:
+  deploy:
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+
+    # Set up the deployment environment for GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }} # This will be the URL of your deployed site
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Checkout your repository code
+
+      - name: Set up Python
+        uses: actions/setup-python@v5 # Configure a Python environment
+        with:
+          python-version: '3.x' # Use a recent stable Python 3 version
+
+      - name: Install documentation dependencies
+        run: |
+          pip install mdsplit mkdocs mkdocs-material # Install required Python packages
+
+      - name: Generate 'web' directory with mdsplit
+        run: |
+          # This command regenerates your 'web' directory contents based on README.md
+          # Important Considerations for your README.md and image assets:
+          # 1. Ensure your original README.md has any internal "Table of Contents" section removed.
+          #    (This was discussed previously and is crucial for a clean MkDocs menu).
+          # 2. If you have a 'screenshot' folder (or any other static assets), ensure it's placed
+          #    directly INSIDE your 'web' folder in your repository (e.g., commit 'web/screenshot/image.png').
+          #    This workflow assumes you commit these assets directly into 'web/'.
+          # 3. Adjust image paths in your original README.md to be relative to the 'web' folder structure.
+          #    For example, if an image is 'web/screenshot/analysis_task.png' and the MD file
+          #    referencing it is 'web/4---Screenshots/4.1---Analysis-task.md', the path in the MD
+          #    should be '../screenshot/analysis_task.png'.
+          mdsplit ./README.md -o web -l 2 -t -n
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5 # Sets up the GitHub Pages environment
+
+      - name: Build MkDocs documentation
+        run: mkdocs build # This command builds your site into the './site' directory
+
+      - name: Upload artifact for deployment
+        uses: actions/upload-pages-artifact@v3 # Uploads the './site' directory as an artifact
+        with:
+          path: './site' # The path to the generated static site files
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4 # This action takes the uploaded artifact and deploys it
