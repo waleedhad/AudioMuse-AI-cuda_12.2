@@ -1,16 +1,12 @@
 # This is the name of the workflow
 name: Build and Deploy Site from main/docs to gh-pages
 
-# This workflow runs automatically on a push to README.md in main,
-# any file in the docs branch, or can be run manually.
+# This workflow runs automatically on a push to main or docs, or can be run manually.
 on:
   push:
     branches:
       - main
       - docs
-    paths:
-      - 'README.md'
-      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -24,22 +20,7 @@ jobs:
         with:
           ref: 'docs'
 
-      # Step 2: Check out the 'main' branch into a separate temporary
-      # directory to safely access its README.md file.
-      - name: Checkout main branch (for README.md)
-        uses: actions/checkout@v3
-        with:
-          ref: 'main'
-          path: 'main-content'
-          sparse-checkout: |
-            README.md
-
-      # Step 3: Move the README.md from the temporary directory to the
-      # main workspace, making it available for the Jekyll build.
-      - name: Move README.md to build directory
-        run: mv main-content/README.md ./README.md
-
-      # Step 4: Set up Ruby, install dependencies from the Gemfile in the
+      # Step 2: Set up Ruby, install dependencies from the Gemfile in the
       # 'docs' branch, and cache them for faster future builds.
       - name: Setup Ruby and Bundler
         uses: ruby/setup-ruby@v1
@@ -47,14 +28,15 @@ jobs:
           ruby-version: 3.1
           bundler-cache: true # Caches gems
 
-      # Step 5: Build the Jekyll site. The output is placed in the `_site` directory.
+      # Step 3: Build the Jekyll site. Jekyll itself will now fetch README.md
+      # from the main branch based on the updated _config.yml.
       - name: Build the Jekyll site
         run: bundle exec jekyll build
         env:
           JEKYLL_ENV: production
 
-      # Step 6: Deploy the final, built website from the `_site` directory
-      # to the `gh-pages` branch. This action handles branch creation and updates.
+      # Step 4: Deploy the final, built website from the `_site` directory
+      # to the `gh-pages` branch.
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v3
         with:
