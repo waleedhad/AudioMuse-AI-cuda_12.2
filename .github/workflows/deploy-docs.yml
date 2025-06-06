@@ -29,26 +29,17 @@ jobs:
 
       - name: Install documentation dependencies
         run: |
-          pip install mdsplit mkdocs mkdocs-material PyYAML # PyYAML is needed by the Python script
+          # Only MkDocs and its theme are needed now. mdsplit and PyYAML are removed.
+          pip install mkdocs mkdocs-material 
 
-      - name: Generate 'web' directory with mdsplit (Level 2 split)
-        run: |
-          # CRUCIAL: Split at Level 2 headings to create multiple pages and subdirectories.
-          # Ensure your original README.md has its internal "Table of Contents" section removed.
-          # Ensure any 'screenshot' folder is placed directly INSIDE the 'web/' folder
-          # in your repository (e.g., commit 'web/screenshot/image.png').
-          # Adjust image paths in your original README.md accordingly (e.g., '../screenshot/image.png'
-          # if referenced from a sub-page like 'web/4---Screenshots/4.1---Analysis-task.md').
-          mdsplit ./README.md -o web -l 2 -t -n
-
-      - name: Generate mkdocs.yml navigation dynamically
-        run: python .github/scripts/generate_nav.py # Execute the Python script
+      # The mdsplit and dynamic navigation generation steps are REMOVED here.
+      # MkDocs will now directly use README.md from the repository root.
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Build MkDocs documentation
-        run: mkdocs build
+        run: mkdocs build # This command builds your site from README.md into the './site' directory
 
       - name: Upload artifact for deployment
         uses: actions/upload-pages-artifact@v3
