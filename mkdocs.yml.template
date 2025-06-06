@@ -5,6 +5,8 @@ site_url: https://neptunehub.github.io/AudioMuse-AI/
 repo_url: https://github.com/NeptuneHub/AudioMuse-AI
 repo_name: GitHub
 
+use_directory_urls: false # <<<--- ADD THIS LINE to prevent URL doubling and use .html extensions
+
 theme:
   name: readthedocs
 
