@@ -3,11 +3,8 @@ description: "Documentation for the AudioMuse-AI project."
 baseurl: "/AudioMuse-AI"
 url: "https://NeptuneHub.github.io"
 
-include:
-  - "README.md"
-
-multipage_auto_pagebreak_at_headings: true
-multipage_auto_pagebreak_heading_level: 2
-
-plugins:
-  - jekyll-multipage
+# Tell Jekyll to treat the '_sections' directory as a collection of documents
+collections:
+  sections:
+    output: true # Generate a page for each document in the collection
+    sort_by: order # Sort the pages by the 'order' variable in their front matter
