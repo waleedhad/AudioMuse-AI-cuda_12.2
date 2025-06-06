@@ -25,8 +25,7 @@ def get_display_name_from_path(relative_path, is_folder=False):
         if '.' not in number_prefix: # Check if it's a single number (e.g., "1" not "2.1")
             return f"{number_prefix} - {display_name_from_slug}"
         else:
-            # For sub-levels (e.g., "2.1", "3.2"), the number prefix is usually omitted
-            # in the display name as it's implied by the parent category.
+            # For sub-levels (e.g., "2.1", "3.2"), remove the number prefix as it's implied by parent
             return display_name_from_slug
     
     # Fallback for any unexpected format
@@ -46,13 +45,12 @@ def generate_mkdocs_config(web_dir, template_file, output_file):
     nav_structure = []
     nav_structure.append({"Home": "toc.md"}) # Always include toc.md as Home
 
-    # Dictionary to hold categories by their full slugged folder name (e.g., '2---Deployment-and-Parameters')
-    # This helps in building the nested structure correctly.
-    categories = {}
+    # --- CRITICAL FIX: Ensure 'top_level_items' is defined here ---
+    # This list will collect all the top-level pages and categories before sorting them.
+    top_level_items = [] 
+    # -----------------------------------------------------------------
 
-    # Collect all top-level files and directories in 'web_dir'
-    top_level_entries = [] # Stores (order_key, entry_type, display_name, path/items)
-
+    # Walk the 'web_dir' to discover structure
     for entry in sorted(os.listdir(web_dir)): # Sorted for consistent order in menu
         full_path = os.path.join(web_dir, entry)
         
