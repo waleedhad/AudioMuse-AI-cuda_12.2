@@ -3,34 +3,36 @@ name: Deploy Docs to GitHub Pages
 on:
   push:
     branches:
-      - main 
+      - main # This workflow will trigger on pushes to the 'main' branch
 
+# Configure permissions for the workflow
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: write   # Required to allow actions/checkout and for deployment
+  pages: write      # Required to deploy to GitHub Pages
+  id-token: write   # Required to authenticate with GitHub Pages
 
+# Define the deployment job
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
 
+    # Set up the deployment environment for GitHub Pages
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }} # This will be the URL of your deployed site
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # Checkout your repository code
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5 # Configure a Python environment
         with:
-          python-version: '3.x'
+          python-version: '3.x' # Use a recent stable Python 3 version
 
       - name: Install documentation dependencies
         run: |
-          # mdsplit is needed again for splitting at Level 1
-          pip install mdsplit mkdocs mkdocs-material 
+          pip install mdsplit mkdocs mkdocs-material PyYAML # PyYAML is needed by the Python script
 
       - name: Generate 'web' directory with mdsplit (Level 1 split)
         run: |
@@ -40,17 +42,20 @@ jobs:
           # and image paths in README.md are relative (e.g., '/screenshot/image.png' if at 'web/screenshot/').
           mdsplit ./README.md -o web -l 1 -t -n
 
+      - name: Generate mkdocs.yml navigation dynamically
+        run: python .github/scripts/generate_nav.py # Execute the Python script
+
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v5 # Sets up the GitHub Pages environment
 
       - name: Build MkDocs documentation
-        run: mkdocs build
+        run: mkdocs build # This command builds your site into the './site' directory
 
       - name: Upload artifact for deployment
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v3 # Uploads the './site' directory as an artifact
         with:
-          path: './site'
+          path: './site' # The path to the generated static site files
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4 # This action takes the uploaded artifact and deploys it
