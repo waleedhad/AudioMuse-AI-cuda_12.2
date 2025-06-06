@@ -1,0 +1,23 @@
+# Site-wide settings for your Jekyll site
+title: AudioMuse-AI Documentation
+description: "Documentation for the AudioMuse-AI project."
+
+# The subdirectory of your site.
+baseurl: "/AudioMuse-AI"
+
+# The base hostname and protocol for your site.
+url: "https://NeptuneHub.github.io"
+
+# The workflow now copies README.md into the 'web' directory before building,
+# so we include it from the local path within the build directory.
+include:
+  - "README.md"
+
+# Jekyll-Multipage plugin configuration
+# This tells the plugin to automatically split the page at every H2 (##) heading.
+multipage_auto_pagebreak_at_headings: true
+multipage_auto_pagebreak_heading_level: 2
+
+# List of plugins for Jekyll to use
+plugins:
+  - jekyll-multipage
