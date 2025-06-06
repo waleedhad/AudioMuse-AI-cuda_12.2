@@ -5,10 +5,8 @@ site_url: https://neptunehub.github.io/AudioMuse-AI/
 repo_url: https://github.com/NeptuneHub/AudioMuse-AI
 repo_name: GitHub
 
-# NAV_PLACEHOLDER - DO NOT REMOVE OR MODIFY THIS LINE
-
 theme:
-  name: readthedocs # Your chosen theme. You can switch back to 'material' if you prefer.
+  name: readthedocs
 
 markdown_extensions:
   - admonition
