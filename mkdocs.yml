@@ -1,0 +1,10 @@
+site_name: AudioMuse-AI Documentation
+docs_dir: web
+
+# Your project's live website URL and GitHub repository details.
+site_url: https://neptunehub.github.io/AudioMuse-AI/
+repo_url: https://github.com/NeptuneHub/AudioMuse-AI
+repo_name: GitHub
+nav:
+  - Home: index.md
+theme: readthedocs
