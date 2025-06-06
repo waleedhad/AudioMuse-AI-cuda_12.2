@@ -7,4 +7,4 @@ repo_name: GitHub
 nav:
   - Home: index.md
 
-theme: readthedocs
+theme: material
