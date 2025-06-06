@@ -6,5 +6,5 @@ site_url: https://neptunehub.github.io/AudioMuse-AI/
 repo_url: https://github.com/NeptuneHub/AudioMuse-AI
 repo_name: GitHub
 nav:
-  - Home: index.md
+  - Home: toc.md
 theme: readthedocs
