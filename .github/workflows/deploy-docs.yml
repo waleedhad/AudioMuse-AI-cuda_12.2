@@ -3,59 +3,58 @@ name: Deploy Docs to GitHub Pages
 on:
   push:
     branches:
-      - main # This workflow will trigger on pushes to the 'main' branch
+      - main 
 
-# Configure permissions for the workflow
 permissions:
-  contents: write   # Required to allow actions/checkout and for deployment
-  pages: write      # Required to deploy to GitHub Pages
-  id-token: write   # Required to authenticate with GitHub Pages
+  contents: write
+  pages: write
+  id-token: write
 
-# Define the deployment job
 jobs:
   deploy:
-    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+    runs-on: ubuntu-latest
 
-    # Set up the deployment environment for GitHub Pages
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }} # This will be the URL of your deployed site
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # Checkout your repository code
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5 # Configure a Python environment
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.x' # Use a recent stable Python 3 version
+          python-version: '3.x'
 
       - name: Install documentation dependencies
         run: |
-          pip install mdsplit mkdocs mkdocs-material PyYAML # PyYAML is needed by the Python script
+          pip install mdsplit mkdocs mkdocs-material PyYAML # PyYAML is now explicitly needed by the Python script
 
       - name: Generate 'web' directory with mdsplit (Level 1 split)
         run: |
-          # This command will now split at Level 1 headings.
-          # Ensure your original README.md has its internal "Table of Contents" removed.
-          # Ensure any 'screenshot' folder is placed directly inside 'web/' in your repo
-          # and image paths in README.md are relative (e.g., '/screenshot/image.png' if at 'web/screenshot/').
+          # Important Reminders:
+          # 1. Ensure your original README.md has its internal "Table of Contents" section removed.
+          # 2. If you have a 'screenshot' folder, ensure it's placed directly INSIDE the 'web' folder
+          #    in your repository (e.g., commit 'web/screenshot/image.png').
+          # 3. Adjust image paths in your original README.md accordingly (e.g., '/screenshot/image.png'
+          #    or relative to the web root depending on how you arrange them).
           mdsplit ./README.md -o web -l 1 -t -n
 
       - name: Generate mkdocs.yml navigation dynamically
         run: python .github/scripts/generate_nav.py # Execute the Python script
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5 # Sets up the GitHub Pages environment
+        uses: actions/configure-pages@v5
 
       - name: Build MkDocs documentation
-        run: mkdocs build # This command builds your site into the './site' directory
+        run: mkdocs build
 
       - name: Upload artifact for deployment
-        uses: actions/upload-pages-artifact@v3 # Uploads the './site' directory as an artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: './site' # The path to the generated static site files
+          path: './site'
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4 # This action takes the uploaded artifact and deploys it
+        uses: actions/deploy-pages@v4
