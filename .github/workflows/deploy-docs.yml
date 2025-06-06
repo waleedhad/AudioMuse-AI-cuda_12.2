@@ -3,7 +3,7 @@ name: Deploy Docs to GitHub Pages
 on:
   push:
     branches:
-      - main 
+      - main # Or your main branch, e.g., 'master'
 
 permissions:
   contents: write
@@ -14,38 +14,49 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    # Set up the deployment environment for GitHub Pages
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4 # Action to check out your repository code
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5 # Action to set up Python environment
         with:
-          python-version: '3.x'
+          python-version: '3.x' # Use a compatible Python version
 
       - name: Install documentation dependencies
         run: |
-          # Only MkDocs and its theme are needed now. mdsplit and PyYAML are removed.
-          pip install mkdocs mkdocs-material 
+          # Install MkDocs and the Material theme.
+          # Ensure mkdocs and mkdocs-material are installed to build your documentation.
+          pip install mkdocs mkdocs-material
 
-      # The mdsplit and dynamic navigation generation steps are REMOVED here.
-      # MkDocs will now directly use README.md from the repository root.
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+      - name: Prepare documentation directory
+        # This crucial step copies the root README.md to web/index.md.
+        # MkDocs, by default, looks for 'index.md' in its configured 'docs_dir'
+        # (which is likely 'web' in your mkdocs.yml).
+        # This makes your root README.md the homepage of your MkDocs site.
+        run: |
+          mkdir -p web # Ensure the 'web' directory exists before copying
+          cp README.md web/index.md # Copy the root README.md and rename it to index.md inside 'web'
 
       - name: Build MkDocs documentation
-        run: mkdocs build # This command builds your site from README.md into the './site' directory
+        # This command builds your site into the './site' directory by default.
+        # It will now use 'web/index.md' (which is your copied README.md) as the homepage.
+        # Ensure your mkdocs.yml file has 'docs_dir: web' if your source markdown files are in 'web'.
+        run: mkdocs build
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5 # Action to set up GitHub Pages for deployment
 
       - name: Upload artifact for deployment
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v3 # Action to upload the built site as an artifact
         with:
-          path: './site'
+          path: './site' # The path to the directory containing your built site
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4 # Action to deploy the artifact to GitHub Pages
