@@ -1,0 +1,19 @@
+site_name: AudioMuse-AI Documentation
+docs_dir: web 
+
+site_url: https://neptunehub.github.io/AudioMuse-AI/
+repo_url: https://github.com/NeptuneHub/AudioMuse-AI
+repo_name: GitHub
+
+# NAV_PLACEHOLDER - DO NOT REMOVE OR MODIFY THIS LINE
+
+theme:
+  name: readthedocs # Your chosen theme. You can switch back to 'material' if you prefer.
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - attr_list
+  - md_in_html
