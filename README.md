@@ -1,8 +1,3 @@
----
-layout: default
-title: Home
-multipage: true
----
 
 # **AudioMuse-AI**
 
