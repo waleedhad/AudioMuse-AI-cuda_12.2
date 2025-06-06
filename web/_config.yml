@@ -1,25 +1,13 @@
-# Site settings
 title: AudioMuse-AI Documentation
-description: "Documentation for the AudioMuse-AI project, automatically generated from README.md."
+description: "Documentation for the AudioMuse-AI project."
+baseurl: "/AudioMuse-AI"
+url: "https://NeptuneHub.github.io"
 
-# The base URL of your site on GitHub Pages.
-# This should be the name of your repository.
-baseurl: "/AudioMuse-AI" 
+include:
+  - "README.md"
 
-# The full URL of your site.
-# This is your GitHub username followed by github.io.
-url: "https://NeptuneHub.github.io" 
-
-# Set the theme for your site.
-# You can use any GitHub-supported theme or a custom one.
-theme: minima
-
-# Jekyll-Multipage plugin configuration
-# This will automatically split your README.md at every H2 (##) heading.
 multipage_auto_pagebreak_at_headings: true
 multipage_auto_pagebreak_heading_level: 2
 
-# Specify the plugins to use.
-# This ensures Jekyll loads the multipage plugin.
 plugins:
   - jekyll-multipage
