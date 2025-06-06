@@ -1,4 +1,4 @@
-name: Build and Deploy Site from web dir to gh-pages
+name: Build and Deploy Site from web dir
 
 on:
   push:
@@ -12,8 +12,7 @@ permissions:
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
+# Allow only one concurrent deployment
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -26,15 +25,16 @@ jobs:
       - name: Checkout main branch
         uses: actions/checkout@v4
 
-      - name: Copy README to build directory
-        run: cp README.md web/
-
       - name: Setup Ruby and Bundler
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: 3.1
           bundler-cache: true
           working-directory: ./web
+
+      - name: Run the split script
+        run: ruby _scripts/split.rb
+        working-directory: ./web
 
       - name: Setup Pages
         id: pages
@@ -49,7 +49,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload the entire site's build output
           path: ./web/_site
 
   # Deployment job
