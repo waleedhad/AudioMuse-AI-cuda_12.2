@@ -32,7 +32,7 @@ jobs:
         run: |
           # Install MkDocs and the Material theme.
           # Ensure mkdocs and mkdocs-material are installed to build your documentation.
-          pip install mkdocs mkdocs-material
+          pip install mkdocs mkdocs-material mkdocs-ivory
 
       - name: Prepare documentation directory
         # This crucial step copies the root README.md to web/index.md.
