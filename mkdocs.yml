@@ -1,6 +1,6 @@
 site_name: AudioMuse-AI Documentation
 # This tells MkDocs to look for your Markdown content in the project root.
-docs_dir: . 
+docs_dir: /web
 
 site_url: https://neptunehub.github.io/AudioMuse-AI/
 repo_url: https://github.com/NeptuneHub/AudioMuse-AI
