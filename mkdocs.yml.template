@@ -1,14 +1,18 @@
 site_name: AudioMuse-AI Documentation
-docs_dir: web 
+# This tells MkDocs to look for your Markdown content in the project root.
+docs_dir: . 
 
 site_url: https://neptunehub.github.io/AudioMuse-AI/
 repo_url: https://github.com/NeptuneHub/AudioMuse-AI
 repo_name: GitHub
 
-use_directory_urls: false # <<<--- This should help with URL doubling and provide .html extensions
+# Remove the 'nav' section entirely to let MkDocs auto-generate the menu.
+# It will typically find 'README.md' as the default page.
+
+use_directory_urls: false # To prevent URL doubling and use .html extensions
 
 theme:
-  name: readthedocs
+  name: readthedocs # Your chosen theme.
 
 markdown_extensions:
   - admonition
