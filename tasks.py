@@ -35,7 +35,10 @@ from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_
     HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH, \
     SCORE_WEIGHT_DIVERSITY, \
     SCORE_WEIGHT_PURITY, \
-    MUTATION_KMEANS_COORD_FRACTION # For create_or_update_playlists_on_jellyfin
+    SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, MUTATION_KMEANS_COORD_FRACTION, \
+    MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA, \
+    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG
+
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
@@ -259,12 +262,34 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
 
     mood_names = [mood_labels_list[i] for i in top_indices if i < len(mood_labels_list)]
     mood_part = "_".join(mood_names).title() if mood_names else "Mixed"
-    full_name = f"{mood_part}_{tempo_label}"
+    base_name = f"{mood_part}_{tempo_label}"
+
+    # Add top "other features" to the name if they are prominent
+    OTHER_FEATURE_THRESHOLD_FOR_NAME = 0.5  # Threshold for a feature to be included in the name
+    MAX_OTHER_FEATURES_IN_NAME = 2      # Max number of "other features" to append
+
+    appended_other_features_str = ""
+    if other_feature_scores_dict:
+        # Filter features above threshold and sort them by score
+        prominent_other_features = sorted(
+            [(feature, score) for feature, score in other_feature_scores_dict.items() if score >= OTHER_FEATURE_THRESHOLD_FOR_NAME],
+            key=lambda item: item[1],
+            reverse=True
+        )
+        # Select top N features to add to the name, capitalized
+        other_features_to_add_to_name_list = [feature.title() for feature, score in prominent_other_features[:MAX_OTHER_FEATURES_IN_NAME]]
+        if other_features_to_add_to_name_list:
+            appended_other_features_str = "_" + "_".join(other_features_to_add_to_name_list)
+    full_name = f"{base_name}{appended_other_features_str}"
 
     top_mood_scores = {mood_labels_list[i]: mood_values[i] for i in top_indices if i < len(mood_labels_list)}
     extra_info = {"tempo": round(tempo_norm, 2), "energy": round(energy_norm, 2)} # Include energy in extra info
 
-    return full_name, {**top_mood_scores, **extra_info}
+    # Combine all relevant centroid features for AI naming and general info
+    # other_feature_scores_dict already contains 'danceable', 'aggressive', etc.
+    # extra_info contains 'tempo' and 'energy'
+    comprehensive_centroid_details = {**top_mood_scores, **extra_info, **other_feature_scores_dict}
+    return full_name, comprehensive_centroid_details
 
 def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
     """Deletes old automatically generated playlists from Jellyfin."""
@@ -820,7 +845,7 @@ def _perform_single_clustering_iteration(
             mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
 
         # --- Data Preparation ---
-        X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed]
+        X_original = [score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in all_tracks_data_parsed]
         X_scaled = np.array(X_original)
         if X_scaled.shape[0] == 0:
             print(f"{log_prefix} Iteration {run_idx}: No data to cluster.")
@@ -1086,6 +1111,7 @@ def _perform_single_clustering_iteration(
         current_named_playlists = defaultdict(list)
         current_playlist_centroids = {}
         unique_predominant_mood_scores = {}
+        unique_predominant_other_feature_scores = {} # New: For other feature diversity
 
         for label_val, songs_list in filtered_clusters.items():
             if songs_list:
@@ -1097,12 +1123,30 @@ def _perform_single_clustering_iteration(
                     if predominant_mood_key:
                         current_mood_score = top_scores.get(predominant_mood_key, 0.0)
                         unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score)
+
+                # New: Extract predominant other feature for diversity score
+                centroid_other_features_from_top_scores = {
+                    label: top_scores.get(label, 0.0)
+                    for label in OTHER_FEATURE_LABELS if label in top_scores
+                }
+                predominant_other_feature_key_for_diversity = None
+                max_other_feature_score_for_diversity = 0.3 # Threshold for considering a feature predominant
+                if centroid_other_features_from_top_scores:
+                    for feature_label, feature_score in centroid_other_features_from_top_scores.items():
+                        if feature_score > max_other_feature_score_for_diversity:
+                            max_other_feature_score_for_diversity = feature_score
+                            predominant_other_feature_key_for_diversity = feature_label
+                
+                if predominant_other_feature_key_for_diversity:
+                    unique_predominant_other_feature_scores[predominant_other_feature_key_for_diversity] = max(
+                        unique_predominant_other_feature_scores.get(predominant_other_feature_key_for_diversity, 0.0),
+                        max_other_feature_score_for_diversity
+                    )
                 current_named_playlists[name].extend(songs_list)
                 current_playlist_centroids[name] = top_scores
 
         # --- Enhanced Score Calculation ---
         base_diversity_score = sum(unique_predominant_mood_scores.values())
-
         # Calculate playlist_purity_component
         all_individual_playlist_purities = []
         item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(all_tracks_data_parsed)}
@@ -1139,21 +1183,78 @@ def _perform_single_clustering_iteration(
                 for item_id, _, _ in songs_in_playlist_info_list:
                     song_original_index = item_id_to_song_index_map.get(item_id)
                     if song_original_index is not None:
-                        song_mood_scores_vector = X_original[song_original_index][1:] # Get only the mood scores part
-                        if predominant_mood_index_in_labels < len(song_mood_scores_vector):
+                        # Corrected slicing for mood scores: X_original = [tempo, energy, moods..., other_features...]
+                        song_mood_scores_vector = X_original[song_original_index][2 : 2 + len(MOOD_LABELS)]
+                        if predominant_mood_index_in_labels < len(song_mood_scores_vector): # Check bounds
                             song_specific_score_for_predominant_mood = song_mood_scores_vector[predominant_mood_index_in_labels]
                             scores_of_predominant_mood_for_songs_in_playlist.append(song_specific_score_for_predominant_mood)
 
                 if scores_of_predominant_mood_for_songs_in_playlist:
                     avg_purity_for_this_playlist = sum(scores_of_predominant_mood_for_songs_in_playlist) / len(scores_of_predominant_mood_for_songs_in_playlist)
                     all_individual_playlist_purities.append(avg_purity_for_this_playlist)
-        # --- End Enhanced Score Calculation ---
+
         playlist_purity_component = 0.0
         if all_individual_playlist_purities:
             playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
 
-        final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + (SCORE_WEIGHT_PURITY * playlist_purity_component)
-        # print(f"{log_prefix} Iteration {run_idx}: BaseDiv: {base_diversity_score:.2f}, PurityComp: {playlist_purity_component:.2f}, FinalScore: {final_enhanced_score:.2f}")
+        # New: Calculate other_features_diversity_score
+        other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
+
+        # New: Calculate other_feature_purity_component
+        all_individual_playlist_other_feature_purities = []
+        OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY = 0.3 # Can be tuned
+
+        if current_named_playlists and OTHER_FEATURE_LABELS: # Ensure there are other features defined
+            for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
+                playlist_centroid_data = current_playlist_centroids.get(playlist_name_key)
+                if not playlist_centroid_data or not songs_in_playlist_info_list:
+                    continue
+
+                centroid_other_features_for_purity = {
+                    label: playlist_centroid_data.get(label, 0.0)
+                    for label in OTHER_FEATURE_LABELS if label in playlist_centroid_data
+                }
+
+                predominant_other_feature_for_this_playlist = None
+                max_score_for_predominant_other = OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY
+                if centroid_other_features_for_purity:
+                    for feature_label, feature_score in centroid_other_features_for_purity.items():
+                        if feature_score > max_score_for_predominant_other:
+                            max_score_for_predominant_other = feature_score
+                            predominant_other_feature_for_this_playlist = feature_label
+                
+                if not predominant_other_feature_for_this_playlist:
+                    continue
+                
+                try:
+                    predominant_other_feature_index_in_labels = OTHER_FEATURE_LABELS.index(predominant_other_feature_for_this_playlist)
+                except ValueError:
+                    print(f"{log_prefix} Iteration {run_idx}: Warning: Predominant other feature '{predominant_other_feature_for_this_playlist}' for playlist '{playlist_name_key}' not in OTHER_FEATURE_LABELS list.")
+                    continue
+
+                scores_of_predominant_other_feature_for_songs = []
+                for item_id, _, _ in songs_in_playlist_info_list:
+                    song_original_index = item_id_to_song_index_map.get(item_id)
+                    if song_original_index is not None:
+                        other_features_start_index = 2 + len(MOOD_LABELS)
+                        song_other_features_vector = X_original[song_original_index][other_features_start_index:]
+                        if predominant_other_feature_index_in_labels < len(song_other_features_vector):
+                            song_specific_score = song_other_features_vector[predominant_other_feature_index_in_labels]
+                            scores_of_predominant_other_feature_for_songs.append(song_specific_score)
+                
+                if scores_of_predominant_other_feature_for_songs:
+                    avg_other_feature_purity = sum(scores_of_predominant_other_feature_for_songs) / len(scores_of_predominant_other_feature_for_songs)
+                    all_individual_playlist_other_feature_purities.append(avg_other_feature_purity)
+
+        other_feature_purity_component = 0.0
+        if all_individual_playlist_other_feature_purities:
+            other_feature_purity_component = sum(all_individual_playlist_other_feature_purities) / len(all_individual_playlist_other_feature_purities)
+
+        final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + \
+                               (SCORE_WEIGHT_PURITY * playlist_purity_component) + \
+                               (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \
+                               (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component)
+        print(f"{log_prefix} Iteration {run_idx}: MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, FinalScore: {final_enhanced_score:.2f}")
 
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
@@ -1632,13 +1733,16 @@ def run_clustering_task(
                         # The get_ai_playlist_name function will take this and append the song list.
                         # So, we pass the template itself, and the individual components to the function for Ollama, using passed-in params.
                         print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using provider '{ai_model_provider_for_run}'. F1: '{feature1}', F2: '{feature2}', F3: '{feature3}'.")
+                        # Retrieve the comprehensive centroid features for this playlist
+                        centroid_features_for_ai = final_playlist_centroids.get(original_name, {})
                         ai_generated_name_str = get_ai_playlist_name(
                             ai_model_provider_for_run,
                             ollama_server_url_for_run, ollama_model_name_for_run,
                             gemini_api_key_for_run, gemini_model_name_for_run, # Pass Gemini params
                             creative_prompt_template,
                             feature1, feature2, feature3, # Pass all three features
-                            song_list_for_ai)
+                            song_list_for_ai,
+                            centroid_features_for_ai) # Pass the comprehensive centroid features
 
                         current_playlist_final_name = original_name
                         # Check if the generated name is a valid name (not an error or skip message)
