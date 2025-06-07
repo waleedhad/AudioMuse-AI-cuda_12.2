@@ -37,7 +37,7 @@ from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_
     SCORE_WEIGHT_PURITY, \
     SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, MUTATION_KMEANS_COORD_FRACTION, \
     MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA, \
-    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG
+    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES
 
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
@@ -190,7 +190,8 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
     # Normalize tempo and energy
     tempo_norm = (tempo - 40) / (200 - 40)
     tempo_norm = np.clip(tempo_norm, 0.0, 1.0)
-    mood_scores = np.zeros(len(mood_labels_list))
+    
+    raw_mood_scores = np.zeros(len(mood_labels_list))
     if mood_str:
         for pair in mood_str.split(","):
             if ":" not in pair:
@@ -198,9 +199,19 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
             label, score_str = pair.split(":")
             if label in mood_labels_list:
                 try:
-                    mood_scores[mood_labels_list.index(label)] = float(score_str)
+                    raw_mood_scores[mood_labels_list.index(label)] = float(score_str)
                 except ValueError:
                     continue
+    
+    # Select top N mood scores and zero out the rest
+    mood_scores_for_vector = np.zeros_like(raw_mood_scores)
+    if raw_mood_scores.any(): # Check if there are any non-zero scores
+        # TOP_N_MOODS is imported from config
+        top_n_mood_indices = np.argsort(raw_mood_scores)[-TOP_N_MOODS:]
+        for idx in top_n_mood_indices:
+            if raw_mood_scores[idx] > 0: # Only keep if score is positive
+                mood_scores_for_vector[idx] = raw_mood_scores[idx]
+
 
     energy_norm = (energy - ENERGY_MIN) / (ENERGY_MAX - ENERGY_MIN) if (ENERGY_MAX - ENERGY_MIN) > 0 else 0.0
     energy_norm = np.clip(energy_norm, 0.0, 1.0)
@@ -215,12 +226,22 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
             label, score_str = pair.split(":")
             if label in other_feature_labels_list:
                 try:
-                    other_feature_scores[other_feature_labels_list.index(label)] = float(score_str)
+                    other_feature_scores[other_feature_labels_list.index(label)] = float(score_str) # This populates raw scores
                 except ValueError:
                     continue
 
+    # Select top N other feature scores and zero out the rest
+    other_feature_scores_for_vector = np.zeros_like(other_feature_scores)
+    if other_feature_scores.any(): # Check if there are any non-zero scores
+        # TOP_N_OTHER_FEATURES is imported from config
+        top_n_other_feature_indices = np.argsort(other_feature_scores)[-TOP_N_OTHER_FEATURES:]
+        for idx in top_n_other_feature_indices:
+            if other_feature_scores[idx] > 0: # Only keep if score is positive
+                other_feature_scores_for_vector[idx] = other_feature_scores[idx]
+
+
     # Construct the full feature vector: [tempo, energy, moods..., other_features...]
-    full_vector = [tempo_norm, energy_norm] + list(mood_scores) + list(other_feature_scores)
+    full_vector = [tempo_norm, energy_norm] + list(mood_scores_for_vector) + list(other_feature_scores_for_vector)
     return full_vector
 
 # OTHER_FEATURE_LABELS is imported from config.py
