@@ -684,7 +684,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                                 pass # Child is active, all_done will be set to False later
 
                         except NoSuchJobError:
-                            print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} not found in Redis. Checking DB.")
+                            #print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} not found in Redis. Checking DB.")
                             with app.app_context(): # Ensure DB context
                                 db_task_info = get_task_info_from_db(job_instance.id)
 
