@@ -58,10 +58,15 @@ MUTATION_FLOAT_ABS_DELTA = float(os.environ.get("CLUSTERING_MUTATION_FLOAT_ABS_D
 MUTATION_KMEANS_COORD_FRACTION = float(os.environ.get("CLUSTERING_MUTATION_KMEANS_COORD_FRACTION", "0.05")) # Fractional change for KMeans centroid coordinates based on data range
 
 # --- Scoring Weights for Enhanced Diversity Score ---
-SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "0.4")) # Weight for the base diversity (inter-playlist mood diversity)
-SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.3"))    # Weight for playlist purity (intra-playlist mood consistency)
-SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY", "0.2")) # New: Weight for inter-playlist other feature diversity
-SCORE_WEIGHT_OTHER_FEATURE_PURITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_PURITY", "0.1"))       # New: Weight for intra-playlist other feature consistency
+SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "0.6")) # Weight for the base diversity (inter-playlist mood diversity)
+SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.4"))    # Weight for playlist purity (intra-playlist mood consistency)
+SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY", "0.3")) # New: Weight for inter-playlist other feature diversity
+SCORE_WEIGHT_OTHER_FEATURE_PURITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_PURITY", "0.2"))       # New: Weight for intra-playlist other feature consistency
+# --- Weights for Internal Validation Metrics ---
+SCORE_WEIGHT_SILHOUETTE = float(os.environ.get("SCORE_WEIGHT_SILHOUETTE", "0.6")) # Weight for Silhouette Score (Adjust as needed if others are zero)
+SCORE_WEIGHT_DAVIES_BOULDIN = float(os.environ.get("SCORE_WEIGHT_DAVIES_BOULDIN", "0.0")) # Set to 0 to effectively disable
+SCORE_WEIGHT_CALINSKI_HARABASZ = float(os.environ.get("SCORE_WEIGHT_CALINSKI_HARABASZ", "0.0")) # Set to 0 to effectively disable
+
 
 # --- AI Playlist Naming ---
 # USE_AI_PLAYLIST_NAMING is replaced by AI_MODEL_PROVIDER
@@ -97,15 +102,18 @@ PREDICTION_MODEL_PATH = "/app/msd-msd-musicnn-1.pb"
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)
-VGGISH_EMBEDDING_MODEL_PATH = os.environ.get("VGGISH_EMBEDDING_MODEL_PATH", "/app/audioset-vggish-3.pb")
-DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/danceability-audioset-vggish-1.pb")
-AGGRESSIVE_MODEL_PATH = os.environ.get("AGGRESSIVE_MODEL_PATH", "/app/mood_aggressive-audioset-vggish-1.pb")
-HAPPY_MODEL_PATH = os.environ.get("HAPPY_MODEL_PATH", "/app/mood_happy-audioset-vggish-1.pb")
-PARTY_MODEL_PATH = os.environ.get("PARTY_MODEL_PATH", "/app/mood_party-audioset-vggish-1.pb")
-RELAXED_MODEL_PATH = os.environ.get("RELAXED_MODEL_PATH", "/app/mood_relaxed-audioset-vggish-1.pb")
-SAD_MODEL_PATH = os.environ.get("SAD_MODEL_PATH", "/app/mood_sad-audioset-vggish-1.pb")
+DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/danceability-msd-musicnn-1.pb") # Example, adjust if different
+AGGRESSIVE_MODEL_PATH = os.environ.get("AGGRESSIVE_MODEL_PATH", "/app/mood_aggressive-msd-musicnn-1.pb")
+HAPPY_MODEL_PATH = os.environ.get("HAPPY_MODEL_PATH", "/app/mood_happy-msd-musicnn-1.pb")
+PARTY_MODEL_PATH = os.environ.get("PARTY_MODEL_PATH", "/app/mood_party-msd-musicnn-1.pb")
+RELAXED_MODEL_PATH = os.environ.get("RELAXED_MODEL_PATH", "/app/mood_relaxed-msd-musicnn-1.pb")
+SAD_MODEL_PATH = os.environ.get("SAD_MODEL_PATH", "/app/mood_sad-msd-musicnn-1.pb")
 
 # --- Energy Normalization Range ---
 ENERGY_MIN = float(os.getenv("ENERGY_MIN", "0.01"))
 ENERGY_MAX = float(os.getenv("ENERGY_MAX", "0.15"))
+
+# --- Tempo Normalization Range (BPM) ---
+TEMPO_MIN_BPM = float(os.getenv("TEMPO_MIN_BPM", "40.0"))
+TEMPO_MAX_BPM = float(os.getenv("TEMPO_MAX_BPM", "200.0"))
 OTHER_FEATURE_LABELS = ['danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad']

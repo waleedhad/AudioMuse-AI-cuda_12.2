@@ -10,10 +10,11 @@ import uuid
 import traceback
 
 # Essentia and ML imports
-from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, TensorflowPredictVGGish, Energy # Import Energy
+from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy # Import Energy, Removed TensorflowPredictVGGish
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
-from sklearn.mixture import GaussianMixture
+from sklearn.mixture import GaussianMixture # type: ignore
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score # type: ignore
 from sklearn.preprocessing import StandardScaler # Import StandardScaler for feature standardization
 
 # RQ import
@@ -29,10 +30,10 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX, \
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, \
-    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME, \
-    VGGISH_EMBEDDING_MODEL_PATH, DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, \
-    HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH, \
+    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, \
+    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME, DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, \
+    HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH, SCORE_WEIGHT_SILHOUETTE, \
+    SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, \
     SCORE_WEIGHT_DIVERSITY, \
     SCORE_WEIGHT_PURITY, \
     SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, MUTATION_KMEANS_COORD_FRACTION, \
@@ -120,12 +121,11 @@ def predict_moods(audio, embedding_model_path, prediction_model_path, mood_label
     mood_results = dict(zip(mood_labels_list, mood_predictions))
     return {label: float(score) for label, score in mood_results.items()}
 
-def predict_other_models(audio):
-    """Predicts danceability, aggression, happiness, party, relaxed, and sadness using VGGish embeddings."""
-    embedding_model = TensorflowPredictVGGish(graphFilename=VGGISH_EMBEDDING_MODEL_PATH, output="model/vggish/embeddings")
-    embeddings = embedding_model(audio)
-
+def predict_other_models(embeddings): # Now accepts embeddings
+    """Predicts danceability, aggression, happiness, party, relaxed, and sadness using MusiCNN embeddings."""
+    # MusiCNN embeddings are passed directly to this function.
     model_paths = {
+        # Ensure these paths in config.py point to your new MusiCNN-based models
         "danceable": DANCEABILITY_MODEL_PATH,
         "aggressive": AGGRESSIVE_MODEL_PATH,
         "happy": HAPPY_MODEL_PATH,
@@ -136,7 +136,7 @@ def predict_other_models(audio):
     predictions = {}
     for mood, path in model_paths.items():
         try:
-            model = TensorflowPredict2D(graphFilename=path, output="model/Softmax")
+            model = TensorflowPredict2D(graphFilename=path, output="model/Softmax") # Using "model/Softmax" as per your example
             prediction = model(embeddings)
             if prediction is not None and prediction.size > 0 and len(prediction) > 0 and len(prediction[0]) == 2:  # Assuming binary classification
                 predictions[mood] = float(prediction[0][0])  # Probability of the positive class
@@ -153,9 +153,16 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     """Analyzes a single track for tempo, key, scale, moods, and other models."""
     # Load audio once at 16000 Hz for all analyses.
     audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
+
+    # Generate MusiCNN embeddings once
+    musicnn_embedding_model = TensorflowPredictMusiCNN(
+        graphFilename=embedding_model_path, output="model/dense/BiasAdd" # Main embedding model
+    )
+    musicnn_embeddings = musicnn_embedding_model(audio)
+
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(audio, embedding_model_path, prediction_model_path, mood_labels_list)
+    moods = predict_moods(musicnn_embeddings, embedding_model_path, prediction_model_path, mood_labels_list) # Pass embeddings
 
     # Calculate raw total energy
     raw_total_energy = Energy()(audio)
@@ -167,7 +174,7 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     else:
         average_energy_per_sample = 0.0 # Should not happen for valid audio
 
-    other_predictions = predict_other_models(audio)
+    other_predictions = predict_other_models(musicnn_embeddings) # Pass the same MusiCNN embeddings
 
     # Combine all predictions into a single dictionary
     all_predictions = {
@@ -187,12 +194,20 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
     tempo = float(row['tempo']) if row['tempo'] is not None else 0.0
     energy = float(row['energy']) if row['energy'] is not None else 0.0 # Get energy
     mood_str = row['mood_vector'] or ""
-
-    # Note: Tempo and energy are NOT normalized here anymore as StandardScaler will handle it.
-    # They are kept as raw values that will be part of the vector to be scaled.
-    tempo_val = tempo
-    energy_val = energy
     
+    # Normalize tempo to 0-1 range
+    tempo_range = TEMPO_MAX_BPM - TEMPO_MIN_BPM
+    tempo_norm = (tempo - TEMPO_MIN_BPM) / tempo_range if tempo_range > 0 else 0.0
+    tempo_norm = np.clip(tempo_norm, 0.0, 1.0)
+
+    # Normalize energy to 0-1 range
+    energy_range = ENERGY_MAX - ENERGY_MIN
+    energy_norm = (energy - ENERGY_MIN) / energy_range if energy_range > 0 else 0.0
+    energy_norm = np.clip(energy_norm, 0.0, 1.0)
+
+    tempo_val = tempo_norm
+    energy_val = energy_norm
+
     mood_scores_for_vector = np.zeros(len(mood_labels_list)) # Initialize vector for all moods
     if mood_str:
         for pair in mood_str.split(","):
@@ -221,7 +236,7 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
 
 
     # Construct the full feature vector: [tempo, energy, moods..., other_features...]
-    # These values are now NOT normalized, they are the raw values to be standardized by StandardScaler.
+    # Tempo and energy are now normalized (0-1) before being passed to StandardScaler.
     full_vector = [tempo_val, energy_val] + list(mood_scores_for_vector) + list(other_feature_scores_for_vector)
     return full_vector
 
@@ -267,11 +282,15 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
 
 
     # Now use the final_interpreted_raw_vector for naming logic
-    # Adjust slicing based on the new vector structure [tempo, energy, moods..., other_features...]
-    # These values are now the original raw values (e.g., tempo in BPM, energy in its original scale)
+    # tempo_val and energy_val are now the 0-1 normalized values because they were normalized
+    # *before* standardization, and scaler.inverse_transform gives us back those normalized values.
     tempo_val = final_interpreted_raw_vector[0]
     energy_val = final_interpreted_raw_vector[1]
     mood_values = final_interpreted_raw_vector[2 : 2 + len(mood_labels_list)]
+
+    # For AI naming, we might want to pass the original scale or interpreted labels.
+    # For now, let's pass the normalized values and let the AI prompt guide interpretation.
+    # Or, we can reconstruct raw values if needed, but let's adjust labels first.
 
     # Extract scores for the other features (danceable, etc.)
     other_feature_values = final_interpreted_raw_vector[2 + len(mood_labels_list):]
@@ -281,16 +300,16 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     else:
         print(f"Warning: Mismatch between other_feature_values length ({len(other_feature_values)}) and OTHER_FEATURE_LABELS length ({len(OTHER_FEATURE_LABELS)}). Cannot map scores for AI naming.")
 
-    # Convert tempo to label (assuming original BPM values for labeling)
-    if tempo_val < 80: tempo_label = "Slow"
-    elif tempo_val < 130: tempo_label = "Medium"
+    # Convert normalized tempo (0-1) to label
+    if tempo_val < 0.33: tempo_label = "Slow"
+    elif tempo_val < 0.66: tempo_label = "Medium"
     else: tempo_label = "Fast"
 
-    # Convert energy to label (assuming original energy values for labeling, can map to min/max from config)
-    # This might need some mapping based on ENERGY_MIN/ENERGY_MAX if they represent the expected range for human labels.
-    energy_norm_for_label = (energy_val - ENERGY_MIN) / (ENERGY_MAX - ENERGY_MIN) if (ENERGY_MAX - ENERGY_MIN) > 0 else 0.0
-    energy_norm_for_label = np.clip(energy_norm_for_label, 0.0, 1.0)
-    energy_label = "Low Energy" if energy_norm_for_label < 0.3 else ("Medium Energy" if energy_norm_for_label < 0.7 else "High Energy")
+    # Convert normalized energy (0-1) to label
+    # energy_val is already the normalized energy (0-1 range)
+    energy_label = "Low Energy" if energy_val < 0.3 else \
+                   ("Medium Energy" if energy_val < 0.7 else \
+                    "High Energy")
 
 
     # Determine top moods
@@ -320,7 +339,10 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     full_name = f"{base_name}{appended_other_features_str}"
 
     top_mood_scores = {mood_labels_list[i]: mood_values[i] for i in top_indices if i < len(mood_labels_list)}
-    extra_info = {"tempo": round(tempo_val, 2), "energy": round(energy_val, 2)} # Include energy in extra info
+    # Store normalized tempo and energy in extra_info for the centroid
+    # If original scale is needed for AI, it would require passing original values or inverse transforming the normalization.
+    # For now, AI will receive normalized values if it uses this part of centroid_details.
+    extra_info = {"tempo_normalized": round(tempo_val, 2), "energy_normalized": round(energy_val, 2)}
 
     # Combine all relevant centroid features for AI naming and general info
     # other_feature_scores_dict already contains 'danceable', 'aggressive', etc.
@@ -1128,6 +1150,31 @@ def _perform_single_clustering_iteration(
             centers_for_points = gmm.means_[labels] # type: ignore
             raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
 
+        # --- Calculate Internal Validation Metrics ---
+        normalized_silhouette = 0.0
+        normalized_davies_bouldin = 0.0
+        normalized_calinski_harabasz = 0.0
+        
+        num_actual_clusters = len(set(labels) - {-1}) # Number of clusters, excluding noise
+        num_samples_for_metrics = data_for_clustering_current.shape[0]
+
+        if num_actual_clusters >= 2 and num_actual_clusters < num_samples_for_metrics:
+            try:
+                s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
+                normalized_silhouette = (s_score + 1.0) / 2.0  # Normalize to [0, 1]
+            except ValueError as e_sil:
+                print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
+
+            try:
+                db_score = davies_bouldin_score(data_for_clustering_current, labels)
+                normalized_davies_bouldin = 1.0 / (1.0 + db_score) # Lower is better, so invert; maps to (0, 1]
+            except ValueError as e_db:
+                print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin score error: {e_db}")
+            try:
+                ch_score = calinski_harabasz_score(data_for_clustering_current, labels)
+                normalized_calinski_harabasz = (1.0 - 1.0 / (1.0 + np.log1p(ch_score))) if ch_score > 0 else 0.0 # Maps positive CH to (0,1)
+            except ValueError as e_ch:
+                print(f"{log_prefix} Iteration {run_idx}: Calinski-Harabasz score error: {e_ch}")
         del data_for_clustering_current # Free memory
 
         if labels is None or len(set(labels) - {-1}) == 0:
@@ -1303,9 +1350,16 @@ def _perform_single_clustering_iteration(
         final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + \
                                (SCORE_WEIGHT_PURITY * playlist_purity_component) + \
                                (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \
-                               (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component)
-        print(f"{log_prefix} Iteration {run_idx}: MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, FinalScore: {final_enhanced_score:.2f}")
+                               (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
+                               (SCORE_WEIGHT_SILHOUETTE * normalized_silhouette) + \
+                               (SCORE_WEIGHT_DAVIES_BOULDIN * normalized_davies_bouldin) + \
+                               (SCORE_WEIGHT_CALINSKI_HARABASZ * normalized_calinski_harabasz)
 
+        print(f"{log_prefix} Iteration {run_idx}: "
+              f"MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
+              f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
+              f"Sil: {normalized_silhouette:.2f}, DB: {normalized_davies_bouldin:.2f}, CH: {normalized_calinski_harabasz:.2f}, "
+              f"FinalScore: {final_enhanced_score:.2f}")
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
             "diversity_score": float(final_enhanced_score), # Use the new enhanced score
