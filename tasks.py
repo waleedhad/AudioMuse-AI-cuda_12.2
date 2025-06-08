@@ -1,4 +1,3 @@
-# /home/guido/Music/AudioMuse-AI/tasks.py
 import os
 import shutil
 import requests
@@ -15,6 +14,7 @@ from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, Ten
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import StandardScaler # Import StandardScaler for feature standardization
 
 # RQ import
 from rq import get_current_job
@@ -151,7 +151,8 @@ def predict_other_models(audio):
 
 def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list):
     """Analyzes a single track for tempo, key, scale, moods, and other models."""
-    audio = MonoLoader(filename=file_path, sampleRate=44100, resampleQuality=4)() # Load audio once (use 44100 for Energy)
+    # Load audio once at 16000 Hz for all analyses.
+    audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
     moods = predict_moods(audio, embedding_model_path, prediction_model_path, mood_labels_list)
@@ -187,11 +188,12 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
     energy = float(row['energy']) if row['energy'] is not None else 0.0 # Get energy
     mood_str = row['mood_vector'] or ""
 
-    # Normalize tempo and energy
-    tempo_norm = (tempo - 40) / (200 - 40)
-    tempo_norm = np.clip(tempo_norm, 0.0, 1.0)
+    # Note: Tempo and energy are NOT normalized here anymore as StandardScaler will handle it.
+    # They are kept as raw values that will be part of the vector to be scaled.
+    tempo_val = tempo
+    energy_val = energy
     
-    raw_mood_scores = np.zeros(len(mood_labels_list))
+    mood_scores_for_vector = np.zeros(len(mood_labels_list)) # Initialize vector for all moods
     if mood_str:
         for pair in mood_str.split(","):
             if ":" not in pair:
@@ -199,25 +201,12 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
             label, score_str = pair.split(":")
             if label in mood_labels_list:
                 try:
-                    raw_mood_scores[mood_labels_list.index(label)] = float(score_str)
+                    mood_scores_for_vector[mood_labels_list.index(label)] = float(score_str) # Populate all mood scores
                 except ValueError:
                     continue
-    
-    # Select top N mood scores and zero out the rest
-    mood_scores_for_vector = np.zeros_like(raw_mood_scores)
-    if raw_mood_scores.any(): # Check if there are any non-zero scores
-        # TOP_N_MOODS is imported from config
-        top_n_mood_indices = np.argsort(raw_mood_scores)[-TOP_N_MOODS:]
-        for idx in top_n_mood_indices:
-            if raw_mood_scores[idx] > 0: # Only keep if score is positive
-                mood_scores_for_vector[idx] = raw_mood_scores[idx]
-
-
-    energy_norm = (energy - ENERGY_MIN) / (ENERGY_MAX - ENERGY_MIN) if (ENERGY_MAX - ENERGY_MIN) > 0 else 0.0
-    energy_norm = np.clip(energy_norm, 0.0, 1.0)
 
     # Parse and prepare other features
-    other_feature_scores = np.zeros(len(other_feature_labels_list))
+    other_feature_scores_for_vector = np.zeros(len(other_feature_labels_list)) # Initialize vector for all other features
     other_features_str = row.get('other_features', "") # Get the new field
     if other_features_str:
         for pair in other_features_str.split(","):
@@ -226,56 +215,83 @@ def score_vector(row, mood_labels_list, other_feature_labels_list): # other_feat
             label, score_str = pair.split(":")
             if label in other_feature_labels_list:
                 try:
-                    other_feature_scores[other_feature_labels_list.index(label)] = float(score_str) # This populates raw scores
+                    other_feature_scores_for_vector[other_feature_labels_list.index(label)] = float(score_str) # Populate all other feature scores
                 except ValueError:
                     continue
 
-    # Select top N other feature scores and zero out the rest
-    other_feature_scores_for_vector = np.zeros_like(other_feature_scores)
-    if other_feature_scores.any(): # Check if there are any non-zero scores
-        # TOP_N_OTHER_FEATURES is imported from config
-        top_n_other_feature_indices = np.argsort(other_feature_scores)[-TOP_N_OTHER_FEATURES:]
-        for idx in top_n_other_feature_indices:
-            if other_feature_scores[idx] > 0: # Only keep if score is positive
-                other_feature_scores_for_vector[idx] = other_feature_scores[idx]
-
 
     # Construct the full feature vector: [tempo, energy, moods..., other_features...]
-    full_vector = [tempo_norm, energy_norm] + list(mood_scores_for_vector) + list(other_feature_scores_for_vector)
+    # These values are now NOT normalized, they are the raw values to be standardized by StandardScaler.
+    full_vector = [tempo_val, energy_val] + list(mood_scores_for_vector) + list(other_feature_scores_for_vector)
     return full_vector
 
 # OTHER_FEATURE_LABELS is imported from config.py
-def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_list):
-    """Generates a human-readable name for a cluster."""
+def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_list, scaler_details=None):
+    """Generates a human-readable name for a cluster. Now includes standardization inverse transform."""
+
+    interpreted_vector = centroid_scaled_vector # This is from the clustered space (might be PCA-transformed)
+
+    # Step 1: Inverse transform from PCA space to standardized space (if PCA enabled)
     if pca_enabled and pca_model is not None:
         try:
-            scaled_vector = pca_model.inverse_transform(centroid_scaled_vector.reshape(1, -1))[0]
+            interpreted_vector = pca_model.inverse_transform(interpreted_vector.reshape(1, -1))[0]
         except ValueError:
-            print("Warning: PCA inverse_transform failed. Using original scaled vector.")
-            scaled_vector = centroid_scaled_vector
-    else:
-        scaled_vector = centroid_scaled_vector
+            print("Warning: PCA inverse_transform failed. Cannot fully inverse transform. Using PCA space for interpretation.")
+            # If PCA inverse fails, further inverse transformation (scaler) will likely be incorrect.
+            # We'll proceed with the PCA-transformed vector, but the interpretation of raw values might be off.
+            pass # interpreted_vector remains in PCA space if inverse fails
 
+    # Step 2: Inverse transform from standardized space to original raw space (if scaler details provided)
+    if scaler_details:
+        try:
+            temp_scaler = StandardScaler()
+            temp_scaler.mean_ = np.array(scaler_details["mean"])
+            temp_scaler.scale_ = np.array(scaler_details["scale"])
+            # Essential for `inverse_transform` to know the number of features it was fitted on
+            temp_scaler.n_features_in_ = len(temp_scaler.mean_)
+
+            if len(interpreted_vector) != len(temp_scaler.mean_):
+                print(f"Warning: Dimension mismatch for scaler inverse transform. Expected {len(temp_scaler.mean_)} features, got {len(interpreted_vector)}. Skipping scaler inverse.")
+                # If dimensions don't match, we cannot reliably inverse scale. Use the vector as is.
+                final_interpreted_raw_vector = interpreted_vector
+            else:
+                final_interpreted_raw_vector = temp_scaler.inverse_transform(interpreted_vector.reshape(1, -1))[0]
+        except Exception as e:
+            print(f"Warning: StandardScaler inverse_transform failed: {e}. Using previously interpreted vector.")
+            traceback.print_exc()
+            final_interpreted_raw_vector = interpreted_vector # Fallback if scaler inverse fails
+    else:
+        # If no scaler details, the vector is either from PCA inverse (if PCA was enabled)
+        # or the original (unscaled) vector passed directly (if no PCA and no scaler).
+        final_interpreted_raw_vector = interpreted_vector
+
+
+    # Now use the final_interpreted_raw_vector for naming logic
     # Adjust slicing based on the new vector structure [tempo, energy, moods..., other_features...]
-    tempo_norm = scaled_vector[0]
-    energy_norm = scaled_vector[1] # Get energy
-    mood_values = scaled_vector[2 : 2 + len(mood_labels_list)] # Correctly slice mood values
+    # These values are now the original raw values (e.g., tempo in BPM, energy in its original scale)
+    tempo_val = final_interpreted_raw_vector[0]
+    energy_val = final_interpreted_raw_vector[1]
+    mood_values = final_interpreted_raw_vector[2 : 2 + len(mood_labels_list)]
 
     # Extract scores for the other features (danceable, etc.)
-    other_feature_values = scaled_vector[2 + len(mood_labels_list):]
+    other_feature_values = final_interpreted_raw_vector[2 + len(mood_labels_list):]
     other_feature_scores_dict = {}
     if len(other_feature_values) == len(OTHER_FEATURE_LABELS):
         other_feature_scores_dict = dict(zip(OTHER_FEATURE_LABELS, other_feature_values))
     else:
         print(f"Warning: Mismatch between other_feature_values length ({len(other_feature_values)}) and OTHER_FEATURE_LABELS length ({len(OTHER_FEATURE_LABELS)}). Cannot map scores for AI naming.")
 
-    tempo = tempo_norm * (200 - 40) + 40
-    if tempo < 80: tempo_label = "Slow"
-    elif tempo < 130: tempo_label = "Medium"
+    # Convert tempo to label (assuming original BPM values for labeling)
+    if tempo_val < 80: tempo_label = "Slow"
+    elif tempo_val < 130: tempo_label = "Medium"
     else: tempo_label = "Fast"
 
-    # Add energy label (example)
-    energy_label = "Low Energy" if energy_norm < 0.3 else ("Medium Energy" if energy_norm < 0.7 else "High Energy")
+    # Convert energy to label (assuming original energy values for labeling, can map to min/max from config)
+    # This might need some mapping based on ENERGY_MIN/ENERGY_MAX if they represent the expected range for human labels.
+    energy_norm_for_label = (energy_val - ENERGY_MIN) / (ENERGY_MAX - ENERGY_MIN) if (ENERGY_MAX - ENERGY_MIN) > 0 else 0.0
+    energy_norm_for_label = np.clip(energy_norm_for_label, 0.0, 1.0)
+    energy_label = "Low Energy" if energy_norm_for_label < 0.3 else ("Medium Energy" if energy_norm_for_label < 0.7 else "High Energy")
+
 
     # Determine top moods
     if len(mood_values) == 0 or np.sum(mood_values) == 0: top_indices = []
@@ -304,7 +320,7 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     full_name = f"{base_name}{appended_other_features_str}"
 
     top_mood_scores = {mood_labels_list[i]: mood_values[i] for i in top_indices if i < len(mood_labels_list)}
-    extra_info = {"tempo": round(tempo_norm, 2), "energy": round(energy_norm, 2)} # Include energy in extra info
+    extra_info = {"tempo": round(tempo_val, 2), "energy": round(energy_val, 2)} # Include energy in extra info
 
     # Combine all relevant centroid features for AI naming and general info
     # other_feature_scores_dict already contains 'danceable', 'aggressive', etc.
@@ -484,7 +500,11 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         "moods": {k: round(v, 2) for k, v in moods.items()}
                     }
 
-                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods, energy=energy, other_features=other_features_str) # Pass energy
+                    # Filter moods to keep only TOP_N_MOODS before saving
+                    top_n_moods_to_save = {
+                        k: moods[k] for k in sorted(moods, key=moods.get, reverse=True)[:top_n_moods]
+                    }
+                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_n_moods_to_save, energy=energy, other_features=other_features_str) # Pass energy
                     tracks_analyzed_count += 1
                     mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
 
@@ -866,13 +886,17 @@ def _perform_single_clustering_iteration(
             mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
 
         # --- Data Preparation ---
-        X_original = [score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in all_tracks_data_parsed]
-        X_scaled = np.array(X_original)
-        if X_scaled.shape[0] == 0:
+        X_original = np.array([score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in all_tracks_data_parsed])
+        if X_original.shape[0] == 0:
             print(f"{log_prefix} Iteration {run_idx}: No data to cluster.")
-            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {}}
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}} # Add scaler_details
 
-        data_after_pca_for_this_iteration = X_scaled # Default if PCA is off or fails
+        # Standardize the data
+        scaler = StandardScaler()
+        X_standardized = scaler.fit_transform(X_original)
+        scaler_details = {"mean": scaler.mean_.tolist(), "scale": scaler.scale_.tolist()}
+
+        data_for_clustering_current = X_standardized # Default if PCA is off or fails
         pca_model_for_this_iteration = None
         # --- End Data Preparation ---
 
@@ -890,8 +914,13 @@ def _perform_single_clustering_iteration(
             chosen_elite_params_set = random.choice(elite_solutions_params_list)
             elite_method_config_original = chosen_elite_params_set.get("clustering_method_config")
             elite_pca_config_original = chosen_elite_params_set.get("pca_config", {"enabled": False, "components": 0})
+            elite_scaler_details_original = chosen_elite_params_set.get("scaler_details") # Get elite scaler details
 
-            if elite_method_config_original and elite_pca_config_original and \
+            # A simple check for scaler compatibility for mutation: if it was used in elite, it must be used now.
+            # This is a heuristic, full compatibility check would be complex.
+            scaler_compatible = (elite_scaler_details_original is not None) == (scaler_details is not None)
+
+            if elite_method_config_original and elite_pca_config_original and scaler_compatible and \
                elite_method_config_original.get("method") == clustering_method:
                 try:
                     # 1. Mutate PCA components first
@@ -901,11 +930,11 @@ def _perform_single_clustering_iteration(
                         pca_params_ranges["components_min"], pca_params_ranges["components_max"],
                         mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA)
                     )
-                    # Max PCA components also limited by number of features in X_scaled and number of samples
-                    max_pca_by_features = X_scaled.shape[1]
-                    max_pca_by_samples = (X_scaled.shape[0] - 1) if X_scaled.shape[0] > 1 else 1
+                    # Max PCA components also limited by number of features in X_standardized and number of samples
+                    max_pca_by_features = X_standardized.shape[1]
+                    max_pca_by_samples = (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1
 
-                    max_allowable_pca_mutated = min(mutated_pca_comps, len(MOOD_LABELS) + 1, max_pca_by_features, max_pca_by_samples)
+                    max_allowable_pca_mutated = min(mutated_pca_comps, max_pca_by_features, max_pca_by_samples)
                     max_allowable_pca_mutated = max(0, max_allowable_pca_mutated) # Ensure not negative
                     temp_pca_config = {"enabled": max_allowable_pca_mutated > 0, "components": max_allowable_pca_mutated}
 
@@ -913,18 +942,18 @@ def _perform_single_clustering_iteration(
                     if temp_pca_config["enabled"]:
                         if temp_pca_config["components"] > 0:
                             pca_model_for_this_iteration = PCA(n_components=temp_pca_config["components"])
-                            data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                            data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
                             temp_pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual components used
                         else: # Components somehow became 0
                             temp_pca_config["enabled"] = False
-                            data_after_pca_for_this_iteration = X_scaled # Fallback
+                            data_for_clustering_current = X_standardized # Fallback
                     else:
-                        data_after_pca_for_this_iteration = X_scaled # PCA not enabled
+                        data_for_clustering_current = X_standardized # PCA not enabled
 
                     # 3. Mutate clustering method parameters (e.g., n_clusters)
-                    #    This must happen AFTER PCA, as n_clusters can depend on data_after_pca_for_this_iteration.shape[0]
+                    #    This must happen AFTER PCA, as n_clusters can depend on data_for_clustering_current.shape[0]
                     temp_method_params_config = None
-                    max_clusters_or_components = data_after_pca_for_this_iteration.shape[0]
+                    max_clusters_or_components = data_for_clustering_current.shape[0]
                     if max_clusters_or_components == 0: # No data points after PCA (should be rare)
                         raise ValueError("No data points available after PCA to determine cluster parameters.")
 
@@ -964,7 +993,7 @@ def _perform_single_clustering_iteration(
                         if clustering_method == "kmeans":
                             kmeans_initial_centroids = _generate_or_mutate_kmeans_initial_centroids(
                                 temp_method_params_config["params"]["n_clusters"],
-                                data_after_pca_for_this_iteration,
+                                data_for_clustering_current,
                                 elite_method_config_original.get("params"), # Pass full elite Kmeans params
                                 elite_pca_config_original, # Elite's PCA config
                                 temp_pca_config,           # Current iteration's PCA config
@@ -984,33 +1013,34 @@ def _perform_single_clustering_iteration(
             # print(f"{log_prefix} Iteration {run_idx}: Using random parameters.")
             # Original random parameter generation
             sampled_pca_components_rand = random.randint(pca_params_ranges["components_min"], pca_params_ranges["components_max"])
-            max_allowable_pca_rand = min(sampled_pca_components_rand, len(MOOD_LABELS) + 1, len(all_tracks_data_parsed) -1 if len(all_tracks_data_parsed) > 1 else 1)
+            # Max PCA components also limited by number of features in X_standardized and number of samples
+            max_allowable_pca_rand = min(sampled_pca_components_rand, X_standardized.shape[1], (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1)
             max_allowable_pca_rand = max(0, max_allowable_pca_rand) # Ensure not negative
             pca_config = {"enabled": max_allowable_pca_rand > 0, "components": max_allowable_pca_rand}
 
-            # Apply PCA for random generation path to get data_after_pca_for_this_iteration
+            # Apply PCA for random generation path to get data_for_clustering_current
             if pca_config["enabled"]:
-                n_comps_rand = min(pca_config["components"], X_scaled.shape[1], (X_scaled.shape[0] - 1) if X_scaled.shape[0] > 1 else 1)
+                n_comps_rand = min(pca_config["components"], X_standardized.shape[1], (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1)
                 if n_comps_rand > 0:
                     pca_model_for_this_iteration = PCA(n_components=n_comps_rand)
-                    data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                    data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
                     pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
                 else:
                     pca_config["enabled"] = False
-                    data_after_pca_for_this_iteration = X_scaled
+                    data_for_clustering_current = X_standardized
             else:
-                data_after_pca_for_this_iteration = X_scaled
+                data_for_clustering_current = X_standardized
 
-            max_clusters_or_components_rand = data_after_pca_for_this_iteration.shape[0]
+            max_clusters_or_components_rand = data_for_clustering_current.shape[0]
             if max_clusters_or_components_rand == 0: # No data points after PCA
                  print(f"{log_prefix} Iteration {run_idx}: No data points available after PCA for random parameter generation.")
-                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"pca_config": pca_config}}
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"pca_config": pca_config}} # Add scaler_details
 
             if clustering_method == "kmeans":
                 k_rand = random.randint(max(1, num_clusters_min_max[0]), min(num_clusters_min_max[1], max_clusters_or_components_rand)) # Ensure min clusters is at least 1
                 k_rand = max(1, k_rand)
                 kmeans_initial_centroids_rand = _generate_or_mutate_kmeans_initial_centroids(
-                    k_rand, data_after_pca_for_this_iteration, None, None, pca_config, # No elite for random
+                    k_rand, data_for_clustering_current, None, None, pca_config, # No elite for random
                     log_prefix=f"{log_prefix} Iteration {run_idx} (random)"
                 )
                 method_params_config = {"method": "kmeans", "params": {"n_clusters": k_rand, "initial_centroids": kmeans_initial_centroids_rand}}
@@ -1030,7 +1060,7 @@ def _perform_single_clustering_iteration(
             # Re-create PCA model and transform data if it wasn't done in the mutation path
             try:
                 pca_model_for_this_iteration = PCA(n_components=pca_config["components"])
-                data_after_pca_for_this_iteration = pca_model_for_this_iteration.fit_transform(X_scaled)
+                data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
                 pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
             except Exception as e_refit_pca:
                  print(f"{log_prefix} Iteration {run_idx}: Error re-fitting PCA: {e_refit_pca}. Disabling PCA for this run.")
@@ -1038,7 +1068,7 @@ def _perform_single_clustering_iteration(
                  pca_config["enabled"] = False
                  pca_config["components"] = 0
                  pca_model_for_this_iteration = None
-                 data_after_pca_for_this_iteration = X_scaled # Fallback to original scaled data
+                 data_for_clustering_current = X_standardized # Fallback to standardized data
 
 
         if not method_params_config or pca_config is None:
@@ -1046,27 +1076,25 @@ def _perform_single_clustering_iteration(
             return None
 
         # --- Start of core logic from original run_single_clustering_iteration_task ---
-        # X_original = [score_vector(row, MOOD_LABELS) for row in all_tracks_data_parsed] # Already done above
-        # X_scaled, data_after_pca_for_this_iteration, and pca_model_for_this_iteration are already prepared above using score_vector
-        # Use data_after_pca_for_this_iteration for clustering.
+        # Use data_for_clustering_current (which is either standardized or PCA-transformed standardized data) for clustering.
 
         labels = None
         cluster_centers_map = {}
-        raw_distances = np.zeros(data_after_pca_for_this_iteration.shape[0])
+        raw_distances = np.zeros(data_for_clustering_current.shape[0])
         method_from_config = method_params_config["method"]
         params_from_config = method_params_config["params"]
 
         if method_from_config == "kmeans":
             if not params_from_config.get("initial_centroids") or not isinstance(params_from_config["initial_centroids"], list) or len(params_from_config["initial_centroids"]) == 0:
                 print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids missing or empty. Cannot cluster with KMeans.")
-                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
 
             initial_centroids_np = np.array(params_from_config["initial_centroids"])
 
             # Ensure n_clusters matches the number of initial centroids provided
             if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: # Empty array from empty list
                  print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids resulted in empty numpy array. Cannot cluster.")
-                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
 
             if initial_centroids_np.shape[0] != params_from_config["n_clusters"]:
                 # print(f"{log_prefix} Iteration {run_idx}: Mismatch n_clusters ({params_from_config['n_clusters']}) and num initial_centroids ({initial_centroids_np.shape[0]}). Adjusting n_clusters.")
@@ -1074,37 +1102,37 @@ def _perform_single_clustering_iteration(
 
             if params_from_config["n_clusters"] == 0:
                 print(f"{log_prefix} Iteration {run_idx}: n_clusters is 0 for KMeans after adjustment. Cannot cluster.")
-                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
 
             kmeans = KMeans(n_clusters=params_from_config["n_clusters"], init=initial_centroids_np, n_init=1)
-            labels = kmeans.fit_predict(data_after_pca_for_this_iteration)
+            labels = kmeans.fit_predict(data_for_clustering_current)
             cluster_centers_map = {i: kmeans.cluster_centers_[i] for i in range(params_from_config["n_clusters"])}
             centers_for_points = kmeans.cluster_centers_[labels]
-            raw_distances = np.linalg.norm(data_after_pca_for_this_iteration - centers_for_points, axis=1)
+            raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
         elif method_from_config == "dbscan":
             dbscan = DBSCAN(eps=params_from_config["eps"], min_samples=params_from_config["min_samples"])
-            labels = dbscan.fit_predict(data_after_pca_for_this_iteration)
+            labels = dbscan.fit_predict(data_for_clustering_current)
             for cluster_id_val in set(labels):
                 if cluster_id_val == -1: continue
                 indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id_val]
-                cluster_points = data_after_pca_for_this_iteration[indices]
+                cluster_points = data_for_clustering_current[indices]
                 if len(cluster_points) > 0:
                     center = cluster_points.mean(axis=0)
-                    for i_idx in indices: raw_distances[i_idx] = np.linalg.norm(data_after_pca_for_this_iteration[i_idx] - center)
+                    for i_idx in indices: raw_distances[i_idx] = np.linalg.norm(data_for_clustering_current[i_idx] - center)
                     cluster_centers_map[cluster_id_val] = center
         elif method_from_config == "gmm":
             gmm = GaussianMixture(n_components=params_from_config["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
-            gmm.fit(data_after_pca_for_this_iteration)
-            labels = gmm.predict(data_after_pca_for_this_iteration)
+            gmm.fit(data_for_clustering_current)
+            labels = gmm.predict(data_for_clustering_current)
             cluster_centers_map = {i: gmm.means_[i] for i in range(params_from_config["n_components"])}
             centers_for_points = gmm.means_[labels] # type: ignore
-            raw_distances = np.linalg.norm(data_after_pca_for_this_iteration - centers_for_points, axis=1)
+            raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
 
-        del data_after_pca_for_this_iteration # Free memory
+        del data_for_clustering_current # Free memory
 
         if labels is None or len(set(labels) - {-1}) == 0:
             # print(f"{log_prefix} Iteration {run_idx}: No valid clusters found.")
-            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
 
         max_dist = raw_distances.max()
         normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
@@ -1138,7 +1166,8 @@ def _perform_single_clustering_iteration(
             if songs_list:
                 center_val = cluster_centers_map.get(label_val)
                 if center_val is None or len(center_val) == 0: continue # Ensure centroid exists and is not empty
-                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], MOOD_LABELS)
+                # Pass scaler_details to name_cluster
+                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], MOOD_LABELS, scaler_details)
                 if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
                     if predominant_mood_key:
@@ -1283,6 +1312,7 @@ def _perform_single_clustering_iteration(
             "named_playlists": dict(current_named_playlists),
             "playlist_centroids": current_playlist_centroids,
             "pca_model_details": pca_model_details,
+            "scaler_details": scaler_details, # Store scaler details here
             "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}
         }
         return result
@@ -1699,6 +1729,8 @@ def run_clustering_task(
             final_named_playlists = best_clustering_results["named_playlists"]
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
             final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
+            final_pca_model_details = best_clustering_results["pca_model_details"] # Retrieve PCA details
+            final_scaler_details = best_clustering_results["scaler_details"]     # Retrieve Scaler details
 
             # --- AI Playlist Naming for the BEST result ---
             log_prefix_main_task_ai = f"[MainClusteringTask-{current_task_id} AI Naming]"
@@ -1725,6 +1757,19 @@ def run_clustering_task(
                     ai_renamed_centroids_final = {}
                     total_playlists_to_name = len(final_named_playlists)
                     playlists_named_count = 0
+
+                    # Recreate PCA model if details are available for AI naming
+                    pca_model_for_ai_naming = None
+                    if final_pca_model_details and final_pca_model_details.get("n_components", 0) > 0:
+                        try:
+                            pca_model_for_ai_naming = PCA(n_components=final_pca_model_details["n_components"])
+                            pca_model_for_ai_naming.mean_ = np.array(final_pca_model_details["mean"])
+
+                            pass # No direct PCA model reconstruction needed here, name_cluster handles it via details.
+                        except Exception as e_pca_details_ai:
+                            print(f"{log_prefix_main_task_ai} Warning: Could not handle PCA model details for AI naming: {e_pca_details_ai}. Proceeding without specific PCA model for AI.")
+                            # pca_model_for_ai_naming is already None by default if this block fails or isn't entered.
+                            # No explicit assignment to None needed here unless it was modified within the try.
 
                     for original_name, songs_in_playlist in final_named_playlists.items():
                         if not songs_in_playlist:
