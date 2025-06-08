@@ -106,18 +106,17 @@ def download_track(jellyfin_url, headers, temp_dir, item):
         print(f"ERROR: download_track {item['Name']}: {e}")
         return None
 
-def predict_moods(audio, embedding_model_path, prediction_model_path, mood_labels_list):
-    """Predicts moods for an audio file using pre-trained models."""
-    embedding_model = TensorflowPredictMusiCNN(
-        graphFilename=embedding_model_path, output="model/dense/BiasAdd"
-    )
-    embeddings = embedding_model(audio)
+def predict_moods(embeddings_input, prediction_model_path, mood_labels_list):
+    """Predicts moods using pre-computed embeddings and a mood classification model."""
+    # embeddings_input is the 1D track-level embedding from TensorflowPredictMusiCNN
     model = TensorflowPredict2D(
         graphFilename=prediction_model_path,
-        input="serving_default_model_Placeholder",
-        output="PartitionedCall"
+        input="serving_default_model_Placeholder", # Ensure this matches your mood model's input tensor name
+        output="PartitionedCall" # Ensure this matches your mood model's output tensor name
     )
-    mood_predictions = model(embeddings)[0]
+    # model() will take the 1D embeddings_input, promote to (1, D), and output (1, num_moods)
+    # [0] extracts the 1D array of mood scores
+    mood_predictions = model(embeddings_input)[0]
     mood_results = dict(zip(mood_labels_list, mood_predictions))
     return {label: float(score) for label, score in mood_results.items()}
 
@@ -162,7 +161,7 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
 
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(musicnn_embeddings, embedding_model_path, prediction_model_path, mood_labels_list) # Pass embeddings
+    moods = predict_moods(musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS) # Pass embeddings and correct model path
 
     # Calculate raw total energy
     raw_total_energy = Energy()(audio)
