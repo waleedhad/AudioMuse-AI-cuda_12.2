@@ -97,17 +97,17 @@ MOOD_LABELS = [
 
 TOP_N_MOODS = 5
 TOP_N_OTHER_FEATURES = int(os.environ.get("TOP_N_OTHER_FEATURES", "2")) # Number of top "other features" to consider for clustering vector
-EMBEDDING_MODEL_PATH = "/app/msd-musicnn-1.pb"
-PREDICTION_MODEL_PATH = "/app/msd-msd-musicnn-1.pb"
+EMBEDDING_MODEL_PATH = "/app/model/msd-musicnn-1.pb"
+PREDICTION_MODEL_PATH = "/app/model/msd-msd-musicnn-1.pb"
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)
-DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/danceability-msd-musicnn-1.pb") # Example, adjust if different
-AGGRESSIVE_MODEL_PATH = os.environ.get("AGGRESSIVE_MODEL_PATH", "/app/mood_aggressive-msd-musicnn-1.pb")
-HAPPY_MODEL_PATH = os.environ.get("HAPPY_MODEL_PATH", "/app/mood_happy-msd-musicnn-1.pb")
-PARTY_MODEL_PATH = os.environ.get("PARTY_MODEL_PATH", "/app/mood_party-msd-musicnn-1.pb")
-RELAXED_MODEL_PATH = os.environ.get("RELAXED_MODEL_PATH", "/app/mood_relaxed-msd-musicnn-1.pb")
-SAD_MODEL_PATH = os.environ.get("SAD_MODEL_PATH", "/app/mood_sad-msd-musicnn-1.pb")
+DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/model/danceability-msd-musicnn-1.pb") # Example, adjust if different
+AGGRESSIVE_MODEL_PATH = os.environ.get("AGGRESSIVE_MODEL_PATH", "/app/model/mood_aggressive-msd-musicnn-1.pb")
+HAPPY_MODEL_PATH = os.environ.get("HAPPY_MODEL_PATH", "/app/model/mood_happy-msd-musicnn-1.pb")
+PARTY_MODEL_PATH = os.environ.get("PARTY_MODEL_PATH", "/app/model/mood_party-msd-musicnn-1.pb")
+RELAXED_MODEL_PATH = os.environ.get("RELAXED_MODEL_PATH", "/app/model/mood_relaxed-msd-musicnn-1.pb")
+SAD_MODEL_PATH = os.environ.get("SAD_MODEL_PATH", "/app/model/mood_sad-msd-musicnn-1.pb")
 
 # --- Energy Normalization Range ---
 ENERGY_MIN = float(os.getenv("ENERGY_MIN", "0.01"))
