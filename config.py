@@ -16,11 +16,11 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 40
 MAX_SONGS_PER_ARTIST = 3
-NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000")) # Convert to int
+NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "3000")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
-AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "GEMINI").upper() # Accepted: OLLAMA, GEMINI, NONE
+AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "NONE").upper() # Accepted: OLLAMA, GEMINI, NONE
 
 # --- DBSCAN Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for DBSCAN parameters
@@ -44,7 +44,7 @@ GMM_COVARIANCE_TYPE = os.environ.get("GMM_COVARIANCE_TYPE", "full") # 'full', 't
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
 PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA
-PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "5")) # Max components for PCA
+PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components for PCA
 
 # --- Clustering Runs for Diversity (New Constant) ---
 CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
@@ -60,6 +60,13 @@ MUTATION_KMEANS_COORD_FRACTION = float(os.environ.get("CLUSTERING_MUTATION_KMEAN
 # --- Scoring Weights for Enhanced Diversity Score ---
 SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "0.6")) # Weight for the base diversity (inter-playlist mood diversity)
 SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.4"))    # Weight for playlist purity (intra-playlist mood consistency)
+SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY", "0.3")) # New: Weight for inter-playlist other feature diversity
+SCORE_WEIGHT_OTHER_FEATURE_PURITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_PURITY", "0.2"))       # New: Weight for intra-playlist other feature consistency
+# --- Weights for Internal Validation Metrics ---
+SCORE_WEIGHT_SILHOUETTE = float(os.environ.get("SCORE_WEIGHT_SILHOUETTE", "0.6")) # Weight for Silhouette Score - This metric measures how similar an object is to its own cluster compared to other clusters.
+SCORE_WEIGHT_DAVIES_BOULDIN = float(os.environ.get("SCORE_WEIGHT_DAVIES_BOULDIN", "0.0")) # Set to 0 to effectively disable - This index quantifies the average similarity between each cluster and its most similar one
+SCORE_WEIGHT_CALINSKI_HARABASZ = float(os.environ.get("SCORE_WEIGHT_CALINSKI_HARABASZ", "0.0")) # Set to 0 to effectively disable - This metric focuses on the ratio of between-cluster dispersion to within-cluster dispersion
+
 
 # --- AI Playlist Naming ---
 # USE_AI_PLAYLIST_NAMING is replaced by AI_MODEL_PROVIDER
@@ -89,5 +96,24 @@ MOOD_LABELS = [
 ]
 
 TOP_N_MOODS = 5
+TOP_N_OTHER_FEATURES = int(os.environ.get("TOP_N_OTHER_FEATURES", "2")) # Number of top "other features" to consider for clustering vector
 EMBEDDING_MODEL_PATH = "/app/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/msd-msd-musicnn-1.pb"
+
+# --- Other Essentia Model Paths ---
+# Paths for models used in predict_other_models (VGGish-based)
+DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/danceability-msd-musicnn-1.pb") # Example, adjust if different
+AGGRESSIVE_MODEL_PATH = os.environ.get("AGGRESSIVE_MODEL_PATH", "/app/mood_aggressive-msd-musicnn-1.pb")
+HAPPY_MODEL_PATH = os.environ.get("HAPPY_MODEL_PATH", "/app/mood_happy-msd-musicnn-1.pb")
+PARTY_MODEL_PATH = os.environ.get("PARTY_MODEL_PATH", "/app/mood_party-msd-musicnn-1.pb")
+RELAXED_MODEL_PATH = os.environ.get("RELAXED_MODEL_PATH", "/app/mood_relaxed-msd-musicnn-1.pb")
+SAD_MODEL_PATH = os.environ.get("SAD_MODEL_PATH", "/app/mood_sad-msd-musicnn-1.pb")
+
+# --- Energy Normalization Range ---
+ENERGY_MIN = float(os.getenv("ENERGY_MIN", "0.01"))
+ENERGY_MAX = float(os.getenv("ENERGY_MAX", "0.15"))
+
+# --- Tempo Normalization Range (BPM) ---
+TEMPO_MIN_BPM = float(os.getenv("TEMPO_MIN_BPM", "40.0"))
+TEMPO_MAX_BPM = float(os.getenv("TEMPO_MAX_BPM", "200.0"))
+OTHER_FEATURE_LABELS = ['danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad']

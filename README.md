@@ -4,7 +4,10 @@ AudioMuse-AI is a Dockerized environment that brings smart playlist generation t
 
 The main scope of this application is testing the clustering algorithm. A front-end is provided for easy use. You can also find the stand-alone Python script in the Jellyfin-Essentia-Playlist repo.
 
-**IMPORTANT:** This is an ALPHA open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
+If you want a brief introduction to the application's functionality, have a look at the presentation slides in [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/devel/docs/slide.pdf).
+
+
+**IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
 
 ## **Table of Contents**
 
@@ -14,11 +17,14 @@ The main scope of this application is testing the clustering algorithm. A front-
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
 - [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
 - [Workflow Overview](#workflow-overview)
+- [Analysis Algorithm Deep Dive](#analysis-algorithm-deep-dive)
 - [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
   - [1. K-Means](#1-k-means)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
+  - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
   - [AI Playlist Naming](#ai-playlist-naming)
+- [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Screenshots](#screenshots)
   - [Analysis task](#analysis-task)
   - [Clustering task](#clustering-task)
@@ -81,7 +87,7 @@ The Quick Start provided in the `playlist` namespace the following resources:
 
 The deployment file also creates the `playlist` namespace to contain all these resources.
 
-For a more stable use, I suggest editing the deployment container image to use the alpha tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha.
+For a more stable use, I suggest editing the deployment container image to use specific version tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha.
 
 ## **Configuration Parameters**
 
@@ -90,16 +96,16 @@ These are the parameters accepted for this script. You can pass them as environm
 The **mandatory** parameter that you need to change from the example are this:
 | Parameter               | Description                                 | Default Value                       |
 | ----------------------- | ------------------------------------------- | ----------------------------------- |
-| `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`      |
-| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.| *(N/A - from Secret)*    |
-| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.| *(N/A - from Secret)*    |
-| `POSTGRES_USER`         | (Required) PostgreSQL username.| *(N/A - from Secret)*    |
-| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.| *(N/A - from Secret)*    |
-| `POSTGRES_DB`           | (Required) PostgreSQL database name.| *(N/A - from Secret)*    |
-| `POSTGRES_HOST`         | (Required) PostgreSQL host.| `postgres-service.playlist` |
-| `POSTGRES_PORT`         | (Required) PostgreSQL port.| `5432`                      |
-| `REDIS_URL`             | (Required) URL for Redis.| `redis://redis-service.playlist:6379/0` |
-| `GEMINI_API_KEY`        | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)* |
+| `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`            |
+| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.                | *(N/A - from Secret)*                     |
+| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.              | *(N/A - from Secret)*                     |
+| `POSTGRES_USER`         | (Required) PostgreSQL username.             | *(N/A - from Secret)*                     |
+| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.             | *(N/A - from Secret)*                     |
+| `POSTGRES_DB`           | (Required) PostgreSQL database name.        | *(N/A - from Secret)*                     |
+| `POSTGRES_HOST`         | (Required) PostgreSQL host.                 | `postgres-service.playlist`               |
+| `POSTGRES_PORT`         | (Required) PostgreSQL port.                 | `5432`                                    |
+| `REDIS_URL`             | (Required) URL for Redis.                   | `redis://redis-service.playlist:6379/0`   |
+| `GEMINI_API_KEY`        | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)*                     |
 
 These parameter can be leave as it is:
 
@@ -110,40 +116,54 @@ These parameter can be leave as it is:
 
 This are the default parameters on wich the analysis or clustering task will be lunched. You will be able to change them to another value directly in the front-end:
 
-| Parameter               | Description                                 | Default Value                       |
-| ----------------------- | ------------------------------------------- | ----------------------------------- |
-| **Analysis General** |                                                                             |                    |
-| `NUM_RECENT_ALBUMS`       | Number of recent albums to scan (0 for all).                                | `2000`   |
-| `TOP_N_MOODS`             | Number of top moods per track for feature vector.                           | `5`      |
-| **Clustering General** |                                                                             |                    |
-| `CLUSTER_ALGORITHM`       | Default clustering: `kmeans`, `dbscan`, `gmm`.                              | `kmeans` |
-| `MAX_SONGS_PER_CLUSTER`   | Max songs per generated playlist segment.                                   | `40`     |
-| `MAX_SONGS_PER_ARTIST`    | Max songs from one artist per cluster.                                      | `3`      |
-| `MAX_DISTANCE`            | Normalized distance threshold for tracks in a cluster.                      | `0.5`    |
-| `CLUSTERING_RUNS`         | Iterations for Monte Carlo evolutionary search.                             | `1000`   |
-| **K-Means Ranges** |                                                                             |                    |
-| `NUM_CLUSTERS_MIN`        | Min $K$ for K-Means.                                                        | `20`     |
-| `NUM_CLUSTERS_MAX`        | Max $K$ for K-Means.                                                        | `60`     |
-| **DBSCAN Ranges** |                                                                             |                    |
-| `DBSCAN_EPS_MIN`          | Min epsilon for DBSCAN.                                                     | `0.1`    |
-| `DBSCAN_EPS_MAX`          | Max epsilon for DBSCAN.                                                     | `0.5`    |
-| `DBSCAN_MIN_SAMPLES_MIN`  | Min `min_samples` for DBSCAN.                                               | `5`      |
-| `DBSCAN_MIN_SAMPLES_MAX`  | Max `min_samples` for DBSCAN.                                               | `20`     |
-| **GMM Ranges** |                                                                             |                    |
-| `GMM_N_COMPONENTS_MIN`    | Min components for GMM.                                                     | `20`     |
-| `GMM_N_COMPONENTS_MAX`    | Max components for GMM.                                                     | `60`     |
-| `GMM_COVARIANCE_TYPE`     | Covariance type for GMM (task uses `'full'`).                               | `full`   |
-| **PCA Ranges** |                                                                             |                    |
-| `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
-| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
-| **AI Naming (*)** |                                                                             |                    |
-| `AI_MODEL_PROVIDER`       | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                 | `GEMINI` |
-| `OLLAMA_SERVER_URL`       | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).            | `http://<your-ip>11434/api/generate` |
-| `OLLAMA_MODEL_NAME`       | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                     | `mistral:7b` |
-| `GEMINI_MODEL_NAME`       | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                     | `gemini-1.5-flash-latest` |
-| `GEMINI_API_CALL_DELAY_SECONDS` | Seconds to wait between Gemini API calls to respect rate limits.          | `7`      |
-| `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
-| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
+| Parameter                                | Description                                                                  | Default Value                        |
+|------------------------------------------|------------------------------------------------------------------------------|--------------------------------------|
+| **Analysis General**                     |                                                                              |                                      |
+| `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `2000`                               |
+| `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
+| **Clustering General**                   |                                                                              |                                      |
+| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
+| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `40`                                 |
+| `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
+| `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
+| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
+| **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
+| `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
+| `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
+| `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
+| `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
+| `MUTATION_FLOAT_ABS_DELTA`               | Max absolute change for float parameter mutation.                          | `0.05`                               |
+| `MUTATION_KMEANS_COORD_FRACTION`         | Fractional change for KMeans centroid coordinates.                       | `0.05`                               |
+| `SCORE_WEIGHT_DIVERSITY`                 | Weight for inter-playlist mood diversity.                                  | `0.6`                                |
+| `SCORE_WEIGHT_PURITY`                    | Weight for intra-playlist mood consistency.                                | `0.4`                                |
+| `SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY`   | Weight for inter-playlist 'other feature' diversity.                       | `0.3`                                |
+| `SCORE_WEIGHT_OTHER_FEATURE_PURITY`      | Weight for intra-playlist 'other feature' consistency.                     | `0.2`                                |
+| `SCORE_WEIGHT_SILHOUETTE`                | Weight for Silhouette Score (cluster separation).                          | `0.6`                                |
+| `SCORE_WEIGHT_DAVIES_BOULDIN`            | Weight for Davies-Bouldin Index (cluster separation).                    | `0.0`                                |
+| `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
+| **K-Means Ranges**                       |                                                                              |                                      |
+| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `20`                                 |
+| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `60`                                 |
+| **DBSCAN Ranges**                        |                                                                              |                                      |
+| `DBSCAN_EPS_MIN`                         | Min epsilon for DBSCAN.                                                    | `0.1`                                |
+| `DBSCAN_EPS_MAX`                         | Max epsilon for DBSCAN.                                                    | `0.5`                                |
+| `DBSCAN_MIN_SAMPLES_MIN`                 | Min `min_samples` for DBSCAN.                                              | `5`                                  |
+| `DBSCAN_MIN_SAMPLES_MAX`                 | Max `min_samples` for DBSCAN.                                              | `20`                                 |
+| **GMM Ranges**                           |                                                                              |                                      |
+| `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `20`                                 |
+| `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `60`                                 |
+| `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
+| **PCA Ranges**                           |                                                                              |                                      |
+| `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
+| `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `5`                                  |
+| **AI Naming (*)**                        |                                                                              |                                      |
+| `AI_MODEL_PROVIDER`                      | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                | `GEMINI`                             |
+| `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>11434/api/generate` |
+| `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
+| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
+| `GEMINI_API_CALL_DELAY_SECONDS`          | Seconds to wait between Gemini API calls to respect rate limits.         | `7`                                  |
+| `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
+| `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `5`                                  |
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
 
@@ -199,15 +219,62 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 
 This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
 
-* **Initiate from Frontend:** Start an analysis via the Flask web UI.  
-* **Job Queued on Redis:** Task is sent to Redis Queue.  
-* **RQ Worker Processes:**  
-  * Multiple worker containers are supported for parallel processing. It is suggested to have at least 2 workers (even on the same machine) because one runs the main process and the other runs subprocesses (so with only one worker, it can get stuck).  
-  * Fetch metadata and download audio from Jellyfin.  
-  * Analyze tracks using Essentia and TensorFlow.  
-  * Store results in PostgreSQL.  
-* **Flexible Clustering:** Re-cluster tracks anytime using stored analysis data.  
-* **Jellyfin Playlist Creation:** Create playlists based on clustering results directly in Jellyfin.
+*   **User Initiation:** Start analysis or clustering jobs via the Flask web UI.
+*   **Task Queuing:** Jobs are sent to Redis Queue for asynchronous background processing.
+*   **Parallel Worker Execution:**
+    *   Multiple RQ workers (at least 2 recommended) process tasks in parallel. Main tasks (e.g., full library analysis, entire evolutionary clustering process) often spawn and manage child tasks (e.g., per-album analysis, batches of clustering iterations).
+    *   **Analysis Phase:**
+        *   Workers fetch metadata and download audio from Jellyfin, processing albums individually.
+        *   Essentia and TensorFlow models analyze tracks for features (tempo, key, energy) and predictions (genres, moods, etc.).
+        *   Analysis results are saved to PostgreSQL.
+    *   **Clustering Phase:**
+        *   An evolutionary algorithm performs numerous clustering runs (e.g., K-Means, DBSCAN, or GMM) on the analyzed data. It explores different parameters to find optimal playlist structures based on a comprehensive scoring system.
+*   **Playlist Generation & Naming:**
+    *   Playlists are formed from the best clustering solution found by the evolutionary process.
+    *   Optionally, AI models (Ollama or Gemini) can be used to generate creative, human-readable names for these playlists.
+    *   Finalized playlists are created directly in your Jellyfin library.
+*   **Advanced Task Management:**
+    *   The web UI provides real-time monitoring of task progress, including main and sub-tasks.
+    *   A key feature is the ability to cancel tasks (both parent and child) even while they are actively running, offering robust control over long processes. This is more advanced than typical queue systems where cancellation might only affect pending tasks.
+
+## Analysis Algorithm Deep Dive
+
+The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously extracts a rich set of features from each track. This process is foundational for the subsequent clustering and playlist generation.
+1.  **Audio Loading & Preprocessing:**
+    *   Tracks are first downloaded from your Jellyfin library to a temporary local directory. Essentia's `MonoLoader` is then employed to load the audio.
+    *   A crucial preprocessing step involves resampling the audio to a consistent **16000 Hz** sample rate with a `resampleQuality` of 4. This standardization is vital because the subsequent TensorFlow models are trained on and expect audio at this specific sample rate, ensuring accurate feature extraction.
+
+2.  **Core Feature Extraction (Essentia):**
+    *   **Tempo:** The `RhythmExtractor2013` algorithm analyzes the rhythmic patterns in the audio to estimate the track's tempo, expressed in Beats Per Minute (BPM).
+    *   **Key & Scale:** The `KeyExtractor` algorithm identifies the predominant musical key (e.g., C, G#, Bb) and scale (major or minor) of the track. This provides insights into its harmonic structure.
+    *   **Energy:** Essentia's `Energy` function calculates the raw total energy of the audio signal. However, to make this feature comparable across tracks of varying lengths and overall loudness, the system computes and stores the **average energy per sample** (total energy divided by the number of samples). This normalized energy value offers a more stable representation of the track's perceived loudness or intensity.
+
+3.  **Embedding Generation (TensorFlow & Essentia):**
+    *   **MusiCNN Embeddings:** The cornerstone of the audio representation is a 200-dimensional embedding vector. This vector is generated using `TensorflowPredictMusiCNN` with the pre-trained model `msd-musicnn-1.pb` (specifically, the output from the `model/dense/BiasAdd` layer). MusiCNN is a Convolutional Neural Network (CNN) architecture that has been extensively trained on large music datasets (like the Million Song Dataset) for tasks such as music tagging. The resulting embedding is a dense, numerical summary that captures high-level semantic information and complex sonic characteristics of the track, going beyond simple acoustic features.
+
+4.  **Prediction Models (TensorFlow & Essentia):**
+    The rich MusiCNN embeddings serve as the input to several specialized `TensorflowPredict2D` models, each designed to predict specific characteristics of the music:
+    *   **Primary Tag/Genre Prediction:**
+        *   Model: `msd-msd-musicnn-1.pb`
+        *   Output: This model produces a vector of probability scores. Each score corresponds to a predefined tag or genre from a list (defined by `MOOD_LABELS` in `config.py`, including labels like 'rock', 'pop', 'electronic', 'jazz', 'chillout', '80s', 'instrumental', etc.). These scores indicate the likelihood of each tag/genre being applicable to the track.
+    *   **Other Feature Predictions:** The `predict_other_models` function leverages a suite of distinct `TensorflowPredict2D` models, each targeting a specific musical attribute. These models also take the MusiCNN embedding as input and typically use a `model/Softmax` output layer:
+        *   `danceable`: Predicted using `danceability-msd-musicnn-1.pb`.
+        *   `aggressive`: Predicted using `mood_aggressive-msd-musicnn-1.pb`.
+        *   `happy`: Predicted using `mood_happy-msd-musicnn-1.pb`.
+        *   `party`: Predicted using `mood_party-msd-musicnn-1.pb`.
+        *   `relaxed`: Predicted using `mood_relaxed-msd-musicnn-1.pb`.
+        *   `sad`: Predicted using `mood_sad-msd-musicnn-1.pb`.
+        *   Output: Each of these models outputs a probability score (typically the probability of the positive class in a binary classification, e.g., the likelihood the track is 'danceable'). This provides a nuanced understanding of various moods and characteristics beyond the primary tags.
+
+5.  **Feature Vector Preparation for Clustering (`score_vector` function):**
+    Before the actual clustering can occur, all the extracted and predicted features are meticulously assembled and transformed into a single numerical vector for each track. This is a critical step for machine learning algorithms:
+    *   **Normalization:** Tempo and the calculated average energy are normalized to a 0-1 range using configured minimum/maximum values (`TEMPO_MIN_BPM`, `TEMPO_MAX_BPM`, `ENERGY_MIN`, `ENERGY_MAX`). This ensures these features have a comparable scale.
+    *   **Normalization:**
+        *   Tempo (BPM) and the calculated average energy per sample are normalized to a 0-1 range. This is achieved by scaling them based on predefined minimum and maximum values (e.g., `TEMPO_MIN_BPM = 40.0`, `TEMPO_MAX_BPM = 200.0`, `ENERGY_MIN = 0.01`, `ENERGY_MAX = 0.15` from `config.py`). Normalization ensures that these features, which might have vastly different original scales, contribute more equally during the initial stages of vector construction.
+    *   **Vector Assembly:**
+        *   The final feature vector for each track is constructed by concatenating: the normalized tempo, the normalized average energy, the vector of primary tag/genre probability scores, and the vector of other predicted feature scores (danceability, aggressive, etc.). This creates a comprehensive numerical profile of the track.
+    *   **Standardization:**
+        *   This complete feature vector is then standardized using `sklearn.preprocessing.StandardScaler`. Standardization transforms the data for each feature to have a zero mean and unit variance across the entire dataset. This step is particularly crucial for distance-based clustering algorithms like K-Means. It prevents features with inherently larger numerical ranges from disproportionately influencing the distance calculations, ensuring that all features contribute more equitably to the clustering process. The mean and standard deviation (scale) computed by the `StandardScaler` for each feature are saved. These saved values are essential later for inverse transforming cluster centroids back to an interpretable scale, which aids in understanding the characteristics of each generated cluster.
 
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
 
@@ -237,6 +304,30 @@ Here's an explanation of the pros and cons of the different algorithms:
 
 **Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 1000\) helps the integrated evolutionary algorithm to find a good solution.
 
+### Montecarlo Evolutionary Approach
+
+AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisticated Monte Carlo evolutionary approach, managed within `tasks.py`, to discover high-quality playlist configurations. Here's a high-level overview:
+
+1.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 1000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
+
+2.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
+    *   **Elite Solutions:** The parameter sets from the best-performing runs (the "elites") are remembered.
+    *   **Exploitation & Mutation:** For subsequent runs, there's a chance (`EXPLOITATION_PROBABILITY_CONFIG`) that instead of purely random parameters, the system will take an elite solution and "mutate" its parameters slightly. This involves making small, random adjustments (controlled by `MUTATION_INT_ABS_DELTA`, `MUTATION_FLOAT_ABS_DELTA`, etc.) to the elite's parameters, effectively exploring the "neighborhood" of good solutions to potentially find even better ones.
+
+3.  **Comprehensive Scoring:** Each clustering outcome is evaluated using a composite score. This score is a weighted sum of several factors, designed to balance different aspects of playlist quality:
+    *   **Playlist Diversity:** Measures how varied the predominant characteristics (e.g., moods, danceability) are across all generated playlists.
+    *   **Playlist Purity:** Assesses how well the songs within each individual playlist align with that playlist's central theme or characteristic.
+    *   **Internal Clustering Metrics:** Standard metrics evaluate the geometric quality of the clusters:
+        *   **Silhouette Score:** How distinct are the clusters?
+        *   **Davies-Bouldin Index:** How well-separated are the clusters relative to their intra-cluster similarity?
+        *   **Calinski-Harabasz Index:** Ratio of between-cluster to within-cluster dispersion.
+
+4.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa.
+
+5.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
+
+This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
+
 ### **AI Playlist Naming**
 
 After the clustering algorithm has identified groups of similar songs, AudioMuse-AI can optionally use an AI model to generate creative, human-readable names for the resulting playlists. This replaces the default "Mood_Tempo" naming scheme with something more evocative.
@@ -248,6 +339,32 @@ After the clustering algorithm has identified groups of similar songs, AudioMuse
 
 This step adds a layer of creativity to the purely data-driven clustering process, making the generated playlists more appealing and easier to understand at a glance. The choice of AI provider and model is configurable via environment variables and the frontend.
 
+## Concurrency Algorithm Deep Dive
+
+AudioMuse-AI leverages Redis Queue (RQ) to manage and execute long-running processes like audio analysis and evolutionary clustering in parallel across multiple worker nodes. This architecture, primarily orchestrated within `tasks.py`, is designed for scalability and robust task management.
+
+1.  **Task Queuing with Redis Queue (RQ):**
+    *   When a user initiates an analysis or clustering job via the web UI, the main Flask application doesn't perform the heavy lifting directly. Instead, it enqueues a task (e.g., `run_analysis_task` or `run_clustering_task`) into a Redis queue.
+    *   Separate RQ worker processes, which can be scaled independently (e.g., running multiple `audiomuse-ai-worker` pods in Kubernetes), continuously monitor this queue. When a new task appears, an available worker picks it up and begins execution.
+
+2.  **Parallel Processing on Multiple Workers:**
+    *   This setup allows multiple tasks to be processed concurrently. For instance, if you have several RQ workers, they can simultaneously analyze different albums or run different batches of clustering iterations. This significantly speeds up the overall processing time, especially for large music libraries or extensive clustering runs.
+
+3.  **Hierarchical Task Structure & Batching for Efficiency:**
+    To minimize the overhead associated with frequent queue interactions (writing/reading task status, small job processing), tasks are structured hierarchically and batched:
+    *   **Analysis Tasks:** The `run_analysis_task` acts as a parent task. It fetches a list of albums and then enqueues individual `analyze_album_task` jobs for each album. Each `analyze_album_task` processes all tracks within that single album. This means one "album analysis" job in the queue corresponds to the analysis of potentially many songs, reducing the number of very small, granular tasks.
+    *   **Clustering Tasks:** Similarly, the main `run_clustering_task` orchestrates the evolutionary clustering. It breaks down the total number of requested clustering runs (e.g., 1000) into smaller `run_clustering_batch_task` jobs. Each batch task (e.g., `run_clustering_batch_task`) then executes a subset of these iterations (e.g., 10 iterations per batch). This strategy avoids enqueuing thousands of tiny individual clustering run tasks, again improving efficiency.
+
+4.  **Advanced Task Monitoring and Cancellation:**
+    A key feature implemented in `tasks.py` is the ability to monitor and cancel tasks *even while they are actively running*, not just when they are pending in the queue.
+    *   **Cooperative Cancellation:** Both parent tasks (like `run_analysis_task` and `run_clustering_task`) and their child tasks (like `analyze_album_task` and `run_clustering_batch_task`) periodically check their own status and the status of their parent in the database.
+    *   If a task sees that its own status has been set to `REVOKED` (e.g., by a user action through the UI) or if its parent task has been revoked or has failed, it will gracefully stop its current operation, perform necessary cleanup (like removing temporary files), and update its status accordingly.
+    *   This is more sophisticated than typical queue systems where cancellation might only prevent a task from starting. Here, long-running iterations or album processing loops can be interrupted mid-way.
+
+5.  **Status Tracking:**
+    *   Throughout their lifecycle, tasks frequently update their progress, status (e.g., `STARTED`, `PROGRESS`, `SUCCESS`, `FAILURE`, `REVOKED`), and detailed logs into the PostgreSQL database. The Flask application reads this information to display real-time updates on the web UI.
+    *   RQ's job metadata is also updated, but the primary source of truth for detailed status and logs is the application's database.
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
@@ -258,32 +375,41 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ### Clustering task
 
-**TBD**
+![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/clustering_task.png "Audio clustering and task status.")
 
 ## **Key Technologies**
 
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
-* **Flask:** Provides the lightweight web interface for user interaction and API endpoints.  
-* **Redis Queue (RQ):** A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.  
+* [**Flask:**](https://flask.palletsprojects.com/) Provides the lightweight web interface for user interaction and API endpoints.  
+* [**Redis Queue (RQ):**](https://redis.io/glossary/redis-queue/) A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.  
 * [**Essentia-tensorflow**](https://essentia.upf.edu/) An open-source library for audio analysis, feature extraction, and music information retrieval. It's used here for:  
   * MonoLoader: Loading and resampling audio files.  
-  * RhythmExtractor2013: Extracting tempo information.  
+  * RhythmExtractor2013: Extracting tempo information.
   * KeyExtractor: Determining the musical key and scale.  
   * TensorflowPredictMusiCNN & TensorflowPredict2D: Leveraging pre-trained TensorFlow models (like MusiCNN) for generating rich audio embeddings and predicting mood tags.  
-* [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:  
+* [**Essentia Models**](https://essentia.upf.edu/models.html) Leverages pre-trained models for feature extraction and prediction. More details and models.
+    *   **Embedding Model:**
+        *   `msd-musicnn-1.pb`: Used with `TensorflowPredictMusiCNN` for generating rich audio embeddings that capture high-level semantic information and complex sonic characteristics.
+    *   **Classification Models:** Used with `TensorflowPredict2D` for predicting various musical attributes from the generated embeddings:
+        *   `msd-msd-musicnn-1.pb`: For primary tag/genre prediction (e.g., 'rock', 'pop', 'electronic').
+        *   `danceability-msd-musicnn-1.pb`: For predicting danceability.
+        *   `mood_aggressive-msd-musicnn-1.pb`: For predicting aggressiveness.
+        *   `mood_happy-msd-musicnn-1.pb`: For predicting happiness.
+        *   `mood_party-msd-musicnn-1.pb`: For predicting party mood.
+        *   `mood_relaxed-msd-musicnn-1.pb`: For predicting relaxed mood.
+        *   `mood_sad-msd-musicnn-1.pb`: For predicting sadness.
+* [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
-* **PostgreSQL:** A powerful, open-source relational database used for persisting:  
+* [**PostgreSQL:**](https://www.postgresql.org/) A powerful, open-source relational database used for persisting:  
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  
   * Task status for the web interface.  
-* **Ollama:** Enables self-hosting of various open-source Large Language Models (LLMs) for tasks like intelligent playlist naming.
-* **Google Gemini API:** Provides access to Google's powerful generative AI models, used as an alternative for intelligent playlist naming.
+* [**Ollama**](https://ollama.com/) Enables self-hosting of various open-source Large Language Models (LLMs) for tasks like intelligent playlist naming.
+* [**Google Gemini API:**](https://ai.google.dev/) Provides access to Google's powerful generative AI models, used as an alternative for intelligent playlist naming.
 * [**Jellyfin API**](https://jellyfin.org/) Integrates directly with your Jellyfin server to fetch media, download audio, and create/manage playlists.  
-* **MusiCNN embedding model** – Developed as part of the [AcousticBrainz project](https://acousticbrainz.org/), based on a convolutional neural network trained for music tagging and embedding.  
-* **Mood prediction model** – A TensorFlow-based model trained to map MusiCNN embeddings to mood probabilities (you must provide or train your own compatible model).  
-* **Docker / OCI-compatible Containers** – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
+* [**Docker / OCI-compatible Containers**](https://www.docker.com/) – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
 
 ## **Additional Documentation**
 
@@ -305,3 +431,17 @@ This MVP lays the groundwork for further development:
 
 Contributions, issues, and feature requests are welcome\!  
 This is an ALPHA early release, so expect bugs or functions that are still not implemented.
+
+If you want to clone this repository remember that **GIT LARGE FILE** is used for the essentia-tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
+
+```
+sudo apt-get install git-lfs
+git clone --branch devel https://github.com/NeptuneHub/AudioMuse-AI.git
+```
+
+The large file was created in this way (in case you need to add more):
+```
+git lfs install
+git lfs track "*.pb"
+git add .gitattributes
+```
