@@ -1158,22 +1158,26 @@ def _perform_single_clustering_iteration(
         num_samples_for_metrics = data_for_clustering_current.shape[0]
 
         if num_actual_clusters >= 2 and num_actual_clusters < num_samples_for_metrics:
-            try:
-                s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
-                normalized_silhouette = (s_score + 1.0) / 2.0  # Normalize to [0, 1]
-            except ValueError as e_sil:
-                print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
+            if SCORE_WEIGHT_SILHOUETTE > 0:
+                try:
+                    s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
+                    normalized_silhouette = (s_score + 1.0) / 2.0  # Normalize to [0, 1]
+                except ValueError as e_sil:
+                    print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
 
-            try:
-                db_score = davies_bouldin_score(data_for_clustering_current, labels)
-                normalized_davies_bouldin = 1.0 / (1.0 + db_score) # Lower is better, so invert; maps to (0, 1]
-            except ValueError as e_db:
-                print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin score error: {e_db}")
-            try:
-                ch_score = calinski_harabasz_score(data_for_clustering_current, labels)
-                normalized_calinski_harabasz = (1.0 - 1.0 / (1.0 + np.log1p(ch_score))) if ch_score > 0 else 0.0 # Maps positive CH to (0,1)
-            except ValueError as e_ch:
-                print(f"{log_prefix} Iteration {run_idx}: Calinski-Harabasz score error: {e_ch}")
+            if SCORE_WEIGHT_DAVIES_BOULDIN > 0:
+                try:
+                    db_score = davies_bouldin_score(data_for_clustering_current, labels)
+                    normalized_davies_bouldin = 1.0 / (1.0 + db_score) # Lower is better, so invert; maps to (0, 1]
+                except ValueError as e_db:
+                    print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin score error: {e_db}")
+
+            if SCORE_WEIGHT_CALINSKI_HARABASZ > 0:
+                try:
+                    ch_score = calinski_harabasz_score(data_for_clustering_current, labels)
+                    normalized_calinski_harabasz = (1.0 - 1.0 / (1.0 + np.log1p(ch_score))) if ch_score > 0 else 0.0 # Maps positive CH to (0,1)
+                except ValueError as e_ch:
+                    print(f"{log_prefix} Iteration {run_idx}: Calinski-Harabasz score error: {e_ch}")
         del data_for_clustering_current # Free memory
 
         if labels is None or len(set(labels) - {-1}) == 0:

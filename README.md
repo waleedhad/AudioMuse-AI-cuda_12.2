@@ -372,7 +372,7 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ### Clustering task
 
-**TBD**
+![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/clustering_task.png "Audio clustering and task status.")
 
 ## **Key Technologies**
 
