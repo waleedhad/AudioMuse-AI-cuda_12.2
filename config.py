@@ -16,7 +16,7 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 40
 MAX_SONGS_PER_ARTIST = 3
-NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "2000")) # Convert to int
+NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "3000")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
