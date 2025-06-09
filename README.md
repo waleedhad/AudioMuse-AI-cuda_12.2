@@ -4,7 +4,9 @@ AudioMuse-AI is a Dockerized environment that brings smart playlist generation t
 
 The main scope of this application is testing the clustering algorithm. A front-end is provided for easy use. You can also find the stand-alone Python script in the Jellyfin-Essentia-Playlist repo.
 
-If you want a brief introduction to the application's functionality, have a look at the presentation slides in [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/main/docs/slide.pdf).
+Addional important information on this project can also be found here:
+* Brief slide presentation: [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/main/docs/slide.pdf).
+* Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
 
 
 **IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
@@ -94,18 +96,19 @@ For a more stable use, I suggest editing the deployment container image to use s
 These are the parameters accepted for this script. You can pass them as environment variables using, for example, /deployment/deployment.yaml in this repository.
 
 The **mandatory** parameter that you need to change from the example are this:
-| Parameter               | Description                                 | Default Value                       |
-| ----------------------- | ------------------------------------------- | ----------------------------------- |
-| `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`            |
-| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.                | *(N/A - from Secret)*                     |
-| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.              | *(N/A - from Secret)*                     |
-| `POSTGRES_USER`         | (Required) PostgreSQL username.             | *(N/A - from Secret)*                     |
-| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.             | *(N/A - from Secret)*                     |
-| `POSTGRES_DB`           | (Required) PostgreSQL database name.        | *(N/A - from Secret)*                     |
-| `POSTGRES_HOST`         | (Required) PostgreSQL host.                 | `postgres-service.playlist`               |
-| `POSTGRES_PORT`         | (Required) PostgreSQL port.                 | `5432`                                    |
-| `REDIS_URL`             | (Required) URL for Redis.                   | `redis://redis-service.playlist:6379/0`   |
-| `GEMINI_API_KEY`        | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)*                     |
+
+| Parameter          | Description                                    | Default Value                     |
+|--------------------|------------------------------------------------|-----------------------------------|
+| `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://YOUR_JELLYFIN_IP:8096`    |
+| `JELLYFIN_USER_ID` | (Required) Jellyfin User ID.                   | *(N/A - from Secret)* |
+| `JELLYFIN_TOKEN`   | (Required) Jellyfin API Token.                 | *(N/A - from Secret)* |
+| `POSTGRES_USER`    | (Required) PostgreSQL username.                | *(N/A - from Secret)* |
+| `POSTGRES_PASSWORD`| (Required) PostgreSQL password.                | *(N/A - from Secret)* |
+| `POSTGRES_DB`      | (Required) PostgreSQL database name.           | *(N/A - from Secret)* |
+| `POSTGRES_HOST`    | (Required) PostgreSQL host.                    | `postgres-service.playlist`       |
+| `POSTGRES_PORT`    | (Required) PostgreSQL port.                    | `5432`                            |
+| `REDIS_URL`        | (Required) URL for Redis.                      | `redis://redis-service.playlist:6379/0` |
+| `GEMINI_API_KEY`   | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)* |
 
 These parameter can be leave as it is:
 
