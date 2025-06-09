@@ -14,10 +14,11 @@ creative_prompt_template = (
     "You are a highly creative music curator. Your SOLE task is to generate 1 concise (15-35 chars) playlist name.\n"
     "The name MUST be evocative, representative of the provided songs/features, and use real English words with ONLY standard ASCII (a-z, A-Z, 0-9, spaces, and - & ' ! . , ? ( ) [ ]).\n"
     "No special fonts or emojis.\n"
-    "Input Features to consider: '{feature1}', '{feature2}', '{feature3}'. Analyze the provided song list for its core vibe.\n"
-    "{additional_features_description}" # Placeholder for the other features description (danceable, aggressive, etc.)
-    "{energy_description}" # New placeholder for energy description
-    "The playlist name should suggest an activity, mood, or context, similar to these:\n\n" # Emphasizes the style
+    "CRITICAL: The most important features for naming are the genres: '{feature1}', '{feature2}', '{feature3}'. The playlist name MUST incorporate at least one of these genres. Analyze the provided song list for its core vibe.\n"
+    "Input Mood feat to consider: {additional_features_description}, use this mainly to say if something is relax, or for party or similar.\n"
+    "Input Energy to consider: {energy_description} use this to say if the music has slow energy or high energy (0 min, 1 max).\n"
+    "Mood and Energy have less importance than the genres.\n"
+    "The playlist name should suggest an activity, mood, or context, similar to these:\n\n"
     "* GOOD EXAMPLES: 'Sunshine Pop Vibrations' (Concept: cheerful, energetic pop for sunny days)\n"
     "* GOOD EXAMPLES: 'Workout Power Hour Mix' (Concept: energetic rock/dance for intense workouts)\n"
     "* GOOD EXAMPLES: 'Relaxing Evening Melodies' (Concept: calming songs for a peaceful evening)\n\n"
@@ -25,7 +26,7 @@ creative_prompt_template = (
     "* BAD EXAMPLES: 'Ambient Electronic Space - Electric Soundscapes - Emotional Waves' (Too long/descriptive)\n"
     "* BAD EXAMPLES: 'Blues Rock Fast Tracks' (Too direct/literal, not evocative enough)\n"
     "* BAD EXAMPLES: '𝑯𝒘𝒆 𝒂𝒓𝒐𝒏𝒊 𝒅𝒆𝒕𝒔' (Non-standard characters)\n\n"
-    "CRITICAL: Your response MUST be ONLY the single playlist name. No explanations, no 'Playlist Name:', no numbering, no extra text or formatting whatsoever.\n" # Made this instruction more direct and emphatic
+    "CRITICAL: Your response MUST be ONLY the single playlist name. No explanations, no 'Playlist Name:', no numbering, no extra text or formatting whatsoever.\n"
 )
 
 def clean_playlist_name(name):
