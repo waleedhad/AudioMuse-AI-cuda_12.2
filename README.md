@@ -18,6 +18,7 @@ The main scope of this application is testing the clustering algorithm. A front-
   - [1. K-Means](#1-k-means)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
+  - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Screenshots](#screenshots)
   - [Analysis task](#analysis-task)
@@ -90,16 +91,16 @@ These are the parameters accepted for this script. You can pass them as environm
 The **mandatory** parameter that you need to change from the example are this:
 | Parameter               | Description                                 | Default Value                       |
 | ----------------------- | ------------------------------------------- | ----------------------------------- |
-| `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`      |
-| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.| *(N/A - from Secret)*    |
-| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.| *(N/A - from Secret)*    |
-| `POSTGRES_USER`         | (Required) PostgreSQL username.| *(N/A - from Secret)*    |
-| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.| *(N/A - from Secret)*    |
-| `POSTGRES_DB`           | (Required) PostgreSQL database name.| *(N/A - from Secret)*    |
-| `POSTGRES_HOST`         | (Required) PostgreSQL host.| `postgres-service.playlist` |
-| `POSTGRES_PORT`         | (Required) PostgreSQL port.| `5432`                      |
-| `REDIS_URL`             | (Required) URL for Redis.| `redis://redis-service.playlist:6379/0` |
-| `GEMINI_API_KEY`        | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)* |
+| `JELLYFIN_URL`          | (Required) Your Jellyfin server's full URL  | `http://YOUR_JELLYFIN_IP:8096`            |
+| `JELLYFIN_USER_ID`      | (Required) Jellyfin User ID.                | *(N/A - from Secret)*                     |
+| `JELLYFIN_TOKEN`        | (Required) Jellyfin API Token.              | *(N/A - from Secret)*                     |
+| `POSTGRES_USER`         | (Required) PostgreSQL username.             | *(N/A - from Secret)*                     |
+| `POSTGRES_PASSWORD`     | (Required) PostgreSQL password.             | *(N/A - from Secret)*                     |
+| `POSTGRES_DB`           | (Required) PostgreSQL database name.        | *(N/A - from Secret)*                     |
+| `POSTGRES_HOST`         | (Required) PostgreSQL host.                 | `postgres-service.playlist`               |
+| `POSTGRES_PORT`         | (Required) PostgreSQL port.                 | `5432`                                    |
+| `REDIS_URL`             | (Required) URL for Redis.                   | `redis://redis-service.playlist:6379/0`   |
+| `GEMINI_API_KEY`        | (Required if `AI_MODEL_PROVIDER` is GEMINI) Your Google Gemini API Key. | *(N/A - from Secret)*                     |
 
 These parameter can be leave as it is:
 
@@ -110,40 +111,54 @@ These parameter can be leave as it is:
 
 This are the default parameters on wich the analysis or clustering task will be lunched. You will be able to change them to another value directly in the front-end:
 
-| Parameter               | Description                                 | Default Value                       |
-| ----------------------- | ------------------------------------------- | ----------------------------------- |
-| **Analysis General** |                                                                             |                    |
-| `NUM_RECENT_ALBUMS`       | Number of recent albums to scan (0 for all).                                | `2000`   |
-| `TOP_N_MOODS`             | Number of top moods per track for feature vector.                           | `5`      |
-| **Clustering General** |                                                                             |                    |
-| `CLUSTER_ALGORITHM`       | Default clustering: `kmeans`, `dbscan`, `gmm`.                              | `kmeans` |
-| `MAX_SONGS_PER_CLUSTER`   | Max songs per generated playlist segment.                                   | `40`     |
-| `MAX_SONGS_PER_ARTIST`    | Max songs from one artist per cluster.                                      | `3`      |
-| `MAX_DISTANCE`            | Normalized distance threshold for tracks in a cluster.                      | `0.5`    |
-| `CLUSTERING_RUNS`         | Iterations for Monte Carlo evolutionary search.                             | `1000`   |
-| **K-Means Ranges** |                                                                             |                    |
-| `NUM_CLUSTERS_MIN`        | Min $K$ for K-Means.                                                        | `20`     |
-| `NUM_CLUSTERS_MAX`        | Max $K$ for K-Means.                                                        | `60`     |
-| **DBSCAN Ranges** |                                                                             |                    |
-| `DBSCAN_EPS_MIN`          | Min epsilon for DBSCAN.                                                     | `0.1`    |
-| `DBSCAN_EPS_MAX`          | Max epsilon for DBSCAN.                                                     | `0.5`    |
-| `DBSCAN_MIN_SAMPLES_MIN`  | Min `min_samples` for DBSCAN.                                               | `5`      |
-| `DBSCAN_MIN_SAMPLES_MAX`  | Max `min_samples` for DBSCAN.                                               | `20`     |
-| **GMM Ranges** |                                                                             |                    |
-| `GMM_N_COMPONENTS_MIN`    | Min components for GMM.                                                     | `20`     |
-| `GMM_N_COMPONENTS_MAX`    | Max components for GMM.                                                     | `60`     |
-| `GMM_COVARIANCE_TYPE`     | Covariance type for GMM (task uses `'full'`).                               | `full`   |
-| **PCA Ranges** |                                                                             |                    |
-| `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
-| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
-| **AI Naming (*)** |                                                                             |                    |
-| `AI_MODEL_PROVIDER`       | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                 | `GEMINI` |
-| `OLLAMA_SERVER_URL`       | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).            | `http://<your-ip>11434/api/generate` |
-| `OLLAMA_MODEL_NAME`       | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                     | `mistral:7b` |
-| `GEMINI_MODEL_NAME`       | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                     | `gemini-1.5-flash-latest` |
-| `GEMINI_API_CALL_DELAY_SECONDS` | Seconds to wait between Gemini API calls to respect rate limits.          | `7`      |
-| `PCA_COMPONENTS_MIN`      | Min PCA components (0 to disable).                                          | `0`      |
-| `PCA_COMPONENTS_MAX`      | Max PCA components.                                                         | `5`     |
+| Parameter                                | Description                                                                  | Default Value                        |
+|------------------------------------------|------------------------------------------------------------------------------|--------------------------------------|
+| **Analysis General**                     |                                                                              |                                      |
+| `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `2000`                               |
+| `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
+| **Clustering General**                   |                                                                              |                                      |
+| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
+| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `40`                                 |
+| `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
+| `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
+| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
+| **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
+| `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
+| `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
+| `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
+| `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
+| `MUTATION_FLOAT_ABS_DELTA`               | Max absolute change for float parameter mutation.                          | `0.05`                               |
+| `MUTATION_KMEANS_COORD_FRACTION`         | Fractional change for KMeans centroid coordinates.                       | `0.05`                               |
+| `SCORE_WEIGHT_DIVERSITY`                 | Weight for inter-playlist mood diversity.                                  | `0.6`                                |
+| `SCORE_WEIGHT_PURITY`                    | Weight for intra-playlist mood consistency.                                | `0.4`                                |
+| `SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY`   | Weight for inter-playlist 'other feature' diversity.                       | `0.3`                                |
+| `SCORE_WEIGHT_OTHER_FEATURE_PURITY`      | Weight for intra-playlist 'other feature' consistency.                     | `0.2`                                |
+| `SCORE_WEIGHT_SILHOUETTE`                | Weight for Silhouette Score (cluster separation).                          | `0.6`                                |
+| `SCORE_WEIGHT_DAVIES_BOULDIN`            | Weight for Davies-Bouldin Index (cluster separation).                    | `0.0`                                |
+| `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
+| **K-Means Ranges**                       |                                                                              |                                      |
+| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `20`                                 |
+| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `60`                                 |
+| **DBSCAN Ranges**                        |                                                                              |                                      |
+| `DBSCAN_EPS_MIN`                         | Min epsilon for DBSCAN.                                                    | `0.1`                                |
+| `DBSCAN_EPS_MAX`                         | Max epsilon for DBSCAN.                                                    | `0.5`                                |
+| `DBSCAN_MIN_SAMPLES_MIN`                 | Min `min_samples` for DBSCAN.                                              | `5`                                  |
+| `DBSCAN_MIN_SAMPLES_MAX`                 | Max `min_samples` for DBSCAN.                                              | `20`                                 |
+| **GMM Ranges**                           |                                                                              |                                      |
+| `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `20`                                 |
+| `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `60`                                 |
+| `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
+| **PCA Ranges**                           |                                                                              |                                      |
+| `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
+| `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `5`                                  |
+| **AI Naming (*)**                        |                                                                              |                                      |
+| `AI_MODEL_PROVIDER`                      | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                | `GEMINI`                             |
+| `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>11434/api/generate` |
+| `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
+| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
+| `GEMINI_API_CALL_DELAY_SECONDS`          | Seconds to wait between Gemini API calls to respect rate limits.         | `7`                                  |
+| `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
+| `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `5`                                  |
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
 
@@ -236,6 +251,30 @@ Here's an explanation of the pros and cons of the different algorithms:
 * **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
 
 **Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 1000\) helps the integrated evolutionary algorithm to find a good solution.
+
+### Montecarlo Evolutionary Approach
+
+AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisticated Monte Carlo evolutionary approach, managed within `tasks.py`, to discover high-quality playlist configurations. Here's a high-level overview:
+
+1.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 1000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
+
+2.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
+    *   **Elite Solutions:** The parameter sets from the best-performing runs (the "elites") are remembered.
+    *   **Exploitation & Mutation:** For subsequent runs, there's a chance (`EXPLOITATION_PROBABILITY_CONFIG`) that instead of purely random parameters, the system will take an elite solution and "mutate" its parameters slightly. This involves making small, random adjustments (controlled by `MUTATION_INT_ABS_DELTA`, `MUTATION_FLOAT_ABS_DELTA`, etc.) to the elite's parameters, effectively exploring the "neighborhood" of good solutions to potentially find even better ones.
+
+3.  **Comprehensive Scoring:** Each clustering outcome is evaluated using a composite score. This score is a weighted sum of several factors, designed to balance different aspects of playlist quality:
+    *   **Playlist Diversity:** Measures how varied the predominant characteristics (e.g., moods, danceability) are across all generated playlists.
+    *   **Playlist Purity:** Assesses how well the songs within each individual playlist align with that playlist's central theme or characteristic.
+    *   **Internal Clustering Metrics:** Standard metrics evaluate the geometric quality of the clusters:
+        *   **Silhouette Score:** How distinct are the clusters?
+        *   **Davies-Bouldin Index:** How well-separated are the clusters relative to their intra-cluster similarity?
+        *   **Calinski-Harabasz Index:** Ratio of between-cluster to within-cluster dispersion.
+
+4.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa.
+
+5.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
+
+This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
 
 ### **AI Playlist Naming**
 
