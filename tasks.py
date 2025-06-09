@@ -1867,6 +1867,9 @@ def run_clustering_task(
                             song_list_for_ai,
                             centroid_features_for_ai) # Pass the comprehensive centroid features
 
+                        # Debug print for the raw AI-generated name string
+                        print(f"{log_prefix_main_task_ai} Raw AI output for '{original_name}': '{ai_generated_name_str}'")
+
                         current_playlist_final_name = original_name
                         # Check if the generated name is a valid name (not an error or skip message)
                         if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("AI Naming Skipped"):
