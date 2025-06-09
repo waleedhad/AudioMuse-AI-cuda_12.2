@@ -4,7 +4,7 @@ AudioMuse-AI is a Dockerized environment that brings smart playlist generation t
 
 The main scope of this application is testing the clustering algorithm. A front-end is provided for easy use. You can also find the stand-alone Python script in the Jellyfin-Essentia-Playlist repo.
 
-If you want a brief introduction to the application's functionality, have a look at the presentation slides in [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/devel/docs/slide.pdf).
+If you want a brief introduction to the application's functionality, have a look at the presentation slides in [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/docs/slide.pdf).
 
 
 **IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
