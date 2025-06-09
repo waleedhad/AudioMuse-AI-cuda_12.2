@@ -378,26 +378,35 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
-* **Flask:** Provides the lightweight web interface for user interaction and API endpoints.  
-* **Redis Queue (RQ):** A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.  
+* [**Flask:**](https://flask.palletsprojects.com/) Provides the lightweight web interface for user interaction and API endpoints.  
+* [**Redis Queue (RQ):**](https://redis.io/glossary/redis-queue/) A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.  
 * [**Essentia-tensorflow**](https://essentia.upf.edu/) An open-source library for audio analysis, feature extraction, and music information retrieval. It's used here for:  
   * MonoLoader: Loading and resampling audio files.  
-  * RhythmExtractor2013: Extracting tempo information.  
+  * RhythmExtractor2013: Extracting tempo information.
   * KeyExtractor: Determining the musical key and scale.  
   * TensorflowPredictMusiCNN & TensorflowPredict2D: Leveraging pre-trained TensorFlow models (like MusiCNN) for generating rich audio embeddings and predicting mood tags.  
-* [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:  
+* [**Essentia Models**](https://essentia.upf.edu/models.html) Leverages pre-trained models for feature extraction and prediction. More details and models.
+    *   **Embedding Model:**
+        *   `msd-musicnn-1.pb`: Used with `TensorflowPredictMusiCNN` for generating rich audio embeddings that capture high-level semantic information and complex sonic characteristics.
+    *   **Classification Models:** Used with `TensorflowPredict2D` for predicting various musical attributes from the generated embeddings:
+        *   `msd-msd-musicnn-1.pb`: For primary tag/genre prediction (e.g., 'rock', 'pop', 'electronic').
+        *   `danceability-msd-musicnn-1.pb`: For predicting danceability.
+        *   `mood_aggressive-msd-musicnn-1.pb`: For predicting aggressiveness.
+        *   `mood_happy-msd-musicnn-1.pb`: For predicting happiness.
+        *   `mood_party-msd-musicnn-1.pb`: For predicting party mood.
+        *   `mood_relaxed-msd-musicnn-1.pb`: For predicting relaxed mood.
+        *   `mood_sad-msd-musicnn-1.pb`: For predicting sadness.
+* [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
-* **PostgreSQL:** A powerful, open-source relational database used for persisting:  
+* [**PostgreSQL:**](https://www.postgresql.org/) A powerful, open-source relational database used for persisting:  
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  
   * Task status for the web interface.  
-* **Ollama:** Enables self-hosting of various open-source Large Language Models (LLMs) for tasks like intelligent playlist naming.
-* **Google Gemini API:** Provides access to Google's powerful generative AI models, used as an alternative for intelligent playlist naming.
+* [**Ollama**](https://ollama.com/) Enables self-hosting of various open-source Large Language Models (LLMs) for tasks like intelligent playlist naming.
+* [**Google Gemini API:**](https://ai.google.dev/) Provides access to Google's powerful generative AI models, used as an alternative for intelligent playlist naming.
 * [**Jellyfin API**](https://jellyfin.org/) Integrates directly with your Jellyfin server to fetch media, download audio, and create/manage playlists.  
-* **MusiCNN embedding model** – Developed as part of the [AcousticBrainz project](https://acousticbrainz.org/), based on a convolutional neural network trained for music tagging and embedding.  
-* **Mood prediction model** – A TensorFlow-based model trained to map MusiCNN embeddings to mood probabilities (you must provide or train your own compatible model).  
-* **Docker / OCI-compatible Containers** – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
+* [**Docker / OCI-compatible Containers**](https://www.docker.com/) – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
 
 ## **Additional Documentation**
 
