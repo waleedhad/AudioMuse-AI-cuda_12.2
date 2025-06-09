@@ -14,12 +14,14 @@ The main scope of this application is testing the clustering algorithm. A front-
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
 - [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
 - [Workflow Overview](#workflow-overview)
+- [Analysis Algorithm Deep Dive](#analysis-algorithm-deep-dive)
 - [Clustering Algorithm Deep Dive](#clustering-algorithm-deep-dive)
   - [1. K-Means](#1-k-means)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
   - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
   - [AI Playlist Naming](#ai-playlist-naming)
+- [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Screenshots](#screenshots)
   - [Analysis task](#analysis-task)
   - [Clustering task](#clustering-task)
@@ -214,15 +216,62 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 
 This is the main workflow of how this algorithm works. For an easy way to use it, you will have a front-end reachable at **your\_ip:8000** with buttons to start/cancel the analysis (it can take hours depending on the number of songs in your Jellyfin library) and a button to create the playlist.
 
-* **Initiate from Frontend:** Start an analysis via the Flask web UI.  
-* **Job Queued on Redis:** Task is sent to Redis Queue.  
-* **RQ Worker Processes:**  
-  * Multiple worker containers are supported for parallel processing. It is suggested to have at least 2 workers (even on the same machine) because one runs the main process and the other runs subprocesses (so with only one worker, it can get stuck).  
-  * Fetch metadata and download audio from Jellyfin.  
-  * Analyze tracks using Essentia and TensorFlow.  
-  * Store results in PostgreSQL.  
-* **Flexible Clustering:** Re-cluster tracks anytime using stored analysis data.  
-* **Jellyfin Playlist Creation:** Create playlists based on clustering results directly in Jellyfin.
+*   **User Initiation:** Start analysis or clustering jobs via the Flask web UI.
+*   **Task Queuing:** Jobs are sent to Redis Queue for asynchronous background processing.
+*   **Parallel Worker Execution:**
+    *   Multiple RQ workers (at least 2 recommended) process tasks in parallel. Main tasks (e.g., full library analysis, entire evolutionary clustering process) often spawn and manage child tasks (e.g., per-album analysis, batches of clustering iterations).
+    *   **Analysis Phase:**
+        *   Workers fetch metadata and download audio from Jellyfin, processing albums individually.
+        *   Essentia and TensorFlow models analyze tracks for features (tempo, key, energy) and predictions (genres, moods, etc.).
+        *   Analysis results are saved to PostgreSQL.
+    *   **Clustering Phase:**
+        *   An evolutionary algorithm performs numerous clustering runs (e.g., K-Means, DBSCAN, or GMM) on the analyzed data. It explores different parameters to find optimal playlist structures based on a comprehensive scoring system.
+*   **Playlist Generation & Naming:**
+    *   Playlists are formed from the best clustering solution found by the evolutionary process.
+    *   Optionally, AI models (Ollama or Gemini) can be used to generate creative, human-readable names for these playlists.
+    *   Finalized playlists are created directly in your Jellyfin library.
+*   **Advanced Task Management:**
+    *   The web UI provides real-time monitoring of task progress, including main and sub-tasks.
+    *   A key feature is the ability to cancel tasks (both parent and child) even while they are actively running, offering robust control over long processes. This is more advanced than typical queue systems where cancellation might only affect pending tasks.
+
+## Analysis Algorithm Deep Dive
+
+The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously extracts a rich set of features from each track. This process is foundational for the subsequent clustering and playlist generation.
+1.  **Audio Loading & Preprocessing:**
+    *   Tracks are first downloaded from your Jellyfin library to a temporary local directory. Essentia's `MonoLoader` is then employed to load the audio.
+    *   A crucial preprocessing step involves resampling the audio to a consistent **16000 Hz** sample rate with a `resampleQuality` of 4. This standardization is vital because the subsequent TensorFlow models are trained on and expect audio at this specific sample rate, ensuring accurate feature extraction.
+
+2.  **Core Feature Extraction (Essentia):**
+    *   **Tempo:** The `RhythmExtractor2013` algorithm analyzes the rhythmic patterns in the audio to estimate the track's tempo, expressed in Beats Per Minute (BPM).
+    *   **Key & Scale:** The `KeyExtractor` algorithm identifies the predominant musical key (e.g., C, G#, Bb) and scale (major or minor) of the track. This provides insights into its harmonic structure.
+    *   **Energy:** Essentia's `Energy` function calculates the raw total energy of the audio signal. However, to make this feature comparable across tracks of varying lengths and overall loudness, the system computes and stores the **average energy per sample** (total energy divided by the number of samples). This normalized energy value offers a more stable representation of the track's perceived loudness or intensity.
+
+3.  **Embedding Generation (TensorFlow & Essentia):**
+    *   **MusiCNN Embeddings:** The cornerstone of the audio representation is a 200-dimensional embedding vector. This vector is generated using `TensorflowPredictMusiCNN` with the pre-trained model `msd-musicnn-1.pb` (specifically, the output from the `model/dense/BiasAdd` layer). MusiCNN is a Convolutional Neural Network (CNN) architecture that has been extensively trained on large music datasets (like the Million Song Dataset) for tasks such as music tagging. The resulting embedding is a dense, numerical summary that captures high-level semantic information and complex sonic characteristics of the track, going beyond simple acoustic features.
+
+4.  **Prediction Models (TensorFlow & Essentia):**
+    The rich MusiCNN embeddings serve as the input to several specialized `TensorflowPredict2D` models, each designed to predict specific characteristics of the music:
+    *   **Primary Tag/Genre Prediction:**
+        *   Model: `msd-msd-musicnn-1.pb`
+        *   Output: This model produces a vector of probability scores. Each score corresponds to a predefined tag or genre from a list (defined by `MOOD_LABELS` in `config.py`, including labels like 'rock', 'pop', 'electronic', 'jazz', 'chillout', '80s', 'instrumental', etc.). These scores indicate the likelihood of each tag/genre being applicable to the track.
+    *   **Other Feature Predictions:** The `predict_other_models` function leverages a suite of distinct `TensorflowPredict2D` models, each targeting a specific musical attribute. These models also take the MusiCNN embedding as input and typically use a `model/Softmax` output layer:
+        *   `danceable`: Predicted using `danceability-msd-musicnn-1.pb`.
+        *   `aggressive`: Predicted using `mood_aggressive-msd-musicnn-1.pb`.
+        *   `happy`: Predicted using `mood_happy-msd-musicnn-1.pb`.
+        *   `party`: Predicted using `mood_party-msd-musicnn-1.pb`.
+        *   `relaxed`: Predicted using `mood_relaxed-msd-musicnn-1.pb`.
+        *   `sad`: Predicted using `mood_sad-msd-musicnn-1.pb`.
+        *   Output: Each of these models outputs a probability score (typically the probability of the positive class in a binary classification, e.g., the likelihood the track is 'danceable'). This provides a nuanced understanding of various moods and characteristics beyond the primary tags.
+
+5.  **Feature Vector Preparation for Clustering (`score_vector` function):**
+    Before the actual clustering can occur, all the extracted and predicted features are meticulously assembled and transformed into a single numerical vector for each track. This is a critical step for machine learning algorithms:
+    *   **Normalization:** Tempo and the calculated average energy are normalized to a 0-1 range using configured minimum/maximum values (`TEMPO_MIN_BPM`, `TEMPO_MAX_BPM`, `ENERGY_MIN`, `ENERGY_MAX`). This ensures these features have a comparable scale.
+    *   **Normalization:**
+        *   Tempo (BPM) and the calculated average energy per sample are normalized to a 0-1 range. This is achieved by scaling them based on predefined minimum and maximum values (e.g., `TEMPO_MIN_BPM = 40.0`, `TEMPO_MAX_BPM = 200.0`, `ENERGY_MIN = 0.01`, `ENERGY_MAX = 0.15` from `config.py`). Normalization ensures that these features, which might have vastly different original scales, contribute more equally during the initial stages of vector construction.
+    *   **Vector Assembly:**
+        *   The final feature vector for each track is constructed by concatenating: the normalized tempo, the normalized average energy, the vector of primary tag/genre probability scores, and the vector of other predicted feature scores (danceability, aggressive, etc.). This creates a comprehensive numerical profile of the track.
+    *   **Standardization:**
+        *   This complete feature vector is then standardized using `sklearn.preprocessing.StandardScaler`. Standardization transforms the data for each feature to have a zero mean and unit variance across the entire dataset. This step is particularly crucial for distance-based clustering algorithms like K-Means. It prevents features with inherently larger numerical ranges from disproportionately influencing the distance calculations, ensuring that all features contribute more equitably to the clustering process. The mean and standard deviation (scale) computed by the `StandardScaler` for each feature are saved. These saved values are essential later for inverse transforming cluster centroids back to an interpretable scale, which aids in understanding the characteristics of each generated cluster.
 
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
 
@@ -286,6 +335,32 @@ After the clustering algorithm has identified groups of similar songs, AudioMuse
 4.  **Output Processing:** The AI's response is cleaned to ensure it meets the formatting and length constraints before being used as the final playlist name (with the `_automatic` suffix appended later by the task runner).
 
 This step adds a layer of creativity to the purely data-driven clustering process, making the generated playlists more appealing and easier to understand at a glance. The choice of AI provider and model is configurable via environment variables and the frontend.
+
+## Concurrency Algorithm Deep Dive
+
+AudioMuse-AI leverages Redis Queue (RQ) to manage and execute long-running processes like audio analysis and evolutionary clustering in parallel across multiple worker nodes. This architecture, primarily orchestrated within `tasks.py`, is designed for scalability and robust task management.
+
+1.  **Task Queuing with Redis Queue (RQ):**
+    *   When a user initiates an analysis or clustering job via the web UI, the main Flask application doesn't perform the heavy lifting directly. Instead, it enqueues a task (e.g., `run_analysis_task` or `run_clustering_task`) into a Redis queue.
+    *   Separate RQ worker processes, which can be scaled independently (e.g., running multiple `audiomuse-ai-worker` pods in Kubernetes), continuously monitor this queue. When a new task appears, an available worker picks it up and begins execution.
+
+2.  **Parallel Processing on Multiple Workers:**
+    *   This setup allows multiple tasks to be processed concurrently. For instance, if you have several RQ workers, they can simultaneously analyze different albums or run different batches of clustering iterations. This significantly speeds up the overall processing time, especially for large music libraries or extensive clustering runs.
+
+3.  **Hierarchical Task Structure & Batching for Efficiency:**
+    To minimize the overhead associated with frequent queue interactions (writing/reading task status, small job processing), tasks are structured hierarchically and batched:
+    *   **Analysis Tasks:** The `run_analysis_task` acts as a parent task. It fetches a list of albums and then enqueues individual `analyze_album_task` jobs for each album. Each `analyze_album_task` processes all tracks within that single album. This means one "album analysis" job in the queue corresponds to the analysis of potentially many songs, reducing the number of very small, granular tasks.
+    *   **Clustering Tasks:** Similarly, the main `run_clustering_task` orchestrates the evolutionary clustering. It breaks down the total number of requested clustering runs (e.g., 1000) into smaller `run_clustering_batch_task` jobs. Each batch task (e.g., `run_clustering_batch_task`) then executes a subset of these iterations (e.g., 10 iterations per batch). This strategy avoids enqueuing thousands of tiny individual clustering run tasks, again improving efficiency.
+
+4.  **Advanced Task Monitoring and Cancellation:**
+    A key feature implemented in `tasks.py` is the ability to monitor and cancel tasks *even while they are actively running*, not just when they are pending in the queue.
+    *   **Cooperative Cancellation:** Both parent tasks (like `run_analysis_task` and `run_clustering_task`) and their child tasks (like `analyze_album_task` and `run_clustering_batch_task`) periodically check their own status and the status of their parent in the database.
+    *   If a task sees that its own status has been set to `REVOKED` (e.g., by a user action through the UI) or if its parent task has been revoked or has failed, it will gracefully stop its current operation, perform necessary cleanup (like removing temporary files), and update its status accordingly.
+    *   This is more sophisticated than typical queue systems where cancellation might only prevent a task from starting. Here, long-running iterations or album processing loops can be interrupted mid-way.
+
+5.  **Status Tracking:**
+    *   Throughout their lifecycle, tasks frequently update their progress, status (e.g., `STARTED`, `PROGRESS`, `SUCCESS`, `FAILURE`, `REVOKED`), and detailed logs into the PostgreSQL database. The Flask application reads this information to display real-time updates on the web UI.
+    *   RQ's job metadata is also updated, but the primary source of truth for detailed status and logs is the application's database.
 
 ## Screenshots
 
