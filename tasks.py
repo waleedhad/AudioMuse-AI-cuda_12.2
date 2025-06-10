@@ -1244,7 +1244,15 @@ def _perform_single_clustering_iteration(
                 current_playlist_centroids[name] = top_scores
 
         # --- Enhanced Score Calculation ---
-        base_diversity_score = sum(unique_predominant_mood_scores.values())
+        raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
+        # Normalize mood diversity score
+        # Divide by the number of possible mood labels to scale between 0 and 1 (approximately, as sum can exceed num_labels if scores are >1, but scores are usually 0-1)
+        # A better normalization is to divide by the number of unique predominant moods found, if any.
+        # Or, to ensure a strict 0-1 range based on potential, divide by len(MOOD_LABELS)
+        if len(MOOD_LABELS) > 0:
+            base_diversity_score = raw_mood_diversity_score / len(MOOD_LABELS)
+        else:
+            base_diversity_score = 0.0
         # Calculate playlist_purity_component
         all_individual_playlist_purities = []
         # item_id_to_song_index_map must now refer to the current data_subset_for_clustering
@@ -1315,7 +1323,12 @@ def _perform_single_clustering_iteration(
             playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
 
         # New: Calculate other_features_diversity_score
-        other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
+        raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
+        # Normalize other feature diversity score
+        if len(OTHER_FEATURE_LABELS) > 0:
+            other_features_diversity_score = raw_other_features_diversity_score / len(OTHER_FEATURE_LABELS)
+        else:
+            other_features_diversity_score = 0.0
 
         # New: Calculate other_feature_purity_component
         all_individual_playlist_other_feature_purities = []
@@ -1377,8 +1390,8 @@ def _perform_single_clustering_iteration(
 
         print(f"{log_prefix} Iteration {run_idx}: "
               f"MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
-              f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
-              f"Sil: {normalized_silhouette:.2f}, DB: {normalized_davies_bouldin:.2f}, CH: {normalized_calinski_harabasz:.2f}, "
+              f"OtherFeatDiv: {other_features_diversity_score:.2f} (Raw: {raw_other_features_diversity_score:.2f}), OtherFeatPur: {other_feature_purity_component:.2f}, "
+              f"Sil: {normalized_silhouette:.2f}, DB: {normalized_davies_bouldin:.2f}, CH: {normalized_calinski_harabasz:.2f} (RawMoodDiv: {raw_mood_diversity_score:.2f}), "
               f"FinalScore: {final_enhanced_score:.2f}")
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
