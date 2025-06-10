@@ -38,7 +38,7 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, TOP_K_MOODS_FOR_PURITY_CALCULATION,
     STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Import new config
 
 # Import AI naming function and prompt template
@@ -1260,36 +1260,54 @@ def _perform_single_clustering_iteration(
                 if not playlist_centroid_mood_data or not songs_in_playlist_info_list:
                     continue
 
-                # Determine the predominant mood for THIS specific playlist based on its centroid's mood data
-                predominant_mood_for_this_playlist = None
-                max_score_for_predominant = -1.0
-                for mood_label, mood_score in playlist_centroid_mood_data.items():
-                    if mood_label in MOOD_LABELS: # Ensure it's a mood label
-                        if mood_score > max_score_for_predominant:
-                            max_score_for_predominant = mood_score
-                            predominant_mood_for_this_playlist = mood_label
+                # Get all mood scores from the centroid for this playlist
+                centroid_mood_scores_for_purity_calc = {
+                    m_label: playlist_centroid_mood_data.get(m_label, 0.0)
+                    for m_label in MOOD_LABELS # Ensure we consider all possible moods
+                    if m_label in playlist_centroid_mood_data # And that the centroid has a score for it
+                }
 
-                if not predominant_mood_for_this_playlist:
+                if not centroid_mood_scores_for_purity_calc: # No mood data in centroid
                     continue
 
-                try:
-                    predominant_mood_index_in_labels = MOOD_LABELS.index(predominant_mood_for_this_playlist)
-                except ValueError:
-                    print(f"{log_prefix} Iteration {run_idx}: Warning: Predominant mood '{predominant_mood_for_this_playlist}' for playlist '{playlist_name_key}' not in MOOD_LABELS list.")
-                    continue
+                # Sort centroid moods by score to get the top K (TOP_K_MOODS_FOR_PURITY_CALCULATION)
+                sorted_centroid_moods_for_purity = sorted(
+                    centroid_mood_scores_for_purity_calc.items(),
+                    key=lambda item: item[1],
+                    reverse=True
+                )
+                
+                # Consider moods with at least some score (e.g., > 0.01)
+                top_k_centroid_mood_labels_for_purity = [
+                    mood_label for mood_label, score in sorted_centroid_moods_for_purity[:TOP_K_MOODS_FOR_PURITY_CALCULATION] if score > 0.01
+                ]
 
-                scores_of_predominant_mood_for_songs_in_playlist = []
+                if not top_k_centroid_mood_labels_for_purity: # No significant moods in centroid's top K
+                    all_individual_playlist_purities.append(0.0)
+                    continue
+                
+                # For each song, find its max score among these top_k_centroid_mood_labels_for_purity
+                current_playlist_song_purity_scores = []
                 for item_id, _, _ in songs_in_playlist_info_list:
                     song_original_index = item_id_to_song_index_map.get(item_id)
                     if song_original_index is not None:
                         # Corrected slicing for mood scores: X_original = [tempo, energy, moods..., other_features...]
                         song_mood_scores_vector = X_original[song_original_index][2 : 2 + len(MOOD_LABELS)]
-                        if predominant_mood_index_in_labels < len(song_mood_scores_vector): # Check bounds
-                            song_specific_score_for_predominant_mood = song_mood_scores_vector[predominant_mood_index_in_labels]
-                            scores_of_predominant_mood_for_songs_in_playlist.append(song_specific_score_for_predominant_mood)
+                        
+                        max_score_for_song_among_top_centroid_moods = 0.0
+                        for centroid_mood_label in top_k_centroid_mood_labels_for_purity:
+                            try:
+                                mood_idx = MOOD_LABELS.index(centroid_mood_label)
+                                if mood_idx < len(song_mood_scores_vector):
+                                    song_score_for_this_centroid_mood = song_mood_scores_vector[mood_idx]
+                                    if song_score_for_this_centroid_mood > max_score_for_song_among_top_centroid_moods:
+                                        max_score_for_song_among_top_centroid_moods = song_score_for_this_centroid_mood
+                            except ValueError: # Should not happen if MOOD_LABELS is consistent
+                                pass 
+                        current_playlist_song_purity_scores.append(max_score_for_song_among_top_centroid_moods)
 
-                if scores_of_predominant_mood_for_songs_in_playlist:
-                    avg_purity_for_this_playlist = sum(scores_of_predominant_mood_for_songs_in_playlist) / len(scores_of_predominant_mood_for_songs_in_playlist)
+                if current_playlist_song_purity_scores:
+                    avg_purity_for_this_playlist = sum(current_playlist_song_purity_scores) / len(current_playlist_song_purity_scores)
                     all_individual_playlist_purities.append(avg_purity_for_this_playlist)
 
         playlist_purity_component = 0.0
