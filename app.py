@@ -21,6 +21,7 @@ from flasgger import Swagger, swag_from
 # Import configuration
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
     REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
+    MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
@@ -501,6 +502,16 @@ def start_clustering_endpoint():
                 type: integer
                 description: Number of clustering iterations to perform.
                 default: "Configured CLUSTERING_RUNS"
+              min_songs_per_genre_for_stratification:
+                type: integer
+                description: Minimum number of songs to target per stratified genre.
+                default: "Configured MIN_SONGS_PER_GENRE_FOR_STRATIFICATION"
+              stratified_sampling_target_percentile:
+                type: integer
+                description: Percentile of genre song counts to use for target songs per genre.
+                minimum: 0
+                maximum: 100
+                default: "Configured STRATIFIED_SAMPLING_TARGET_PERCENTILE"
               max_songs_per_cluster:
                 type: integer
                 description: Maximum number of songs per generated playlist/cluster.
@@ -583,6 +594,10 @@ def start_clustering_endpoint():
     pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
     num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
+    min_songs_per_genre_for_stratification_val = int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION))
+    stratified_sampling_target_percentile_val = int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE))
+    # Ensure percentile is within valid range
+    stratified_sampling_target_percentile_val = max(0, min(100, stratified_sampling_target_percentile_val))
 
     # Get AI Naming parameters from request, fallback to global config
     ai_model_provider_param = data.get('ai_model_provider', AI_MODEL_PROVIDER).upper()
@@ -601,7 +616,8 @@ def start_clustering_endpoint():
         args=(
             clustering_method, num_clusters_min_val, num_clusters_max_val,
             dbscan_eps_min_val, dbscan_eps_max_val, dbscan_min_samples_min_val, dbscan_min_samples_max_val,
-            pca_components_min_val, pca_components_max_val, num_clustering_runs_val,
+            pca_components_min_val, pca_components_max_val,
+            num_clustering_runs_val, # This is the total runs, not the batch size
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
             ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param # Pass ALL AI params
         ),
@@ -1064,6 +1080,10 @@ def get_config_endpoint():
                   type: integer
                 pca_components_max:
                   type: integer
+                min_songs_per_genre_for_stratification:
+                  type: integer
+                stratified_sampling_target_percentile:
+                  type: integer
                 top_n_moods:
                   type: integer
                 mood_labels:
@@ -1101,6 +1121,8 @@ def get_config_endpoint():
         "dbscan_min_samples_min": DBSCAN_MIN_SAMPLES_MIN, "dbscan_min_samples_max": DBSCAN_MIN_SAMPLES_MAX,
         "gmm_n_components_min": GMM_N_COMPONENTS_MIN, "gmm_n_components_max": GMM_N_COMPONENTS_MAX,
         "pca_components_min": PCA_COMPONENTS_MIN, "pca_components_max": PCA_COMPONENTS_MAX,
+        "min_songs_per_genre_for_stratification": MIN_SONGS_PER_GENRE_FOR_STRATIFICATION,
+        "stratified_sampling_target_percentile": STRATIFIED_SAMPLING_TARGET_PERCENTILE,
         "ai_model_provider": AI_MODEL_PROVIDER, # New provider config
         "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
         "gemini_api_key": GEMINI_API_KEY, "gemini_model_name": GEMINI_MODEL_NAME, # Gemini config

@@ -31,7 +31,7 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX,
-    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS,
+    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, REDIS_URL, DATABASE_URL,
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME,
     DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH,
     SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ,
@@ -519,11 +519,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         "moods": {k: round(v, 2) for k, v in moods.items()}
                     }
 
-                    # Filter moods to keep only TOP_N_MOODS before saving
-                    top_n_moods_to_save = {
-                        k: moods[k] for k in sorted(moods, key=moods.get, reverse=True)[:top_n_moods]
-                    }
-                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_n_moods_to_save, energy=energy, other_features=other_features_str) # Pass energy
+                    # Save ALL mood scores, not just top N, to allow for more accurate purity calculations
+                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods, energy=energy, other_features=other_features_str) # Pass full moods dict
                     tracks_analyzed_count += 1
                     mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
 
@@ -1666,14 +1663,15 @@ def run_clustering_batch_task(
 
 def run_clustering_task(
     clustering_method, num_clusters_min, num_clusters_max,
-    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max,
+    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, # Keep these
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
     gmm_n_components_min, gmm_n_components_max,
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param,
     gemini_api_key_param, gemini_model_name_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
     current_job = get_current_job(redis_conn)
-    current_task_id = current_job.id if current_job else str(uuid.uuid4())
+    # Use job ID if available, otherwise generate one (though it should always be available for an RQ task)
+    current_task_id = current_job.id if current_job else str(uuid.uuid4()) # type: ignore
 
     with app.app_context():
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main clustering task started."
@@ -1792,7 +1790,7 @@ def run_clustering_task(
             if songs_counts_for_stratified_genres: # Avoid division by zero if list is empty
                 # Use np.percentile. Ensure percentile is within [0, 100]
                 percentile_to_use = np.clip(STRATIFIED_SAMPLING_TARGET_PERCENTILE, 0, 100)
-                calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use)
+                calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use) # type: ignore
                 log_and_update_main_clustering(
                     f"{percentile_to_use}th percentile of songs per stratified genre: {calculated_target_based_on_percentile:.2f}",
                     current_progress, print_console=False
@@ -1801,7 +1799,7 @@ def run_clustering_task(
                 log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
 
             # Target is the max of the configured minimum and the calculated percentile value
-            target_songs_per_genre = max(MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, int(np.floor(calculated_target_based_on_percentile)))
+            target_songs_per_genre = max(MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, int(np.floor(calculated_target_based_on_percentile))) # type: ignore
             # If no stratified genres have enough songs, or total available is low, adjust target
             # Ensure target_songs_per_genre is not zero if there are any songs at all
             if target_songs_per_genre == 0 and len(rows) > 0:
@@ -1953,7 +1951,7 @@ def run_clustering_task(
                             args=(
                                 batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch,
                                 all_tracks_data_json, # Original full data, used for initial sampling inside batch
-                                genre_to_full_track_data_map_json, # Pre-categorized track data
+                                genre_to_full_track_data_map_json, # Pre-categorized track data (JSON string)
                                 target_songs_per_genre,
                                 SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
                                 clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,

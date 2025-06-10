@@ -99,6 +99,16 @@
                                 <label for="config-clustering_runs" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Runs:</label>
                                 <input type="number" id="config-clustering_runs" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
+                            <!-- New Clustering Parameters -->
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-min_songs_per_genre_for_stratification" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Min Songs Per Genre for Stratification:</label>
+                                <input type="number" id="config-min_songs_per_genre_for_stratification" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div style="margin-bottom: 0.5rem;">
+                                <label for="config-stratified_sampling_target_percentile" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Stratified Sampling Target Percentile:</label>
+                                <input type="number" id="config-stratified_sampling_target_percentile" min="0" max="100" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <!-- End New Clustering Parameters -->
                         </div>
 
                         <div id="dbscan-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
@@ -321,6 +331,10 @@
             document.getElementById('config-pca_components_min').value = config.pca_components_min || 0;
             document.getElementById('config-pca_components_max').value = config.pca_components_max || 0;
             document.getElementById('config-clustering_runs').value = config.clustering_runs || 0;
+
+            // New Clustering Parameters
+            document.getElementById('config-min_songs_per_genre_for_stratification').value = config.min_songs_per_genre_for_stratification || 0;
+            document.getElementById('config-stratified_sampling_target_percentile').value = config.stratified_sampling_target_percentile || 0;
 
             document.getElementById('config-dbscan_eps_min').value = config.dbscan_eps_min || 0;
             document.getElementById('config-dbscan_eps_max').value = config.dbscan_eps_max || 0;
@@ -570,6 +584,10 @@
                 payload.pca_components_min = parseInt(document.getElementById('config-pca_components_min').value);
                 payload.pca_components_max = parseInt(document.getElementById('config-pca_components_max').value);
                 payload.clustering_runs = parseInt(document.getElementById('config-clustering_runs').value);
+
+                // New Clustering Parameters
+                payload.min_songs_per_genre_for_stratification = parseInt(document.getElementById('config-min_songs_per_genre_for_stratification').value);
+                payload.stratified_sampling_target_percentile = parseInt(document.getElementById('config-stratified_sampling_target_percentile').value);
 
                 if (payload.clustering_method === 'dbscan') {
                     payload.dbscan_eps_min = parseFloat(document.getElementById('config-dbscan_eps_min').value);
