@@ -117,3 +117,23 @@ ENERGY_MAX = float(os.getenv("ENERGY_MAX", "0.15"))
 TEMPO_MIN_BPM = float(os.getenv("TEMPO_MIN_BPM", "40.0"))
 TEMPO_MAX_BPM = float(os.getenv("TEMPO_MAX_BPM", "200.0"))
 OTHER_FEATURE_LABELS = ['danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad']
+
+# --- Stratified Sampling Constants (New) ---
+# Genres for which to enforce equal representation during stratified sampling
+STRATIFIED_GENRES = [
+    'rock', 'pop', 'alternative', 'indie', 'electronic', 'jazz', 'metal', 'classic rock', 'soul',
+    'indie rock', 'electronica', 'folk', 'punk', 'blues', 'hard rock', 'ambient', 'acoustic',
+    'experimental', 'Hip-Hop', 'country', 'funk', 'electro', 'heavy metal', 'Progressive rock',
+    'rnb', 'indie pop', 'House'
+]
+
+# Minimum number of songs to target per genre for stratified sampling.
+# This will be dynamically adjusted based on actual available songs.
+MIN_SONGS_PER_GENRE_FOR_STRATIFICATION = int(os.getenv("MIN_SONGS_PER_GENRE_FOR_STRATIFICATION", "100"))
+
+# Percentile to use for determining the target number of songs per genre in stratified sampling.
+# E.g., 75 means the target will be based on the 75th percentile of song counts among stratified genres.
+STRATIFIED_SAMPLING_TARGET_PERCENTILE = int(os.getenv("STRATIFIED_SAMPLING_TARGET_PERCENTILE", "25"))
+
+# Percentage of songs to change in the stratified sample between clustering runs (0.0 to 1.0)
+SAMPLING_PERCENTAGE_CHANGE_PER_RUN = float(os.getenv("SAMPLING_PERCENTAGE_CHANGE_PER_RUN", "0.2"))

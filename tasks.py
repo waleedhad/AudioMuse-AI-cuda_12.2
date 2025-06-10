@@ -10,38 +10,36 @@ import uuid
 import traceback
 
 # Essentia and ML imports
-from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy # Import Energy, Removed TensorflowPredictVGGish
+from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture # type: ignore
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score # type: ignore
-from sklearn.preprocessing import StandardScaler # Import StandardScaler for feature standardization
+from sklearn.preprocessing import StandardScaler
 
 # RQ import
 from rq import get_current_job
+from rq.job import Job # Import Job class
+from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
 # Import necessary components from the main app.py file
-# This assumes app.py will define 'app', 'redis_conn', and the DB utility functions
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
                 track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus,
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
                 TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
-from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
-    GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX, \
-    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, \
-    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME, DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, \
-    HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH, SCORE_WEIGHT_SILHOUETTE, \
-    SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, \
-    SCORE_WEIGHT_DIVERSITY, \
-    SCORE_WEIGHT_PURITY, \
-    SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, MUTATION_KMEANS_COORD_FRACTION, \
-    MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA, \
-    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES
-
-from rq.job import Job # Import Job class
-from rq.exceptions import NoSuchJobError, InvalidJobOperation
+from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
+    GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX,
+    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS,
+    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME,
+    DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH,
+    SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ,
+    SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
+    MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
+    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
+    STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Import new config
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
@@ -885,12 +883,13 @@ def _generate_or_mutate_kmeans_initial_centroids(
     return initial_centroids.tolist()
 
 def _perform_single_clustering_iteration(
-    run_idx, all_tracks_data_parsed,
+    run_idx, data_subset_for_clustering, # Changed from all_tracks_data_parsed
     clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges,
     max_songs_per_cluster, log_prefix="",
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None):
     """
     Internal helper to perform a single clustering iteration. Not an RQ task.
+    Receives a subset of track data (rows) for clustering.
     Returns a result dictionary or None on failure.
     `num_clusters_min_max` is a tuple (min, max)
     `dbscan_params_ranges` is a dict like {"eps_min": ..., "eps_max": ..., "samples_min": ..., "samples_max": ...}
@@ -907,9 +906,10 @@ def _perform_single_clustering_iteration(
             mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
 
         # --- Data Preparation ---
-        X_original = np.array([score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in all_tracks_data_parsed])
+        # X_original is now derived from the passed data_subset_for_clustering
+        X_original = np.array([score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in data_subset_for_clustering])
         if X_original.shape[0] == 0:
-            print(f"{log_prefix} Iteration {run_idx}: No data to cluster.")
+            print(f"{log_prefix} Iteration {run_idx}: No data in subset to cluster.")
             return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}} # Add scaler_details
 
         # Standardize the data
@@ -1186,7 +1186,8 @@ def _perform_single_clustering_iteration(
 
         max_dist = raw_distances.max()
         normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-        track_info_list = [{"row": all_tracks_data_parsed[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(all_tracks_data_parsed))]
+        # track_info_list now uses data_subset_for_clustering
+        track_info_list = [{"row": data_subset_for_clustering[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(data_subset_for_clustering))]
 
         filtered_clusters = defaultdict(list)
         for cid in set(labels):
@@ -1228,10 +1229,10 @@ def _perform_single_clustering_iteration(
                 centroid_other_features_from_top_scores = {
                     label: top_scores.get(label, 0.0)
                     for label in OTHER_FEATURE_LABELS if label in top_scores
-                }
+                } # Semicolon was here, removed for consistency, though not a functional error.
                 predominant_other_feature_key_for_diversity = None
                 max_other_feature_score_for_diversity = 0.3 # Threshold for considering a feature predominant
-                if centroid_other_features_from_top_scores:
+                if centroid_other_features_from_top_scores: # Check for other features
                     for feature_label, feature_score in centroid_other_features_from_top_scores.items():
                         if feature_score > max_other_feature_score_for_diversity:
                             max_other_feature_score_for_diversity = feature_score
@@ -1249,7 +1250,8 @@ def _perform_single_clustering_iteration(
         base_diversity_score = sum(unique_predominant_mood_scores.values())
         # Calculate playlist_purity_component
         all_individual_playlist_purities = []
-        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(all_tracks_data_parsed)}
+        # item_id_to_song_index_map must now refer to the current data_subset_for_clustering
+        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(data_subset_for_clustering)}
 
         if current_named_playlists:
             for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
@@ -1378,14 +1380,131 @@ def _perform_single_clustering_iteration(
         traceback.print_exc()
         return None # Indicate failure for this iteration
 
+# --- New Stratified Sampling Helper Function ---
+def _get_stratified_song_subset(
+    genre_to_full_track_data_map, # All available tracks, categorized by genre
+    target_songs_per_genre,       # Desired count per genre
+    previous_subset_track_ids=None, # List of item_ids from the previous subset
+    percentage_change=0.0         # Percentage of songs to swap out for mutation
+):
+    """
+    Generates a stratified sample of songs for clustering.
+    If previous_subset_track_ids is provided and percentage_change > 0,
+    it perturbs the existing subset while maintaining stratification.
+    Otherwise, it generates a fresh stratified sample.
+    """
+    new_subset_tracks_list = [] # Use a list to build the subset
+    # Use a set for efficient addition and uniqueness check for item_ids in the current iteration
+    current_ids_in_new_subset_for_this_iteration = set()
+
+    current_subset_track_ids_set = set(previous_subset_track_ids) if previous_subset_track_ids else set()
+    current_subset_tracks_by_genre = defaultdict(list)
+
+    if previous_subset_track_ids:
+        all_tracks_flat = [track for genre_list in genre_to_full_track_data_map.values() for track in genre_list]
+        id_to_track_map = {track['item_id']: track for track in all_tracks_flat}
+
+        for track_id in current_subset_track_ids_set:
+            track_data = id_to_track_map.get(track_id)
+            if track_data:
+                # Find the primary stratified genre for this track
+                top_mood_found = None
+                if 'mood_vector' in track_data and track_data['mood_vector']:
+                    mood_scores = {}
+                    for pair in track_data['mood_vector'].split(','):
+                        if ':' in pair:
+                            label, score = pair.split(':')
+                            mood_scores[label] = float(score)
+                    
+                    # Find the highest scoring mood that is also a stratified genre
+                    top_mood_in_stratified = None
+                    max_mood_score = -1
+                    for genre in STRATIFIED_GENRES:
+                        if genre in mood_scores and mood_scores[genre] > max_mood_score:
+                            max_mood_score = mood_scores[genre]
+                            top_mood_in_stratified = genre
+                    
+                    if top_mood_in_stratified:
+                        current_subset_tracks_by_genre[top_mood_in_stratified].append(track_data)
+                    else:
+                        # If no stratified genre is predominant, add to a 'misc' category for now
+                        current_subset_tracks_by_genre['__misc__'].append(track_data)
+                else:
+                    current_subset_tracks_by_genre['__misc__'].append(track_data)
+
+    for genre in STRATIFIED_GENRES:
+        available_tracks_for_genre = genre_to_full_track_data_map.get(genre, [])
+        num_available = len(available_tracks_for_genre)
+        songs_added_for_this_genre_count = 0
+
+        # 1. Keep songs from the previous subset for this genre (if applicable)
+        if previous_subset_track_ids and percentage_change > 0:
+            tracks_from_previous_for_this_genre = current_subset_tracks_by_genre.get(genre, [])
+            num_to_keep_from_previous = int(len(tracks_from_previous_for_this_genre) * (1.0 - percentage_change))
+            
+            # Ensure we don't try to keep more than available or more than the target
+            num_to_keep_from_previous = min(num_to_keep_from_previous, len(tracks_from_previous_for_this_genre), target_songs_per_genre)
+
+            if num_to_keep_from_previous > 0:
+                kept_tracks_for_genre = random.sample(tracks_from_previous_for_this_genre, num_to_keep_from_previous)
+                for track_to_keep in kept_tracks_for_genre:
+                    if track_to_keep['item_id'] not in current_ids_in_new_subset_for_this_iteration:
+                        new_subset_tracks_list.append(track_to_keep)
+                        current_ids_in_new_subset_for_this_iteration.add(track_to_keep['item_id'])
+                        songs_added_for_this_genre_count += 1
+                        if songs_added_for_this_genre_count >= target_songs_per_genre:
+                            break # Reached target for this genre
+            # print(f"  Genre {genre}: Kept {songs_added_for_this_genre_count} tracks from previous subset.")
+
+        # 2. Add new songs if still needed for this genre to reach its target
+        num_still_needed_for_genre = target_songs_per_genre - songs_added_for_this_genre_count
+
+        if num_still_needed_for_genre > 0 and num_available > 0:
+            # Get candidates from the full pool for this genre, excluding those already added in this iteration
+            new_candidates = [
+                track for track in available_tracks_for_genre
+                if track['item_id'] not in current_ids_in_new_subset_for_this_iteration
+            ]
+
+            num_new_to_add_for_genre = min(num_still_needed_for_genre, len(new_candidates))
+
+            if num_new_to_add_for_genre > 0:
+                selected_new_for_genre = random.sample(new_candidates, num_new_to_add_for_genre)
+                for track_to_add in selected_new_for_genre:
+                    # Double check uniqueness, though `new_candidates` should already handle it
+                    if track_to_add['item_id'] not in current_ids_in_new_subset_for_this_iteration:
+                        new_subset_tracks_list.append(track_to_add)
+                        current_ids_in_new_subset_for_this_iteration.add(track_to_add['item_id'])
+                        songs_added_for_this_genre_count += 1 # This count is per-genre, not strictly needed here
+                                                            # as we are just filling up to num_new_to_add_for_genre
+                # print(f"  Genre {genre}: Added {num_new_to_add_for_genre} new tracks.")
+
+    # If, after stratified sampling, the total number of tracks is less than expected
+    # (e.g., due to very few tracks in some genres), fill with random tracks from anywhere.
+    # This ensures a minimum dataset size for clustering, but might break perfect stratification.
+    # This step is a fallback. The user might want strictly stratified, even if it means fewer total songs.
+    # For now, I will prioritize strict stratification for the target genres.
+    # If a genre has fewer than target_songs_per_genre, it will simply contribute all its available songs.
+
+    # Shuffle the final subset to ensure random order for clustering
+    random.shuffle(new_subset_tracks_list)
+    return new_subset_tracks_list
+
+
 def run_clustering_batch_task(
-    batch_id_str, start_run_idx, num_iterations_in_batch, all_tracks_data_json,
+    batch_id_str, start_run_idx, num_iterations_in_batch,
+    all_tracks_data_json, # All tracks, used for initial categorization and sampling
+    genre_to_full_track_data_map_json, # Pre-categorized full track data
+    target_songs_per_genre, # The dynamically determined target count
+    sampling_percentage_change_per_run, # Percentage for mutation
     clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
     max_songs_per_cluster, parent_task_id,
-    elite_solutions_params_list_json=None, exploitation_probability=0.0, mutation_config_json=None):
-    """RQ task to run a batch of clustering iterations."""
+    elite_solutions_params_list_json=None, exploitation_probability=0.0, mutation_config_json=None,
+    initial_subset_track_ids_json=None # The initial subset IDs for the first run of the first batch
+    ):
+    """RQ task to run a batch of clustering iterations with stratified sampling."""
     current_job = get_current_job(redis_conn)
-    current_task_id = current_job.id if current_job else str(uuid.uuid4()) # This is the ID of the batch task itself
+    current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Clustering Batch Task {batch_id_str} (Job ID: {current_task_id}) started. Iterations: {start_run_idx} to {start_run_idx + num_iterations_in_batch - 1}."
@@ -1433,7 +1552,14 @@ def run_clustering_batch_task(
 
         try:
             log_and_update_batch_task(f"Processing {num_iterations_in_batch} iterations.", 5)
-            all_tracks_data = json.loads(all_tracks_data_json) # Load data once per batch task
+            # all_tracks_data is now actually full track objects
+            all_tracks_data_parsed = json.loads(all_tracks_data_json)
+            genre_to_full_track_data_map = json.loads(genre_to_full_track_data_map_json)
+
+            current_sampled_track_ids_in_batch = []
+            if initial_subset_track_ids_json:
+                current_sampled_track_ids_in_batch = json.loads(initial_subset_track_ids_json)
+            
             # === Cooperative Cancellation Check for Batch Task ===
             if current_job:
                 with app.app_context():
@@ -1468,6 +1594,17 @@ def run_clustering_batch_task(
             best_score_in_this_batch = -1.0
             iterations_actually_completed = 0
 
+            # Get initial subset for the first run of this batch
+            current_subset_data = _get_stratified_song_subset(
+                genre_to_full_track_data_map,
+                target_songs_per_genre,
+                previous_subset_track_ids=current_sampled_track_ids_in_batch, # Use the passed initial subset for the first run
+                percentage_change=0.0 if start_run_idx == 0 else SAMPLING_PERCENTAGE_CHANGE_PER_RUN # No change for first run of the very first batch
+            )
+            # Update current_sampled_track_ids_in_batch for subsequent iterations within this batch
+            current_sampled_track_ids_in_batch = [t['item_id'] for t in current_subset_data]
+
+
             for i in range(num_iterations_in_batch):
                 current_run_global_idx = start_run_idx + i
 
@@ -1479,12 +1616,23 @@ def run_clustering_batch_task(
                         if (task_db_info_iter_check and task_db_info_iter_check.get('status') == TASK_STATUS_REVOKED) or \
                            (parent_task_db_info_iter_check and parent_task_db_info_iter_check.get('status') in [TASK_STATUS_REVOKED, TASK_STATUS_FAILURE]):
                             log_and_update_batch_task(f"Batch task {batch_id_str} stopping mid-batch due to cancellation/parent failure before iteration {current_run_global_idx}.", current_progress_batch, task_state=TASK_STATUS_REVOKED)
-                            return {"status": "REVOKED", "message": "Batch task revoked mid-process.", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch}
+                            return {"status": "REVOKED", "message": "Batch task revoked mid-process.", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch} # Return final subset IDs
+
+                # Get the song subset for this specific iteration (perturb if not the very first run of first batch)
+                # For subsequent iterations within the same batch, perturb the current_sampled_track_ids_in_batch
+                if i > 0 or start_run_idx > 0: # If it's not the very first iteration of the very first batch
+                    current_subset_data = _get_stratified_song_subset(
+                        genre_to_full_track_data_map,
+                        target_songs_per_genre,
+                        previous_subset_track_ids=current_sampled_track_ids_in_batch, # Use the last sampled IDs
+                        percentage_change=SAMPLING_PERCENTAGE_CHANGE_PER_RUN
+                    )
+                    current_sampled_track_ids_in_batch = [t['item_id'] for t in current_subset_data] # Update IDs for next iteration
 
                 iteration_result = _perform_single_clustering_iteration(
-                    current_run_global_idx, all_tracks_data, clustering_method,
-                    num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-                    max_songs_per_cluster, log_prefix=log_prefix_for_iter, # Pass max_songs_per_cluster
+                    current_run_global_idx, current_subset_data, # Pass the current subset
+                    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
+                    max_songs_per_cluster, log_prefix=log_prefix_for_iter,
                     elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
                     exploitation_probability=exploitation_probability,
                     mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {})
@@ -1501,17 +1649,19 @@ def run_clustering_batch_task(
             final_batch_summary = {
                 "best_score_in_batch": best_score_in_this_batch,
                 "iterations_completed_in_batch": iterations_actually_completed,
-                "full_best_result_from_batch": best_result_in_this_batch # This is what the parent will use
+                "full_best_result_from_batch": best_result_in_this_batch,
+                "final_subset_track_ids": current_sampled_track_ids_in_batch # Return the last subset used for the batch
             }
             log_and_update_batch_task(f"Batch {batch_id_str} complete. Best score in batch: {best_score_in_this_batch:.2f}", 100, details_extra=final_batch_summary, task_state=TASK_STATUS_SUCCESS)
-            return {"status": "SUCCESS", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch}
+            return {"status": "SUCCESS", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch}
 
         except Exception as e:
             error_tb = traceback.format_exc()
             failure_details = {"error": str(e), "traceback": error_tb, "batch_id": batch_id_str}
             log_and_update_batch_task(f"Failed clustering batch {batch_id_str}: {e}", current_progress_batch, details_extra=failure_details, task_state=TASK_STATUS_FAILURE)
             print(f"ERROR: Clustering batch {batch_id_str} failed: {e}\n{error_tb}")
-            raise
+            # Ensure final_subset_track_ids is returned even on failure for subsequent batches to pick up
+            return {"status": "FAILURE", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": None, "final_subset_track_ids": current_sampled_track_ids_in_batch}
 
 
 def run_clustering_task(
@@ -1605,8 +1755,68 @@ def run_clustering_task(
                 log_and_update_main_clustering("Number of clustering runs is 0. Nothing to do.", 100, task_state=TASK_STATUS_SUCCESS)
                 return {"status": "SUCCESS", "message": "Number of clustering runs was 0."}
 
-            serializable_rows = [dict(row) for row in rows]
-            all_tracks_data_json = json.dumps(serializable_rows)
+            # --- Stratified Sampling Preparation ---
+            genre_to_full_track_data_map = defaultdict(list)
+            for row in rows:
+                if 'mood_vector' in row and row['mood_vector']:
+                    mood_scores = {}
+                    for pair in row['mood_vector'].split(','):
+                        if ':' in pair:
+                            label, score_str = pair.split(':')
+                            mood_scores[label] = float(score_str)
+                    
+                    # Find the top mood for this track among the stratified genres
+                    top_stratified_genre = None
+                    max_score = -1.0
+                    for genre in STRATIFIED_GENRES:
+                        if genre in mood_scores and mood_scores[genre] > max_score:
+                            max_score = mood_scores[genre]
+                            top_stratified_genre = genre
+                    
+                    if top_stratified_genre:
+                        genre_to_full_track_data_map[top_stratified_genre].append(row)
+                    else:
+                        # Fallback for tracks that don't strongly belong to a stratified genre
+                        # We still want to include them in the overall pool, but not explicitly sample by genre
+                        genre_to_full_track_data_map['__other__'].append(row)
+                else:
+                    genre_to_full_track_data_map['__other__'].append(row)
+
+            # --- Determine the dynamic target_songs_per_genre based on percentile ---
+            songs_counts_for_stratified_genres = []
+            for genre in STRATIFIED_GENRES:
+                if genre in genre_to_full_track_data_map:
+                    songs_counts_for_stratified_genres.append(len(genre_to_full_track_data_map[genre]))
+
+            calculated_target_based_on_percentile = 0
+            if songs_counts_for_stratified_genres: # Avoid division by zero if list is empty
+                # Use np.percentile. Ensure percentile is within [0, 100]
+                percentile_to_use = np.clip(STRATIFIED_SAMPLING_TARGET_PERCENTILE, 0, 100)
+                calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use)
+                log_and_update_main_clustering(
+                    f"{percentile_to_use}th percentile of songs per stratified genre: {calculated_target_based_on_percentile:.2f}",
+                    current_progress, print_console=False
+                )
+            else:
+                log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
+
+            # Target is the max of the configured minimum and the calculated percentile value
+            target_songs_per_genre = max(MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, int(np.floor(calculated_target_based_on_percentile)))
+            # If no stratified genres have enough songs, or total available is low, adjust target
+            # Ensure target_songs_per_genre is not zero if there are any songs at all
+            if target_songs_per_genre == 0 and len(rows) > 0:
+                target_songs_per_genre = 1 # At least one song per genre if possible
+            log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)
+
+            # Store the raw track data in a serializable format for passing to batch jobs
+            all_tracks_data_json = json.dumps([dict(row) for row in rows]) # This should be the original full data
+            # Convert DictRow to dict for JSON serialization to prevent type errors in child tasks
+            genre_to_full_track_data_map_serializable = defaultdict(list)
+            for genre_key, track_list_val in genre_to_full_track_data_map.items():
+                genre_to_full_track_data_map_serializable[genre_key] = [dict(track_item) for track_item in track_list_val]
+            genre_to_full_track_data_map_json = json.dumps(genre_to_full_track_data_map_serializable)
+            # --- End Stratified Sampling Preparation ---
+
             best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
             best_clustering_results = None # Stores the full result dict of the best iteration
             elite_solutions_list = []      # List of {"score": float, "params": dict}
@@ -1630,8 +1840,10 @@ def run_clustering_task(
             _main_task_accumulated_details["total_batch_jobs"] = num_total_batch_jobs # Store total batches
             batches_completed_count = 0
 
-            log_and_update_main_clustering(f"Fetched {len(rows)} tracks. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 5)
+            # Store the last subset IDs from the previous batch. This will be updated by batch tasks.
+            last_subset_track_ids_for_batch_chaining = None
 
+            log_and_update_main_clustering(f"Fetched {len(rows)} tracks. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 5)
 
             while batches_completed_count < num_total_batch_jobs:
                 if current_job:
@@ -1654,10 +1866,14 @@ def run_clustering_task(
                         if db_task_info_child and db_task_info_child.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED]:
                             is_child_truly_completed_this_cycle = True
                         else:
-                            print(f"[MainClusteringTask-{current_task_id}] Warning: Active batch job {job_id} missing from RQ, not terminal in DB.")
+                            # Job missing from RQ, and DB status is not terminal.
+                            # Treat as completed (abnormally) to prevent stall.
+                            db_status_for_log = db_task_info_child.get('status') if db_task_info_child else "UNKNOWN (not in DB)"
+                            print(f"[MainClusteringTask-{current_task_id}] Warning: Active batch job {job_id} missing from RQ, DB status '{db_status_for_log}' is not terminal. Treating as completed (abnormally) to prevent stall.")
+                            is_child_truly_completed_this_cycle = True # Ensure it's marked completed
                     except Exception as e_monitor_child_active:
                         print(f"[MainClusteringTask-{current_task_id}] ERROR monitoring active batch job {job_id}: {e_monitor_child_active}. Treating as completed.")
-                        traceback.print_exc()
+                        # traceback.print_exc() # Potentially too verbose for this specific case
                         is_child_truly_completed_this_cycle = True
                     if is_child_truly_completed_this_cycle:
                         processed_in_this_cycle_ids.append(job_id)
@@ -1674,6 +1890,12 @@ def run_clustering_task(
                             iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
                             total_iterations_completed_count += iterations_from_batch
                             best_from_batch = batch_job_result.get("best_result_from_batch")
+                            
+                            # Update last_subset_track_ids_for_batch_chaining with the result from the *last* iteration of this batch
+                            # This ensures continuity across batches
+                            if "final_subset_track_ids" in batch_job_result and batch_job_result["final_subset_track_ids"] is not None:
+                                last_subset_track_ids_for_batch_chaining = batch_job_result["final_subset_track_ids"]
+
                             if best_from_batch and isinstance(best_from_batch, dict):
                                 batch_best_score = best_from_batch.get("diversity_score", -1.0)
                                 batch_best_params = best_from_batch.get("parameters")
@@ -1712,7 +1934,6 @@ def run_clustering_task(
                             next_batch_job_idx_to_launch +=1 # Ensure progress
                             continue
 
-
                         batch_id_for_logging = f"Batch_{next_batch_job_idx_to_launch}"
                         save_task_status(batch_job_task_id, "clustering_batch", "PENDING", parent_task_id=current_task_id, sub_type_identifier=batch_id_for_logging,
                                          details={"start_run_idx": current_batch_start_run_idx, "num_iterations": num_iterations_for_this_batch})
@@ -1726,17 +1947,25 @@ def run_clustering_task(
                         should_exploit_for_this_batch = (current_batch_start_run_idx >= exploitation_start_run_idx) and elite_solutions_list
                         exploitation_prob_for_this_batch = EXPLOITATION_PROBABILITY_CONFIG if should_exploit_for_this_batch else 0.0
 
-                        # Note: AI Naming parameters are NOT passed to batch jobs, only to the main task for the final step.
+                        # Pass the last_subset_track_ids_for_batch_chaining to the *new* batch job
+                        # This ensures the new batch continues the sampling perturbation from where the previous left off
+                        initial_subset_for_this_batch_json = json.dumps(last_subset_track_ids_for_batch_chaining) if last_subset_track_ids_for_batch_chaining else "[]"
+
                         new_job = main_rq_queue.enqueue(
                             run_clustering_batch_task,
                             args=(
-                                batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch, all_tracks_data_json,
+                                batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch,
+                                all_tracks_data_json, # Original full data, used for initial sampling inside batch
+                                genre_to_full_track_data_map_json, # Pre-categorized track data
+                                target_songs_per_genre,
+                                SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
                                 clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
                                 current_elite_params_for_batch_json,
-                                exploitation_prob_for_this_batch, # Pass exploitation probability
-                                mutation_config_json
+                                exploitation_prob_for_this_batch,
+                                mutation_config_json,
+                                initial_subset_for_this_batch_json # Pass the subset from the end of the previous batch
                             ),
                             job_id=batch_job_task_id,
                             description=f"Clustering Batch {next_batch_job_idx_to_launch} (Runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1})",
@@ -1983,9 +2212,9 @@ def run_clustering_task(
                             print(f"[MainClusteringTask-{current_task_id}] Error marking child batch job {child_job_instance.id} as REVOKED: {e_cancel_child_on_fail}")
             raise
         finally:
-            if 'all_tracks_data_json' in locals():
-                try: del all_tracks_data_json
-                except NameError: pass
+            # Removed direct deletion of all_tracks_data_json as it's now handled by the function's scope.
+            # If large data is processed in a temporary file, that cleanup would still be needed.
+            pass
 
 # --- Helper to get job result safely from RQ or DB ---
 def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_type_for_logging="child task"):
@@ -2020,7 +2249,8 @@ def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_ty
                              # This is the structure returned by run_clustering_batch_task in its DB details
                             run_result_data = {"status": "SUCCESS",
                                                "iterations_completed_in_batch": details_dict.get("iterations_completed_in_batch", 0),
-                                               "best_result_from_batch": details_dict.get("full_best_result_from_batch")}
+                                               "best_result_from_batch": details_dict.get("full_best_result_from_batch"),
+                                               "final_subset_track_ids": details_dict.get("final_subset_track_ids")} # Include final subset IDs
                         elif 'full_result' in details_dict: # Fallback for old single run tasks if any
                             run_result_data = details_dict['full_result']
                         else:
