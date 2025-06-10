@@ -1190,10 +1190,10 @@ def _perform_single_clustering_iteration(
             if current_score_weight_calinski_harabasz > 0: # Use current_score_weight_calinski_harabasz
                 try:
                     ch_score_raw = calinski_harabasz_score(data_for_clustering_current, labels)
-                    # Normalize Calinski-Harabasz: higher is better.
-                    # Scale down by a factor (e.g., 1000) as its range can be large.
-                    # (calinski_score / 1000.0)
-                    calinski_harabasz_metric_value = ch_score_raw / 1000.0
+                    # Normalize Calinski-Harabasz using diminishing returns:
+                    # ch_norm = 1 - math.exp(-calinski_harabasz / 5.0)
+                    # math.exp(-x) decreases as x increases. 
+                    calinski_harabasz_metric_value = 1.0 - np.exp(-ch_score_raw / 5.0)  # Apply diminishing returns
                 except ValueError as e_ch:
                     print(f"{log_prefix} Iteration {run_idx}: Calinski-Harabasz score error: {e_ch}")
                     calinski_harabasz_metric_value = 0.0 # Ensure it's 0 on error
