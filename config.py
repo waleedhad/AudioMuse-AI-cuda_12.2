@@ -49,6 +49,10 @@ PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components 
 # --- Clustering Runs for Diversity (New Constant) ---
 CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 
+# --- Batching Constants for Clustering Runs ---
+ITERATIONS_PER_BATCH_JOB = int(os.environ.get("ITERATIONS_PER_BATCH_JOB", "100")) # Number of clustering iterations per RQ batch job
+MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "5")) # Max number of batch jobs to run concurrently
+
 # --- Guided Evolutionary Clustering Constants ---
 TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10")) # Number of best solutions to keep as elites
 EXPLOITATION_START_FRACTION = float(os.environ.get("CLUSTERING_EXPLOITATION_START_FRACTION", "0.2")) # Fraction of runs before starting to use elites (e.g., 0.2 means after 20% of runs)
@@ -133,7 +137,7 @@ MIN_SONGS_PER_GENRE_FOR_STRATIFICATION = int(os.getenv("MIN_SONGS_PER_GENRE_FOR_
 
 # Percentile to use for determining the target number of songs per genre in stratified sampling.
 # E.g., 75 means the target will be based on the 75th percentile of song counts among stratified genres.
-STRATIFIED_SAMPLING_TARGET_PERCENTILE = int(os.getenv("STRATIFIED_SAMPLING_TARGET_PERCENTILE", "25"))
+STRATIFIED_SAMPLING_TARGET_PERCENTILE = int(os.getenv("STRATIFIED_SAMPLING_TARGET_PERCENTILE", "50"))
 
 # Percentage of songs to change in the stratified sample between clustering runs (0.0 to 1.0)
 SAMPLING_PERCENTAGE_CHANGE_PER_RUN = float(os.getenv("SAMPLING_PERCENTAGE_CHANGE_PER_RUN", "0.2"))

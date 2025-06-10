@@ -22,7 +22,7 @@ from rq import get_current_job
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
-# Import necessary components from the main app.py file
+# Import necessary components from the main app.py file (ensure these are available)
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
                 track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus,
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
@@ -38,7 +38,7 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,
     STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Import new config
 
 # Import AI naming function and prompt template
@@ -1830,9 +1830,6 @@ def run_clustering_task(
             exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
             all_launched_child_jobs_instances = []
             from app import rq_queue as main_rq_queue # Ensure we use the main queue
-
-            MAX_CONCURRENT_BATCH_JOBS = 10
-            ITERATIONS_PER_BATCH_JOB = 10
             active_jobs_map = {}
             total_iterations_completed_count = 0
             next_batch_job_idx_to_launch = 0
