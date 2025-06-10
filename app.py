@@ -20,7 +20,8 @@ from flasgger import Swagger, swag_from
 
 # Import configuration
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
-    REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_SILHOUETTE, \
+    REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
+    SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, \
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
@@ -512,6 +513,16 @@ def start_clustering_endpoint():
                 format: float
                 description: Weight for the Silhouette score component.
                 default: "Configured SCORE_WEIGHT_SILHOUETTE"
+              score_weight_davies_bouldin:
+                type: number
+                format: float
+                description: Weight for the Davies-Bouldin score component (higher is better for score calculation).
+                default: "Configured SCORE_WEIGHT_DAVIES_BOULDIN"
+              score_weight_calinski_harabasz:
+                type: number
+                format: float
+                description: Weight for the Calinski-Harabasz score component (higher is better).
+                default: "Configured SCORE_WEIGHT_CALINSKI_HARABASZ"
               min_songs_per_genre_for_stratification:
                 type: integer
                 description: Minimum number of songs to target per stratified genre.
@@ -603,6 +614,10 @@ def start_clustering_endpoint():
     pca_components_min_val = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
     score_weight_diversity_val = float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY))
     score_weight_silhouette_val = float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE))
+    # Retrieve new weights
+    score_weight_davies_bouldin_val = float(data.get('score_weight_davies_bouldin', SCORE_WEIGHT_DAVIES_BOULDIN))
+    score_weight_calinski_harabasz_val = float(data.get('score_weight_calinski_harabasz', SCORE_WEIGHT_CALINSKI_HARABASZ))
+
     pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
     num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
@@ -632,6 +647,7 @@ def start_clustering_endpoint():
             num_clustering_runs_val, # This is the total runs, not the batch size
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val, # Keep GMM params
             score_weight_diversity_val, score_weight_silhouette_val, # Pass the new weights
+            score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val, # Pass the new weights for DB and CH
             ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param # Pass ALL AI params
         ),
         job_id=job_id,
@@ -1124,6 +1140,12 @@ def get_config_endpoint():
                   nullable: true
                 clustering_runs:
                   type: integer
+                score_weight_davies_bouldin:
+                  type: number
+                  format: float
+                score_weight_calinski_harabasz:
+                  type: number
+                  format: float
     """
     # Ensure float values are represented correctly in the response
     # Although jsonify handles floats, explicitly casting might be clearer
@@ -1143,6 +1165,8 @@ def get_config_endpoint():
         "min_songs_per_genre_for_stratification": MIN_SONGS_PER_GENRE_FOR_STRATIFICATION,
         "score_weight_diversity": SCORE_WEIGHT_DIVERSITY, # Add diversity weight
         "score_weight_silhouette": SCORE_WEIGHT_SILHOUETTE, # Add silhouette weight
+        "score_weight_davies_bouldin": SCORE_WEIGHT_DAVIES_BOULDIN, # New: Add Davies-Bouldin weight
+        "score_weight_calinski_harabasz": SCORE_WEIGHT_CALINSKI_HARABASZ, # New: Add Calinski-Harabasz weight
         "stratified_sampling_target_percentile": STRATIFIED_SAMPLING_TARGET_PERCENTILE,
         "ai_model_provider": AI_MODEL_PROVIDER, # New provider config
         "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
