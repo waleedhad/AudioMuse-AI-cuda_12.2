@@ -883,7 +883,8 @@ def _perform_single_clustering_iteration(
     run_idx, data_subset_for_clustering, # Changed from all_tracks_data_parsed
     clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges,
     max_songs_per_cluster, log_prefix="",
-    elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None):
+    elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
+    score_weight_diversity_override=None, score_weight_silhouette_override=None): # New weight overrides
     """
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Receives a subset of track data (rows) for clustering.
@@ -893,6 +894,8 @@ def _perform_single_clustering_iteration(
     `gmm_params_ranges` is a dict like {"n_components_min": ..., "n_components_max": ...}
     `pca_params_ranges` is a dict like {"components_min": ..., "components_max": ...}
     `elite_solutions_params_list`: A list of 'parameters' dicts from previous best runs.
+    `score_weight_diversity_override`: Specific weight for diversity for this run.
+    `score_weight_silhouette_override`: Specific weight for silhouette for this run.
     `exploitation_probability`: Chance to use an elite solution for parameter generation.
     `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
@@ -901,6 +904,11 @@ def _perform_single_clustering_iteration(
         mutation_config = mutation_config or {"int_abs_delta": MUTATION_INT_ABS_DELTA, "float_abs_delta": MUTATION_FLOAT_ABS_DELTA, "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION}
         if "coord_mutation_fraction" not in mutation_config: # Ensure default if not passed
             mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
+
+        # Use override if provided, else use global config
+        current_score_weight_diversity = score_weight_diversity_override if score_weight_diversity_override is not None else SCORE_WEIGHT_DIVERSITY
+        current_score_weight_silhouette = score_weight_silhouette_override if score_weight_silhouette_override is not None else SCORE_WEIGHT_SILHOUETTE
+
 
         # --- Data Preparation ---
         # X_original is now derived from the passed data_subset_for_clustering
@@ -1155,14 +1163,14 @@ def _perform_single_clustering_iteration(
         num_samples_for_metrics = data_for_clustering_current.shape[0]
 
         if num_actual_clusters >= 2 and num_actual_clusters < num_samples_for_metrics:
-            if SCORE_WEIGHT_SILHOUETTE > 0:
+            if current_score_weight_silhouette > 0: # Use current_score_weight_silhouette
                 try:
                     s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
                     normalized_silhouette = (s_score + 1.0) / 2.0  # Normalize to [0, 1]
                 except ValueError as e_sil:
                     print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
 
-            if SCORE_WEIGHT_DAVIES_BOULDIN > 0:
+            if SCORE_WEIGHT_DAVIES_BOULDIN > 0: # Assuming this one is not overridden for now
                 try:
                     db_score = davies_bouldin_score(data_for_clustering_current, labels)
                     normalized_davies_bouldin = 1.0 / (1.0 + db_score) # Lower is better, so invert; maps to (0, 1]
@@ -1245,11 +1253,7 @@ def _perform_single_clustering_iteration(
 
         # --- Enhanced Score Calculation ---
         raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
-        # Normalize mood diversity score
-        # Divide by the number of possible mood labels to scale between 0 and 1 (approximately, as sum can exceed num_labels if scores are >1, but scores are usually 0-1)
-        # A better normalization is to divide by the number of unique predominant moods found, if any.
-        # Or, to ensure a strict 0-1 range based on potential, divide by len(MOOD_LABELS)
-        if len(MOOD_LABELS) > 0:
+        if len(MOOD_LABELS) > 0 and current_score_weight_diversity > 0: # Use current_score_weight_diversity
             base_diversity_score = raw_mood_diversity_score / len(MOOD_LABELS)
         else:
             base_diversity_score = 0.0
@@ -1380,19 +1384,20 @@ def _perform_single_clustering_iteration(
         if all_individual_playlist_other_feature_purities:
             other_feature_purity_component = sum(all_individual_playlist_other_feature_purities) / len(all_individual_playlist_other_feature_purities)
 
-        final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + \
+        final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + \
                                (SCORE_WEIGHT_PURITY * playlist_purity_component) + \
                                (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \
                                (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
-                               (SCORE_WEIGHT_SILHOUETTE * normalized_silhouette) + \
+                               (current_score_weight_silhouette * normalized_silhouette) + \
                                (SCORE_WEIGHT_DAVIES_BOULDIN * normalized_davies_bouldin) + \
                                (SCORE_WEIGHT_CALINSKI_HARABASZ * normalized_calinski_harabasz)
 
         print(f"{log_prefix} Iteration {run_idx}: "
-              f"MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
+              f"MoodDiv: {raw_mood_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
               f"OtherFeatDiv: {other_features_diversity_score:.2f} (Raw: {raw_other_features_diversity_score:.2f}), OtherFeatPur: {other_feature_purity_component:.2f}, "
               f"Sil: {normalized_silhouette:.2f}, DB: {normalized_davies_bouldin:.2f}, CH: {normalized_calinski_harabasz:.2f} (RawMoodDiv: {raw_mood_diversity_score:.2f}), "
-              f"FinalScore: {final_enhanced_score:.2f}")
+              f"FinalScore: {final_enhanced_score:.2f} (Weights: Div={current_score_weight_diversity}, Sil={current_score_weight_silhouette})")
+
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
             "diversity_score": float(final_enhanced_score), # Use the new enhanced score
@@ -1526,7 +1531,8 @@ def run_clustering_batch_task(
     target_songs_per_genre, # The dynamically determined target count
     sampling_percentage_change_per_run, # Percentage for mutation
     clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-    max_songs_per_cluster, parent_task_id,
+    max_songs_per_cluster, parent_task_id, score_weight_diversity_param, score_weight_silhouette_param, # Added score weights
+
     elite_solutions_params_list_json=None, exploitation_probability=0.0, mutation_config_json=None,
     initial_subset_track_ids_json=None # The initial subset IDs for the first run of the first batch
     ):
@@ -1663,7 +1669,9 @@ def run_clustering_batch_task(
                     max_songs_per_cluster, log_prefix=log_prefix_for_iter,
                     elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
                     exploitation_probability=exploitation_probability,
-                    mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {})
+                    mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {}),
+                    score_weight_diversity_override=score_weight_diversity_param, # Pass down
+                    score_weight_silhouette_override=score_weight_silhouette_param  # Pass down
                 )
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
@@ -1697,7 +1705,8 @@ def run_clustering_task(
     dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, # Keep these
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
     gmm_n_components_min, gmm_n_components_max,
-    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param,
+    score_weight_diversity_param, score_weight_silhouette_param, # Added score weights
+    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params must be after new score weights
     gemini_api_key_param, gemini_model_name_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
     current_job = get_current_job(redis_conn)
@@ -1716,6 +1725,8 @@ def run_clustering_task(
             "active_runs_count": 0,
             "best_score": -1.0,
             "clustering_run_job_ids": [],
+            "score_weight_diversity_for_run": score_weight_diversity_param, # Log the used weight
+            "score_weight_silhouette_for_run": score_weight_silhouette_param, # Log the used weight
             # Add AI config to initial details for logging/status
             "ai_model_provider_for_run": ai_model_provider_param,
             "ollama_model_name_for_run": ollama_model_name_param,
@@ -1988,7 +1999,8 @@ def run_clustering_task(
                                 clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
-                                current_elite_params_for_batch_json,
+                                score_weight_diversity_param, score_weight_silhouette_param, # Pass down to batch task
+                                current_elite_params_for_batch_json, # Elite params must be after new score weights
                                 exploitation_prob_for_this_batch,
                                 mutation_config_json,
                                 initial_subset_for_this_batch_json # Pass the subset from the end of the previous batch
