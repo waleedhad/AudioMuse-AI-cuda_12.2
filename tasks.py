@@ -1537,16 +1537,25 @@ def run_clustering_batch_task(
     all_tracks_data_json, # All tracks, used for initial categorization and sampling
     genre_to_full_track_data_map_json, # Pre-categorized full track data
     target_songs_per_genre, # The dynamically determined target count
-    sampling_percentage_change_per_run, clustering_method, num_clusters_min_max_tuple,
-    dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-    max_songs_per_cluster, parent_task_id, score_weight_diversity_param, score_weight_silhouette_param, # Added score weights
-
-    elite_solutions_params_list_json=None, exploitation_probability=0.0, mutation_config_json=None,
-    initial_subset_track_ids_json=None # The initial subset IDs for the first run of the first batch
+    sampling_percentage_change_per_run,
+    clustering_method,
+    num_clusters_min_max_tuple,
+    dbscan_params_ranges_dict,
+    gmm_params_ranges_dict,
+    pca_params_ranges_dict,
+    max_songs_per_cluster,
+    parent_task_id,
+    score_weight_diversity_param,
+    score_weight_silhouette_param,
+    score_weight_davies_bouldin_param, # Added Davies-Bouldin weight
+    score_weight_calinski_harabasz_param, # Added Calinski-Harabasz weight
+    elite_solutions_params_list_json, # No default, will be passed positionally
+    exploitation_probability,         # No default, will be passed positionally
+    mutation_config_json,             # No default, will be passed positionally
+    initial_subset_track_ids_json     # No default, will be passed positionally
     ):
     """RQ task to run a batch of clustering iterations with stratified sampling."""
-    # Add new params for DB and CH weights
-    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, current_job = get_current_job(redis_conn)
+    current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
