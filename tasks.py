@@ -1254,7 +1254,7 @@ def _perform_single_clustering_iteration(
         # --- Enhanced Score Calculation ---
         raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
         if len(MOOD_LABELS) > 0 and current_score_weight_diversity > 0: # Use current_score_weight_diversity
-            base_diversity_score = raw_mood_diversity_score / len(MOOD_LABELS)
+            base_diversity_score = raw_mood_diversity_score # Use the raw sum directly
         else:
             base_diversity_score = 0.0
         # Calculate playlist_purity_component
@@ -1390,7 +1390,7 @@ def _perform_single_clustering_iteration(
                                (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
                                (current_score_weight_silhouette * normalized_silhouette) + \
                                (SCORE_WEIGHT_DAVIES_BOULDIN * normalized_davies_bouldin) + \
-                               (SCORE_WEIGHT_CALINSKI_HARABASZ * normalized_calinski_harabasz)
+                               (SCORE_WEIGHT_CALINSKI_HARABASZ * normalized_calinski_harabasz) # Keep normalization for internal metrics
 
         print(f"{log_prefix} Iteration {run_idx}: "
               f"MoodDiv: {raw_mood_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
