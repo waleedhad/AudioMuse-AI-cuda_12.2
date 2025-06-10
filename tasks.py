@@ -1170,16 +1170,19 @@ def _perform_single_clustering_iteration(
             if current_score_weight_silhouette > 0: # Use current_score_weight_silhouette
                 try:
                     s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
-                    silhouette_metric_value = s_score  # Use raw Silhouette score [-1, 1]
+                    # Normalize Silhouette score from [-1, 1] to [0, 1]
+                    silhouette_metric_value = (s_score + 1) / 2.0
                 except ValueError as e_sil:
                     print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
+                    silhouette_metric_value = 0.0 # Default on error
 
             if current_score_weight_davies_bouldin > 0: # Use current_score_weight_davies_bouldin
                 try:
                     db_score_raw = davies_bouldin_score(data_for_clustering_current, labels)
-                    # Use 1 / (db_score_raw + eps) to handle db_score_raw = 0 and make higher better.
-                    # np.finfo(float).eps is the smallest representable positive number such that 1.0 + eps != 1.0.
-                    davies_bouldin_metric_value = 1.0 / (db_score_raw + np.finfo(float).eps)
+                    # Normalize Davies-Bouldin: lower is better (0 is best).
+                    # Transform to make higher better, roughly in [0, 1] range.
+                    # (1 / (1 + davies_bouldin_score))
+                    davies_bouldin_metric_value = 1.0 / (1.0 + db_score_raw)
                 except ValueError as e_db:
                     print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin score error: {e_db}")
                     davies_bouldin_metric_value = 0.0 # Ensure it's 0 on error
@@ -1187,7 +1190,10 @@ def _perform_single_clustering_iteration(
             if current_score_weight_calinski_harabasz > 0: # Use current_score_weight_calinski_harabasz
                 try:
                     ch_score_raw = calinski_harabasz_score(data_for_clustering_current, labels)
-                    calinski_harabasz_metric_value = ch_score_raw # Use raw score, higher is better
+                    # Normalize Calinski-Harabasz: higher is better.
+                    # Scale down by a factor (e.g., 1000) as its range can be large.
+                    # (calinski_score / 1000.0)
+                    calinski_harabasz_metric_value = ch_score_raw / 1000.0
                 except ValueError as e_ch:
                     print(f"{log_prefix} Iteration {run_idx}: Calinski-Harabasz score error: {e_ch}")
                     calinski_harabasz_metric_value = 0.0 # Ensure it's 0 on error
