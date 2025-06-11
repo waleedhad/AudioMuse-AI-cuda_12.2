@@ -75,15 +75,20 @@ TOP_K_MOODS_FOR_PURITY_CALCULATION = int(os.environ.get("TOP_K_MOODS_FOR_PURITY_
 # --- Statistics for Raw Score Scaling (Mood Diversity and Purity) ---
 # These are based on observed typical ranges for the raw scores.
 # The 'sd' (standard deviation) is stored as requested but not used in the current LN + MinMax scaling.
-RAW_MOOD_DIVERSITY_STATS = {
-    "min": float(os.environ.get("RAW_MOOD_DIVERSITY_MIN", "0.83")),
-    "max": float(os.environ.get("RAW_MOOD_DIVERSITY_MAX", "4.72")),
-    "sd": float(os.environ.get("RAW_MOOD_DIVERSITY_SD", "0.86"))
+# Constants for Log-Transformed and Standardized Mood Diversity
+LN_MOOD_DIVERSITY_STATS = {
+    "min": float(os.environ.get("LN_MOOD_DIVERSITY_MIN", "-0.1863")),
+    "max": float(os.environ.get("LN_MOOD_DIVERSITY_MAX", "1.5518")),
+    "mean": float(os.environ.get("LN_MOOD_DIVERSITY_MEAN", "0.9995")),
+    "sd": float(os.environ.get("LN_MOOD_DIVERSITY_SD", "0.3541"))
 }
-RAW_MOOD_PURITY_STATS = { # For the non-normalized (summed) mood purity
-    "min": float(os.environ.get("RAW_MOOD_PURITY_MIN", "2.01")),
-    "max": float(os.environ.get("RAW_MOOD_PURITY_MAX", "1456.62")),
-    "sd": float(os.environ.get("RAW_MOOD_PURITY_SD", "343.97"))
+
+# Constants for Log-Transformed and Standardized Mood Purity
+LN_MOOD_PURITY_STATS = {
+    "min": float(os.environ.get("LN_MOOD_PURITY_MIN", "0.6981")),
+    "max": float(os.environ.get("LN_MOOD_PURITY_MAX", "7.2848")),
+    "mean": float(os.environ.get("LN_MOOD_PURITY_MEAN", "5.8679")),
+    "sd": float(os.environ.get("LN_MOOD_PURITY_SD", "1.1557"))
 }
 
 # --- AI Playlist Naming ---

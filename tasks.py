@@ -38,8 +38,8 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,
-    TOP_K_MOODS_FOR_PURITY_CALCULATION, RAW_MOOD_DIVERSITY_STATS, RAW_MOOD_PURITY_STATS, # Import new stats
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, # type: ignore
+    TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS, # Use new LN stats
     STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Import new config
 
 # Import AI naming function and prompt template
@@ -1276,24 +1276,23 @@ def _perform_single_clustering_iteration(
             ln_mood_diversity = np.log1p(raw_mood_diversity_score) # log1p(x) = log(1+x)
 
             # 2. Apply Z-score standardization using configured stats
-            # ASSUMPTION: RAW_MOOD_DIVERSITY_STATS in config.py will be updated to include a "mean" key.
-            # E.g., RAW_MOOD_DIVERSITY_STATS = {"min": ..., "max": ..., "mean": ..., "sd": ...}
-            # The "sd" from config is used directly. For a more conventional Z-score of log-transformed data,
-            # the SD of the log-transformed data itself would be used.
-            raw_mean_diversity = RAW_MOOD_DIVERSITY_STATS.get("mean")
-            raw_sd_diversity = RAW_MOOD_DIVERSITY_STATS.get("sd")
+            # LN_MOOD_DIVERSITY_STATS from config.py is assumed to contain 'mean' and 'sd'
+            # of the log-transformed mood diversity scores.
+            config_mean_ln_diversity = LN_MOOD_DIVERSITY_STATS.get("mean")
+            config_sd_ln_diversity = LN_MOOD_DIVERSITY_STATS.get("sd")
 
-            if raw_mean_diversity is None or raw_sd_diversity is None:
-                print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in RAW_MOOD_DIVERSITY_STATS. Mood diversity score set to 0.")
+            if config_mean_ln_diversity is None or config_sd_ln_diversity is None:
+                print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_MOOD_DIVERSITY_STATS. Mood diversity score set to 0.")
                 base_diversity_score = 0.0
             else:
-                log_transformed_mean_diversity = np.log1p(raw_mean_diversity)
-                if abs(raw_sd_diversity) < 1e-9: # Check if SD is effectively zero
+                # The mean from LN_MOOD_DIVERSITY_STATS is already log-transformed.
+                # So, we use it directly.
+                if abs(config_sd_ln_diversity) < 1e-9: # Check if SD is effectively zero
                     # If SD is zero, and value is at the mean, Z-score is 0. Otherwise, it's undefined/infinity.
                     # Setting to 0 to prevent extreme score impact.
                     base_diversity_score = 0.0
                 else:
-                    base_diversity_score = (ln_mood_diversity - log_transformed_mean_diversity) / raw_sd_diversity
+                    base_diversity_score = (ln_mood_diversity - config_mean_ln_diversity) / config_sd_ln_diversity
                     # Note: Z-scores are not typically clipped to [0,1]. Previous clip removed.
         else:
             base_diversity_score = 0.0
@@ -1371,21 +1370,21 @@ def _perform_single_clustering_iteration(
         ln_mood_purity = np.log1p(raw_playlist_purity_component)
 
         # 2. Apply Z-score standardization using configured stats
-        # ASSUMPTION: RAW_MOOD_PURITY_STATS in config.py will be updated to include a "mean" key.
-        # E.g., RAW_MOOD_PURITY_STATS = {"min": ..., "max": ..., "mean": ..., "sd": ...}
-        # The "sd" from config is used directly.
-        raw_mean_purity = RAW_MOOD_PURITY_STATS.get("mean")
-        raw_sd_purity = RAW_MOOD_PURITY_STATS.get("sd")
+        # LN_MOOD_PURITY_STATS from config.py is assumed to contain 'mean' and 'sd'
+        # of the log-transformed mood purity scores.
+        config_mean_ln_purity = LN_MOOD_PURITY_STATS.get("mean")
+        config_sd_ln_purity = LN_MOOD_PURITY_STATS.get("sd")
 
-        if raw_mean_purity is None or raw_sd_purity is None:
-            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in RAW_MOOD_PURITY_STATS. Mood purity score set to 0.")
+        if config_mean_ln_purity is None or config_sd_ln_purity is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_MOOD_PURITY_STATS. Mood purity score set to 0.")
             playlist_purity_component = 0.0
         else:
-            log_transformed_mean_purity = np.log1p(raw_mean_purity)
-            if abs(raw_sd_purity) < 1e-9: # Check if SD is effectively zero
+            # The mean from LN_MOOD_PURITY_STATS is already log-transformed.
+            # So, we use it directly.
+            if abs(config_sd_ln_purity) < 1e-9: # Check if SD is effectively zero
                 playlist_purity_component = 0.0
             else:
-                playlist_purity_component = (ln_mood_purity - log_transformed_mean_purity) / raw_sd_purity
+                playlist_purity_component = (ln_mood_purity - config_mean_ln_purity) / config_sd_ln_purity
                 # Note: Z-scores are not typically clipped to [0,1]. Previous clip removed.
 
         # If raw_playlist_purity_component was 0 (e.g., no playlists or all songs had 0 relevant mood scores),
