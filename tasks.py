@@ -1841,7 +1841,9 @@ def run_clustering_task(
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
     gmm_n_components_min, gmm_n_components_max, # GMM params
     score_weight_diversity_param, score_weight_silhouette_param, # Existing score weights (Mood Diversity, Silhouette)
-    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # New score weights for DB and CH    
+    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # New score weights for DB and CH
+    score_weight_other_feature_diversity_param, # Added missing parameter
+    score_weight_other_feature_purity_param,    # Added missing parameter
     score_weight_purity_param, # New score weight for Purity
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params must be after new score weights
     gemini_api_key_param, gemini_model_name_param):
