@@ -893,7 +893,9 @@ def _perform_single_clustering_iteration(
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
     score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None, # New weight overrides for DB and CH
-    score_weight_purity_override=None): # Removed the unmatched ')'
+    score_weight_purity_override=None,
+    score_weight_other_feature_diversity_override=None, # Added missing parameter
+    score_weight_other_feature_purity_override=None): # Added missing parameter
     """
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Receives a subset of track data (rows) for clustering.
@@ -925,8 +927,8 @@ def _perform_single_clustering_iteration(
         current_score_weight_davies_bouldin = score_weight_davies_bouldin_override if score_weight_davies_bouldin_override is not None else SCORE_WEIGHT_DAVIES_BOULDIN
         current_score_weight_calinski_harabasz = score_weight_calinski_harabasz_override if score_weight_calinski_harabasz_override is not None else SCORE_WEIGHT_CALINSKI_HARABASZ
         current_score_weight_purity = score_weight_purity_override if score_weight_purity_override is not None else SCORE_WEIGHT_PURITY
-        current_score_weight_other_feature_diversity = score_weight_other_feature_diversity_override if score_weight_other_feature_diversity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY
-        current_score_weight_other_feature_purity = score_weight_other_feature_purity_override if score_weight_other_feature_purity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_PURITY
+        current_score_weight_other_feature_diversity = score_weight_other_feature_diversity_override if score_weight_other_feature_diversity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY # Now uses defined param
+        current_score_weight_other_feature_purity = score_weight_other_feature_purity_override if score_weight_other_feature_purity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_PURITY # Now uses defined param
 
         # --- Data Preparation ---
         # X_original is now derived from the passed data_subset_for_clustering
@@ -1502,13 +1504,7 @@ def _perform_single_clustering_iteration(
             else:
                 other_feature_purity_component = (ln_other_features_purity - config_mean_ln_other_pur) / config_sd_ln_other_pur
 
-        final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + \
-                               (current_score_weight_purity * playlist_purity_component) + \ # Mood Purity
-                               (current_score_weight_other_feature_diversity * other_features_diversity_score) + \ # Other Feature Diversity
-                               (current_score_weight_other_feature_purity * other_feature_purity_component) + \ # Other Feature Purity
-                               (current_score_weight_silhouette * silhouette_metric_value) + \
-                               (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + \
-                               (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
+        final_enhanced_score = (current_score_weight_diversity * base_diversity_score) +  (current_score_weight_purity * playlist_purity_component) + (current_score_weight_other_feature_diversity * other_features_diversity_score) + (current_score_weight_other_feature_purity * other_feature_purity_component) + (current_score_weight_silhouette * silhouette_metric_value) + (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
 
         print(f"{log_prefix} Iteration {run_idx}: "
               f"Scores -> MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
