@@ -76,7 +76,7 @@ def get_ollama_playlist_name(ollama_url, model_name, full_prompt):
     try:
         print(f"DEBUG AI (Ollama): Starting API call for model '{model_name}' at '{ollama_url}'.") # Debug print
 
-        response = requests.post(ollama_url, headers=headers, data=json.dumps(payload), stream=True, timeout=480) # Increased timeout
+        response = requests.post(ollama_url, headers=headers, data=json.dumps(payload), stream=True, timeout=960) # Increased timeout
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
         full_raw_response_content = ""
         for line in response.iter_lines():
@@ -135,7 +135,7 @@ def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
         model = genai.GenerativeModel(model_name)
 
         print(f"DEBUG AI (Gemini): Starting API call for model '{model_name}'.") # Debug print
-        response = model.generate_content(full_prompt, request_options={'timeout': 480}) # Increased timeout
+        response = model.generate_content(full_prompt, request_options={'timeout': 960}) # Increased timeout
 
         # Extract text from the response
         if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:

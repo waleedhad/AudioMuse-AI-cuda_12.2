@@ -1178,6 +1178,11 @@ def _perform_single_clustering_iteration(
         davies_bouldin_metric_value = 0.0 # Initialize Davies-Bouldin metric
         calinski_harabasz_metric_value = 0.0 # Initialize Calinski-Harabasz metric
 
+        # Initialize raw scores for logging, in case metrics are not calculated
+        s_score_raw_val_for_log = 0.0
+        db_score_raw_val_for_log = 0.0
+        ch_score_raw_val_for_log = 0.0
+
         num_actual_clusters = len(set(labels) - {-1}) # Number of clusters, excluding noise
         num_samples_for_metrics = data_for_clustering_current.shape[0]
 
@@ -1185,15 +1190,16 @@ def _perform_single_clustering_iteration(
             if current_score_weight_silhouette > 0: # Use current_score_weight_silhouette
                 try:
                     s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
+                    s_score_raw_val_for_log = s_score # Store raw value for logging
                     # Normalize Silhouette score from [-1, 1] to [0, 1]
                     silhouette_metric_value = (s_score + 1) / 2.0
                 except ValueError as e_sil:
                     print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
                     silhouette_metric_value = 0.0 # Default on error
-
             if current_score_weight_davies_bouldin > 0: # Use current_score_weight_davies_bouldin
                 try:
                     db_score_raw = davies_bouldin_score(data_for_clustering_current, labels)
+                    db_score_raw_val_for_log = db_score_raw # Store raw value for logging
                     # Normalize Davies-Bouldin: lower is better (0 is best).
                     # Transform to make higher better, roughly in [0, 1] range.
                     # (1 / (1 + davies_bouldin_score))
@@ -1201,10 +1207,10 @@ def _perform_single_clustering_iteration(
                 except ValueError as e_db:
                     print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin score error: {e_db}")
                     davies_bouldin_metric_value = 0.0 # Ensure it's 0 on error
-
             if current_score_weight_calinski_harabasz > 0: # Use current_score_weight_calinski_harabasz
                 try:
                     ch_score_raw = calinski_harabasz_score(data_for_clustering_current, labels)
+                    ch_score_raw_val_for_log = ch_score_raw # Store raw value for logging
                     # Normalize Calinski-Harabasz using diminishing returns.
                     # The scaling factor (previously 5.0) needs to be larger to prevent
                     # exp(-ch_score_raw / factor) from becoming 0 too quickly for typical CH scores.
@@ -1507,9 +1513,14 @@ def _perform_single_clustering_iteration(
         final_enhanced_score = (current_score_weight_diversity * base_diversity_score) +  (current_score_weight_purity * playlist_purity_component) + (current_score_weight_other_feature_diversity * other_features_diversity_score) + (current_score_weight_other_feature_purity * other_feature_purity_component) + (current_score_weight_silhouette * silhouette_metric_value) + (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
 
         print(f"{log_prefix} Iteration {run_idx}: "
-              f"Scores -> MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
-              f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
-              f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, FinalScore: {final_enhanced_score:.2f} "
+              f"Scores -> MoodDiv: {raw_mood_diversity_score:.2f}/{base_diversity_score:.2f}, "
+              f"MoodPur: {raw_playlist_purity_component:.2f}/{playlist_purity_component:.2f}, "
+              f"OtherFeatDiv: {raw_other_features_diversity_score:.2f}/{other_features_diversity_score:.2f}, "
+              f"OtherFeatPur: {raw_other_feature_purity_component:.2f}/{other_feature_purity_component:.2f}, "
+              f"Sil: {s_score_raw_val_for_log:.2f}/{silhouette_metric_value:.2f}, "
+              f"DB: {db_score_raw_val_for_log:.2f}/{davies_bouldin_metric_value:.2f}, "
+              f"CH: {ch_score_raw_val_for_log:.2f}/{calinski_harabasz_metric_value:.2f}, "
+              f"FinalScore: {final_enhanced_score:.2f} "
               f"(Weights: MoodDiv={current_score_weight_diversity}, MoodPur={current_score_weight_purity}, "
               f"OtherFeatDiv={current_score_weight_other_feature_diversity}, OtherFeatPur={current_score_weight_other_feature_purity}, "
               f"Sil={current_score_weight_silhouette}, "

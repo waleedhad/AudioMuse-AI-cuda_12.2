@@ -95,17 +95,17 @@ LN_MOOD_PURITY_STATS = {
 # IMPORTANT: Replace these placeholder values with actual statistics derived from your data.
 # These are used for Z-score standardization of the "other features" diversity and purity.
 LN_OTHER_FEATURES_DIVERSITY_STATS = {
-    "min": float(os.environ.get("LN_OTHER_FEAT_DIV_MIN", "0.0")), # Placeholder
-    "max": float(os.environ.get("LN_OTHER_FEAT_DIV_MAX", "2.5")), # Placeholder
-    "mean": float(os.environ.get("LN_OTHER_FEAT_DIV_MEAN", "1.2")), # Placeholder
-    "sd": float(os.environ.get("LN_OTHER_FEAT_DIV_SD", "0.4"))      # Placeholder
+    "min": float(os.environ.get("LN_OTHER_FEAT_DIV_MIN", "-0.19")), # Placeholder
+    "max": float(os.environ.get("LN_OTHER_FEAT_DIV_MAX", "2.06")), # Placeholder
+    "mean": float(os.environ.get("LN_OTHER_FEAT_DIV_MEAN", "1.5")), # Placeholder
+    "sd": float(os.environ.get("LN_OTHER_FEAT_DIV_SD", "0.46"))      # Placeholder
 }
 
 LN_OTHER_FEATURES_PURITY_STATS = {
-    "min": float(os.environ.get("LN_OTHER_FEAT_PUR_MIN", "0.0")),  # Placeholder
-    "max": float(os.environ.get("LN_OTHER_FEAT_PUR_MAX", "8.0")),  # Placeholder
-    "mean": float(os.environ.get("LN_OTHER_FEAT_PUR_MEAN", "4.0")),  # Placeholder
-    "sd": float(os.environ.get("LN_OTHER_FEAT_PUR_SD", "1.5"))       # Placeholder
+    "min": float(os.environ.get("LN_OTHER_FEAT_PUR_MIN", "8.67")),   # Updated value
+    "max": float(os.environ.get("LN_OTHER_FEAT_PUR_MAX", "8.95")),   # Updated value
+    "mean": float(os.environ.get("LN_OTHER_FEAT_PUR_MEAN", "8.84")),  # Updated value
+    "sd": float(os.environ.get("LN_OTHER_FEAT_PUR_SD", "0.07"))     # Updated value
 }
 
 # Threshold for considering an "other feature" predominant in a playlist for purity calculation
