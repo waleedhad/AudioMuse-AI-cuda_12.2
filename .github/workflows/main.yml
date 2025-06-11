@@ -19,8 +19,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          lfs: true # <-- ADDED THIS LINE to ensure LFS files are downloaded
+        # Removed lfs: true as models are now downloaded directly in Dockerfile
+        # with:
+        #   lfs: true # <-- Removed this line
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -184,7 +185,7 @@ jobs:
               # Look for the "Listening on" log message which indicates RQ worker startup
               # RQ worker logs typically include "Listening on <queue_name>..."
               # Giving a bit more time for logs to appear
-              sleep 2 
+              sleep 2
               if docker logs rq-test-worker 2>&1 | grep -E "Listening on|RQ Worker [^ ]+ started"; then # Added alternative RQ startup message
                   echo "RQ worker container is running and listening."
                   exit 0
