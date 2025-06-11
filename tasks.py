@@ -102,8 +102,8 @@ def download_track(jellyfin_url, headers, temp_dir, item):
             f.write(r.content)
         return path
     except Exception as e:
-        print(f"ERROR: download_track {item['Name']}: {e}")
-        return None
+            print(f"ERROR: download_track {item['Name']}: {e}")
+            return None
 
 def predict_moods(embeddings_input, prediction_model_path, mood_labels_list):
     """Predicts moods using pre-computed embeddings and a mood classification model."""
@@ -143,8 +143,6 @@ def predict_other_models(embeddings): # Now accepts embeddings
         except Exception as e:
             print(f"Error predicting {mood}: {e}")
             predictions[mood] = 0.0  # Default value in case of error
-
-    return predictions
 
 
 def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list):
@@ -887,7 +885,7 @@ def _perform_single_clustering_iteration(
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
     score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None, # New weight overrides for DB and CH
-    score_weight_purity_override=None): # New weight override for Purity
+    score_weight_purity_override=None): # Removed the unmatched ')'
     """    
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Receives a subset of track data (rows) for clustering.
@@ -1068,7 +1066,7 @@ def _perform_single_clustering_iteration(
             max_clusters_or_components_rand = data_for_clustering_current.shape[0]
             if max_clusters_or_components_rand == 0: # No data points after PCA
                  print(f"{log_prefix} Iteration {run_idx}: No data points available after PCA for random parameter generation.")
-                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"pca_config": pca_config}} # Add scaler_details
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
 
             if clustering_method == "kmeans":
                 k_rand = random.randint(max(1, num_clusters_min_max[0]), min(num_clusters_min_max[1], max_clusters_or_components_rand)) # Ensure min clusters is at least 1
@@ -1125,7 +1123,6 @@ def _perform_single_clustering_iteration(
 
             initial_centroids_np = np.array(params_from_config["initial_centroids"])
 
-            # Ensure n_clusters matches the number of initial centroids provided
             if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: # Empty array from empty list
                  print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids resulted in empty numpy array. Cannot cluster.")
                  return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
@@ -1252,22 +1249,29 @@ def _perform_single_clustering_iteration(
                         unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score)
 
                 # New: Extract predominant other feature for diversity score
-                centroid_other_features_from_top_scores = {
+                # This dictionary contains other feature scores from the current centroid's top_scores
+                centroid_other_features_for_diversity_evaluation = {
                     label: top_scores.get(label, 0.0)
                     for label in OTHER_FEATURE_LABELS if label in top_scores
-                } # Semicolon was here, removed for consistency, though not a functional error.
-                predominant_other_feature_key_for_diversity = None
-                max_other_feature_score_for_diversity = 0.3 # Threshold for considering a feature predominant
-                if centroid_other_features_from_top_scores: # Check for other features
-                    for feature_label, feature_score in centroid_other_features_from_top_scores.items():
-                        if feature_score > max_other_feature_score_for_diversity:
-                            max_other_feature_score_for_diversity = feature_score
-                            predominant_other_feature_key_for_diversity = feature_label
+                }
                 
-                if predominant_other_feature_key_for_diversity:
-                    unique_predominant_other_feature_scores[predominant_other_feature_key_for_diversity] = max(
-                        unique_predominant_other_feature_scores.get(predominant_other_feature_key_for_diversity, 0.0),
-                        max_other_feature_score_for_diversity
+                predominant_other_feature_key_for_diversity_score_calc = None
+                # This variable will hold the *score* of the most predominant "other feature" found so far for this centroid.
+                # Initialize with a threshold. Only features scoring higher than this will be considered.
+                highest_predominant_other_feature_score_this_centroid = 0.3 # Threshold for considering a feature predominant
+
+                if centroid_other_features_for_diversity_evaluation: # Check if the dict is not empty
+                    for feature_label, feature_score in centroid_other_features_for_diversity_evaluation.items():
+                        if feature_score > highest_predominant_other_feature_score_this_centroid:
+                            highest_predominant_other_feature_score_this_centroid = feature_score # Update the max score found
+                            predominant_other_feature_key_for_diversity_score_calc = feature_label # Update the key of the predominant feature
+                
+                # If a predominant "other feature" (above threshold) was found for this centroid
+                if predominant_other_feature_key_for_diversity_score_calc:
+                     # Store/update the highest score found for this feature across all centroids
+                     unique_predominant_other_feature_scores[predominant_other_feature_key_for_diversity_score_calc] = max(
+                        unique_predominant_other_feature_scores.get(predominant_other_feature_key_for_diversity_score_calc, 0.0),
+                        highest_predominant_other_feature_score_this_centroid # Use the actual highest score of the predominant feature for this centroid
                     )
                 current_named_playlists[name].extend(songs_list)
                 current_playlist_centroids[name] = top_scores
@@ -1360,7 +1364,7 @@ def _perform_single_clustering_iteration(
                                 if mood_idx < len(song_mood_scores_vector):
                                     song_score_for_this_centroid_mood = song_mood_scores_vector[mood_idx]
                                     if song_score_for_this_centroid_mood > max_score_for_song_among_top_centroid_moods:
-                                        max_score_for_song_among_top_centroid_moods = song_score_for_this_centroid_mood
+                                        max_score_for_song_among_top_centroid_moods = song_mood_scores_vector[mood_idx] # Keep only the highest score
                             except ValueError: # Should not happen if MOOD_LABELS is consistent
                                 pass 
                         current_playlist_song_purity_scores.append(max_score_for_song_among_top_centroid_moods)
@@ -1761,7 +1765,7 @@ def run_clustering_batch_task(
                     score_weight_silhouette_override=score_weight_silhouette_param,
                     score_weight_davies_bouldin_override=score_weight_davies_bouldin_param,       # Pass down DB weight
                     score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param, # Pass down CH weight
-                    score_weight_purity_override=score_weight_purity_param # Pass down Purity weight
+                    score_weight_purity_override=score_weight_purity_param 
                 )
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
@@ -2229,7 +2233,7 @@ def run_clustering_task(
                             creative_prompt_template,
                             feature1, feature2, feature3, # Pass all three features
                             song_list_for_ai,
-                            centroid_features_for_ai) # Pass the comprehensive centroid features
+                            centroid_features_for_ai)
 
                         # Debug print for the raw AI-generated name string
                         print(f"{log_prefix_main_task_ai} Raw AI output for '{original_name}': '{ai_generated_name_str}'")
