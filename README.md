@@ -99,7 +99,7 @@ The **mandatory** parameter that you need to change from the example are this:
 
 | Parameter          | Description                                    | Default Value                     |
 |--------------------|------------------------------------------------|-----------------------------------|
-| `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://YOUR_JELLYFIN_IP:8096`    |
+| `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://your_jellyfin_url:8096`   |
 | `JELLYFIN_USER_ID` | (Required) Jellyfin User ID.                   | *(N/A - from Secret)* |
 | `JELLYFIN_TOKEN`   | (Required) Jellyfin API Token.                 | *(N/A - from Secret)* |
 | `POSTGRES_USER`    | (Required) PostgreSQL username.                | *(N/A - from Secret)* |
@@ -125,21 +125,28 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `3000`                               |
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
-| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
-| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `40`                                 |
+| `TOP_N_OTHER_FEATURES`                   | Number of top "other features" to consider for clustering vector.            | `2`                                  |
+| `ENERGY_MIN`                             | Minimum value for energy normalization.                                      | `0.01`                               |
+| `ENERGY_MAX`                             | Maximum value for energy normalization.                                      | `0.15`                               |
+| `TEMPO_MIN_BPM`                          | Minimum BPM for tempo normalization.                                         | `40.0`                               |
+| `TEMPO_MAX_BPM`                          | Maximum BPM for tempo normalization.                                         | `200.0`                              |
+| **Clustering General**                   |                                                                              |                                      |
+| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                               | `kmeans`                             |
+| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment (0 for no limit).                   | `0`                                  |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
-| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
+| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `5000`                               |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
-| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `100`                                |
-| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `5`                                  |
+| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                 |
+| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `6`                                  |
 | `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
+| `OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY` | Threshold for an "other feature" to be predominant for purity calculation. | `0.3`                                |
 | `SAMPLING_PERCENTAGE_CHANGE_PER_RUN`     | Percentage of songs to swap out in the stratified sample between runs (0.0 to 1.0). | `0.2`                                |
 | `MIN_SONGS_PER_GENRE_FOR_STRATIFICATION` | Minimum number of songs to target per stratified genre during sampling.    | `100`                                |
 | `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `75`                                 |
 | `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
 | `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
-| `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
+| `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                    | `0.7`                                |
 | `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
 | `MUTATION_FLOAT_ABS_DELTA`               | Max absolute change for float parameter mutation.                          | `0.05`                               |
 | `MUTATION_KMEANS_COORD_FRACTION`         | Fractional change for KMeans centroid coordinates.                       | `0.05`                               |
@@ -160,16 +167,16 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
 | `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `8`                                  |
 | **AI Naming (*)**                        |                                                                              |                                      |
-| `SCORE_WEIGHT_PURITY`                    | Weight for playlist purity (intra-playlist mood consistency).                | `0.4`                                |
-| `SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY`   | Weight for inter-playlist 'other feature' diversity.                       | `0.3`                                |
-| `SCORE_WEIGHT_OTHER_FEATURE_PURITY`      | Weight for intra-playlist 'other feature' consistency.                     | `0.2`                                |
+| `SCORE_WEIGHT_PURITY`                    | Weight for playlist purity (intra-playlist mood consistency).                | `1.0`                                |
+| `SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY`   | Weight for inter-playlist 'other feature' diversity.                       | `0.0`                                |
+| `SCORE_WEIGHT_OTHER_FEATURE_PURITY`      | Weight for intra-playlist 'other feature' consistency.                     | `0.0`                                |
 | `SCORE_WEIGHT_SILHOUETTE`                | Weight for Silhouette Score (cluster separation).                          | `0.0`                                |
 | `SCORE_WEIGHT_DAVIES_BOULDIN`            | Weight for Davies-Bouldin Index (cluster separation).                    | `0.0`                                |
 | `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
 | `AI_MODEL_PROVIDER`                      | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                | `NONE`                               |
 | `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>11434/api/generate` |
 | `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
-| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            | # Corrected typo
+| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
 
@@ -446,18 +453,6 @@ This MVP lays the groundwork for further development:
 ## **Contributing**
 
 Contributions, issues, and feature requests are welcome\!  
-This is an ALPHA early release, so expect bugs or functions that are still not implemented.
+This is an **BETA** early release, so expect bugs or functions that are still not implemented.
 
-If you want to clone this repository remember that **GIT LARGE FILE** is used for the essentia-tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
-
-```
-sudo apt-get install git-lfs
-git clone --branch devel https://github.com/NeptuneHub/AudioMuse-AI.git
-```
-
-The large file was created in this way (in case you need to add more):
-```
-git lfs install
-git lfs track "*.pb"
-git add .gitattributes
-```
+**GIT LARGE FILE REMOVED** now the model are attached in a specific model release here: https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v1.0.0-model
