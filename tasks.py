@@ -38,9 +38,11 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, # type: ignore
-    TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS, # Use new LN stats
-    STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Import new config
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,  # type: ignore
+    TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
+    LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
+    STRATIFIED_SAMPLING_TARGET_PERCENTILE, # Import new config
+    OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY) # Import the new config
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
@@ -1404,16 +1406,28 @@ def _perform_single_clustering_iteration(
 
 
         # New: Calculate other_features_diversity_score
+        # This is already a sum of predominant "other feature" scores.
         raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
-        # Normalize other feature diversity score
-        if len(OTHER_FEATURE_LABELS) > 0:
-            other_features_diversity_score = raw_other_features_diversity_score / len(OTHER_FEATURE_LABELS)
-        else:
+        
+        # Apply LN transformation and Z-score standardization
+        ln_other_features_diversity = np.log1p(raw_other_features_diversity_score)
+        
+        config_mean_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("mean")
+        config_sd_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("sd")
+
+        if config_mean_ln_other_div is None or config_sd_ln_other_div is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_OTHER_FEATURES_DIVERSITY_STATS. OtherFeatDiv set to 0.")
             other_features_diversity_score = 0.0
+        else:
+            if abs(config_sd_ln_other_div) < 1e-9:
+                other_features_diversity_score = 0.0
+            else:
+                other_features_diversity_score = (ln_other_features_diversity - config_mean_ln_other_div) / config_sd_ln_other_div
 
         # New: Calculate other_feature_purity_component
+        # This will now be a sum of sums, analogous to mood purity.
         all_individual_playlist_other_feature_purities = []
-        OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY = 0.3 # Can be tuned
+        # OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY = 0.3 # Now using from config
 
         if current_named_playlists and OTHER_FEATURE_LABELS: # Ensure there are other features defined
             for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
@@ -1427,7 +1441,7 @@ def _perform_single_clustering_iteration(
                 }
 
                 predominant_other_feature_for_this_playlist = None
-                max_score_for_predominant_other = OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY
+                max_score_for_predominant_other = CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY
                 if centroid_other_features_for_purity:
                     for feature_label, feature_score in centroid_other_features_for_purity.items():
                         if feature_score > max_score_for_predominant_other:
@@ -1454,13 +1468,29 @@ def _perform_single_clustering_iteration(
                             scores_of_predominant_other_feature_for_songs.append(song_specific_score)
                 
                 if scores_of_predominant_other_feature_for_songs:
-                    avg_other_feature_purity = sum(scores_of_predominant_other_feature_for_songs) / len(scores_of_predominant_other_feature_for_songs)
-                    all_individual_playlist_other_feature_purities.append(avg_other_feature_purity)
+                    # Sum of scores for the predominant other feature in this playlist
+                    sum_other_feature_purity_for_playlist = sum(scores_of_predominant_other_feature_for_songs)
+                    all_individual_playlist_other_feature_purities.append(sum_other_feature_purity_for_playlist)
 
-        other_feature_purity_component = 0.0
+        raw_other_feature_purity_component = 0.0
         if all_individual_playlist_other_feature_purities:
-            other_feature_purity_component = sum(all_individual_playlist_other_feature_purities) / len(all_individual_playlist_other_feature_purities)
+            raw_other_feature_purity_component = sum(all_individual_playlist_other_feature_purities)
 
+        # Apply LN transformation and Z-score standardization
+        ln_other_features_purity = np.log1p(raw_other_feature_purity_component)
+
+        config_mean_ln_other_pur = LN_OTHER_FEATURES_PURITY_STATS.get("mean")
+        config_sd_ln_other_pur = LN_OTHER_FEATURES_PURITY_STATS.get("sd")
+
+        if config_mean_ln_other_pur is None or config_sd_ln_other_pur is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_OTHER_FEATURES_PURITY_STATS. OtherFeatPur set to 0.")
+            other_feature_purity_component = 0.0
+        else:
+            if abs(config_sd_ln_other_pur) < 1e-9:
+                other_feature_purity_component = 0.0
+            else:
+                other_feature_purity_component = (ln_other_features_purity - config_mean_ln_other_pur) / config_sd_ln_other_pur
+                
         final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + \
                                (current_score_weight_purity * playlist_purity_component) + \
                                (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \

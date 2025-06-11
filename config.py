@@ -91,6 +91,26 @@ LN_MOOD_PURITY_STATS = {
     "sd": float(os.environ.get("LN_MOOD_PURITY_SD", "1.1557"))
 }
 
+# --- Statistics for Log-Transformed and Standardized "Other Features" Scores ---
+# IMPORTANT: Replace these placeholder values with actual statistics derived from your data.
+# These are used for Z-score standardization of the "other features" diversity and purity.
+LN_OTHER_FEATURES_DIVERSITY_STATS = {
+    "min": float(os.environ.get("LN_OTHER_FEAT_DIV_MIN", "0.0")), # Placeholder
+    "max": float(os.environ.get("LN_OTHER_FEAT_DIV_MAX", "2.5")), # Placeholder
+    "mean": float(os.environ.get("LN_OTHER_FEAT_DIV_MEAN", "1.2")), # Placeholder
+    "sd": float(os.environ.get("LN_OTHER_FEAT_DIV_SD", "0.4"))      # Placeholder
+}
+
+LN_OTHER_FEATURES_PURITY_STATS = {
+    "min": float(os.environ.get("LN_OTHER_FEAT_PUR_MIN", "0.0")),  # Placeholder
+    "max": float(os.environ.get("LN_OTHER_FEAT_PUR_MAX", "8.0")),  # Placeholder
+    "mean": float(os.environ.get("LN_OTHER_FEAT_PUR_MEAN", "4.0")),  # Placeholder
+    "sd": float(os.environ.get("LN_OTHER_FEAT_PUR_SD", "1.5"))       # Placeholder
+}
+
+# Threshold for considering an "other feature" predominant in a playlist for purity calculation
+OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY = float(os.environ.get("OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY", "0.3"))
+
 # --- AI Playlist Naming ---
 # USE_AI_PLAYLIST_NAMING is replaced by AI_MODEL_PROVIDER
 OLLAMA_SERVER_URL = os.environ.get("OLLAMA_SERVER_URL", "http://192.168.3.15:11434/api/generate") # URL for your Ollama instance
