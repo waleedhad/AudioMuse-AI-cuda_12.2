@@ -76,11 +76,11 @@ spec:
         image: redis:7-alpine # Lightweight Redis image
         resources:
           limits:
-            cpu: 500m
-            memory: 500Mi
+            cpu: 2000m
+            memory: 8000Mi
           requests:
-            cpu: 50m
-            memory: 64Mi
+            cpu: 2000m
+            memory: 8000Mi
         ports:
         - containerPort: 6379
 ---
@@ -149,7 +149,7 @@ spec:
         resources:
           limits:
             cpu: "1"
-            memory: "1Gi"
+            memory: "8Gi"
           requests:
             cpu: "250m"
             memory: "256Mi"
