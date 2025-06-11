@@ -32,8 +32,8 @@ DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20"))
 
 # --- KMEANS Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for KMeans parameters
-NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "20"))
-NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "60"))
+NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "40"))
+NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "100"))
 
 # --- GMM Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for GMM parameters
