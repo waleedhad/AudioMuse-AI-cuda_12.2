@@ -888,7 +888,7 @@ def _perform_single_clustering_iteration(
     score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
     score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None, # New weight overrides for DB and CH
     score_weight_purity_override=None): # Removed the unmatched ')'
-    """    
+    """
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Receives a subset of track data (rows) for clustering.
     Returns a result dictionary or None on failure.
@@ -901,7 +901,9 @@ def _perform_single_clustering_iteration(
     `score_weight_silhouette_override`: Specific weight for silhouette for this run.
     `score_weight_davies_bouldin_override`: Specific weight for Davies-Bouldin for this run.
     `score_weight_calinski_harabasz_override`: Specific weight for Calinski-Harabasz for this run.
-    `score_weight_purity_override`: Specific weight for purity for this run.
+    `score_weight_purity_override`: Specific weight for mood purity for this run.
+    `score_weight_other_feature_diversity_override`: Specific weight for other feature diversity.
+    `score_weight_other_feature_purity_override`: Specific weight for other feature purity.
     `exploitation_probability`: Chance to use an elite solution for parameter generation.
     `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
@@ -917,6 +919,8 @@ def _perform_single_clustering_iteration(
         current_score_weight_davies_bouldin = score_weight_davies_bouldin_override if score_weight_davies_bouldin_override is not None else SCORE_WEIGHT_DAVIES_BOULDIN
         current_score_weight_calinski_harabasz = score_weight_calinski_harabasz_override if score_weight_calinski_harabasz_override is not None else SCORE_WEIGHT_CALINSKI_HARABASZ
         current_score_weight_purity = score_weight_purity_override if score_weight_purity_override is not None else SCORE_WEIGHT_PURITY
+        current_score_weight_other_feature_diversity = score_weight_other_feature_diversity_override if score_weight_other_feature_diversity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY
+        current_score_weight_other_feature_purity = score_weight_other_feature_purity_override if score_weight_other_feature_purity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_PURITY
 
         # --- Data Preparation ---
         # X_original is now derived from the passed data_subset_for_clustering
@@ -1257,7 +1261,7 @@ def _perform_single_clustering_iteration(
                     for label in OTHER_FEATURE_LABELS if label in top_scores
                 }
                 
-                predominant_other_feature_key_for_diversity_score_calc = None
+                predominant_other_feature_key_for_diversity_score_calc = None # This will store the label of the single most predominant feature (above threshold)
                 # This variable will hold the *score* of the most predominant "other feature" found so far for this centroid.
                 # Initialize with a threshold. Only features scoring higher than this will be considered.
                 highest_predominant_other_feature_score_this_centroid = 0.3 # Threshold for considering a feature predominant
@@ -1369,8 +1373,8 @@ def _perform_single_clustering_iteration(
                                         max_score_for_song_among_top_centroid_moods = song_mood_scores_vector[mood_idx] # Keep only the highest score
                             except ValueError: # Should not happen if MOOD_LABELS is consistent
                                 pass 
-                        current_playlist_song_purity_scores.append(max_score_for_song_among_top_centroid_moods)
-
+                        if max_score_for_song_among_top_centroid_moods > 0: # Only add if there's a positive score
+                            current_playlist_song_purity_scores.append(max_score_for_song_among_top_centroid_moods)
                 if current_playlist_song_purity_scores:
                     sum_purity_for_this_playlist = sum(current_playlist_song_purity_scores) # Changed from average to sum
                     all_individual_playlist_purities.append(sum_purity_for_this_playlist) # Add sum to list
@@ -1407,7 +1411,7 @@ def _perform_single_clustering_iteration(
 
         # New: Calculate other_features_diversity_score
         # This is already a sum of predominant "other feature" scores.
-        raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
+        raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values()) # This sum is already based on scores > threshold
         
         # Apply LN transformation and Z-score standardization
         ln_other_features_diversity = np.log1p(raw_other_features_diversity_score)
@@ -1466,7 +1470,8 @@ def _perform_single_clustering_iteration(
                         if predominant_other_feature_index_in_labels < len(song_other_features_vector):
                             song_specific_score = song_other_features_vector[predominant_other_feature_index_in_labels]
                             scores_of_predominant_other_feature_for_songs.append(song_specific_score)
-                
+
+                # Sum the scores of the predominant other feature for all songs in this playlist
                 if scores_of_predominant_other_feature_for_songs:
                     # Sum of scores for the predominant other feature in this playlist
                     sum_other_feature_purity_for_playlist = sum(scores_of_predominant_other_feature_for_songs)
@@ -1492,8 +1497,8 @@ def _perform_single_clustering_iteration(
                 other_feature_purity_component = (ln_other_features_purity - config_mean_ln_other_pur) / config_sd_ln_other_pur
                 
         final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + \
-                               (current_score_weight_purity * playlist_purity_component) + \
-                               (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \
+                               (current_score_weight_purity * playlist_purity_component) + \ # Mood Purity
+                               (current_score_weight_other_feature_diversity * other_features_diversity_score) + \ # Other Feature Diversity
                                (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
                                (current_score_weight_silhouette * silhouette_metric_value) + \
                                (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + \
@@ -1502,8 +1507,8 @@ def _perform_single_clustering_iteration(
         print(f"{log_prefix} Iteration {run_idx}: "
               f"Scores -> MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
               f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
-              f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, "
-              f"FinalScore: {final_enhanced_score:.2f} (Weights: MoodDiv={current_score_weight_diversity}, "
+              f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, FinalScore: {final_enhanced_score:.2f} "
+              f"(Weights: MoodDiv={current_score_weight_diversity}, "
               f"MoodPur={current_score_weight_purity}, OtherFeatDiv={SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY}, "
               f"OtherFeatPur={SCORE_WEIGHT_OTHER_FEATURE_PURITY}, Sil={current_score_weight_silhouette}, "
               f"DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
@@ -1651,6 +1656,8 @@ def run_clustering_batch_task(
     score_weight_silhouette_param,
     score_weight_davies_bouldin_param, # Added Davies-Bouldin weight
     score_weight_calinski_harabasz_param, # Added Calinski-Harabasz weight
+    score_weight_other_feature_diversity_param, # Added Other Feature Diversity weight
+    score_weight_other_feature_purity_param, # Added Other Feature Purity weight
     score_weight_purity_param, # Added Purity weight
     elite_solutions_params_list_json, # No default, will be passed positionally
     exploitation_probability,         # No default, will be passed positionally
@@ -1795,7 +1802,9 @@ def run_clustering_batch_task(
                     score_weight_silhouette_override=score_weight_silhouette_param,
                     score_weight_davies_bouldin_override=score_weight_davies_bouldin_param,       # Pass down DB weight
                     score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param, # Pass down CH weight
-                    score_weight_purity_override=score_weight_purity_param 
+                    score_weight_purity_override=score_weight_purity_param,
+                    score_weight_other_feature_diversity_override=score_weight_other_feature_diversity_param, # Pass down Other Feature Diversity weight
+                    score_weight_other_feature_purity_override=score_weight_other_feature_purity_param # Pass down Other Feature Purity weight
                 )
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
@@ -1829,7 +1838,7 @@ def run_clustering_task(
     dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, # Keep these
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
     gmm_n_components_min, gmm_n_components_max, # GMM params
-    score_weight_diversity_param, score_weight_silhouette_param, # Existing score weights
+    score_weight_diversity_param, score_weight_silhouette_param, # Existing score weights (Mood Diversity, Silhouette)
     score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # New score weights for DB and CH    
     score_weight_purity_param, # New score weight for Purity
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params must be after new score weights
@@ -1855,6 +1864,8 @@ def run_clustering_task(
             "score_weight_silhouette_for_run": score_weight_silhouette_param,
             "score_weight_davies_bouldin_for_run": score_weight_davies_bouldin_param,     # Log DB weight
             "score_weight_calinski_harabasz_for_run": score_weight_calinski_harabasz_param, # Log CH weight
+            "score_weight_other_feature_diversity_for_run": score_weight_other_feature_diversity_param, # Log Other Feature Diversity weight
+            "score_weight_other_feature_purity_for_run": score_weight_other_feature_purity_param, # Log Other Feature Purity weight
             "score_weight_purity_for_run": score_weight_purity_param, # Log Purity weight
             # Add AI config to initial details for logging/status
             "ai_model_provider_for_run": ai_model_provider_param,
@@ -2129,7 +2140,8 @@ def run_clustering_task(
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
                                 score_weight_diversity_param, score_weight_silhouette_param, # Pass down to batch task
-                                score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # Pass DB & CH weights
+                                score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # Pass DB & CH weights to batch
+                                score_weight_other_feature_diversity_param, score_weight_other_feature_purity_param, # Pass Other Feature weights to batch
                                 score_weight_purity_param, # Pass Purity weight
                                 current_elite_params_for_batch_json,
                                 exploitation_prob_for_this_batch, # AI params are not passed to batch, but to main task

@@ -21,7 +21,7 @@ from flasgger import Swagger, swag_from
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
     REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, \
-    SCORE_WEIGHT_PURITY, \
+    SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, \
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
@@ -430,9 +430,9 @@ def start_analysis_endpoint():
         run_analysis_task,
         args=(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods),
         job_id=job_id,
-        description="Main Music Analysis", # No timeout
+        description="Main Music Analysis",
         retry=Retry(max=1), # Optional: retry once if fails
-        job_timeout=-1
+        job_timeout=-1 # No timeout
     )
     return jsonify({"task_id": job.id, "task_type": "main_analysis", "status": job.get_status()}), 202
 
@@ -528,6 +528,16 @@ def start_clustering_endpoint():
                 format: float
                 description: Weight for playlist purity (intra-playlist mood consistency).
                 default: "Configured SCORE_WEIGHT_PURITY"
+              score_weight_other_feature_diversity:
+                type: number
+                format: float
+                description: Weight for inter-playlist diversity of other features (e.g., danceability).
+                default: "Configured SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY"
+              score_weight_other_feature_purity:
+                type: number
+                format: float
+                description: Weight for intra-playlist consistency of other features (e.g., danceability).
+                default: "Configured SCORE_WEIGHT_OTHER_FEATURE_PURITY"
               min_songs_per_genre_for_stratification:
                 type: integer
                 description: Minimum number of songs to target per stratified genre.
@@ -561,7 +571,6 @@ def start_clustering_endpoint():
                 description: Override for the Gemini API key for this run.
                 nullable: true
                 default: "Defaults to server-configured GEMINI_API_KEY"
-                # example: "AIza..."
               gemini_model_name:
                 type: string
                 description: Override for the Gemini model name for this run.
@@ -585,6 +594,19 @@ def start_clustering_endpoint():
                 status:
                   type: string
                   description: The initial status of the job in the queue (e.g., queued).
+      409:
+        description: An active clustering task is already in progress.
+        content:
+            application/json:
+                schema:
+                    type: object
+                    properties:
+                        error:
+                            type: string
+                        task_id:
+                            type: string
+                        status:
+                            type: string
     """
     # Import task function here to break circular dependency
     from tasks import run_clustering_task
@@ -593,7 +615,7 @@ def start_clustering_endpoint():
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
     # Define non-terminal statuses
-    active_statuses = (TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS) # Add any other relevant non-terminal RQ statuses if needed
+    active_statuses = (TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS)
     cur.execute("""
         SELECT task_id, status FROM task_status
         WHERE task_type = 'main_clustering' AND status IN %s
@@ -617,19 +639,22 @@ def start_clustering_endpoint():
     gmm_n_components_min_val = int(data.get('gmm_n_components_min', GMM_N_COMPONENTS_MIN))
     gmm_n_components_max_val = int(data.get('gmm_n_components_max', GMM_N_COMPONENTS_MAX))
     pca_components_min_val = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
-    score_weight_diversity_val = float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY))
-    score_weight_silhouette_val = float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE))
-    # Retrieve new weights
-    score_weight_davies_bouldin_val = float(data.get('score_weight_davies_bouldin', SCORE_WEIGHT_DAVIES_BOULDIN))
-    score_weight_calinski_harabasz_val = float(data.get('score_weight_calinski_harabasz', SCORE_WEIGHT_CALINSKI_HARABASZ))
-    score_weight_purity_val = float(data.get('score_weight_purity', SCORE_WEIGHT_PURITY))
-
-
     pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
     num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
     min_songs_per_genre_for_stratification_val = int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION))
     stratified_sampling_target_percentile_val = int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE))
+    
+    # Retrieve score weights from request, falling back to config defaults
+    score_weight_diversity_val = float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY))
+    score_weight_silhouette_val = float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE))
+    score_weight_davies_bouldin_val = float(data.get('score_weight_davies_bouldin', SCORE_WEIGHT_DAVIES_BOULDIN))
+    score_weight_calinski_harabasz_val = float(data.get('score_weight_calinski_harabasz', SCORE_WEIGHT_CALINSKI_HARABASZ))
+    score_weight_purity_val = float(data.get('score_weight_purity', SCORE_WEIGHT_PURITY))
+    # *** NEW: Retrieve new 'other_feature' weights ***
+    score_weight_other_feature_diversity_val = float(data.get('score_weight_other_feature_diversity', SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY))
+    score_weight_other_feature_purity_val = float(data.get('score_weight_other_feature_purity', SCORE_WEIGHT_OTHER_FEATURE_PURITY))
+
     # Ensure percentile is within valid range
     stratified_sampling_target_percentile_val = max(0, min(100, stratified_sampling_target_percentile_val))
 
@@ -651,19 +676,24 @@ def start_clustering_endpoint():
             clustering_method, num_clusters_min_val, num_clusters_max_val,
             dbscan_eps_min_val, dbscan_eps_max_val, dbscan_min_samples_min_val, dbscan_min_samples_max_val,
             pca_components_min_val, pca_components_max_val,
-            num_clustering_runs_val, # This is the total runs, not the batch size
-            max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val, # Keep GMM params
-            score_weight_diversity_val, score_weight_silhouette_val, # Pass the new weights
-            score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val, # Pass the new weights for DB and CH
-            score_weight_purity_val, # Pass the new purity weight
-            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param # Pass ALL AI params
+            num_clustering_runs_val,
+            max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
+            score_weight_diversity_val, score_weight_silhouette_val,
+            score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val,
+            score_weight_purity_val,
+            # *** NEW: Pass the new 'other_feature' weights to the task ***
+            score_weight_other_feature_diversity_val,
+            score_weight_other_feature_purity_val,
+            # Pass AI params
+            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param
         ),
         job_id=job_id,
-        description="Main Music Clustering", # No timeout
-        retry=Retry(max=1), # Optional
-        job_timeout=-1
+        description="Main Music Clustering",
+        retry=Retry(max=1),
+        job_timeout=-1 # No timeout
     )
     return jsonify({"task_id": job.id, "task_type": "main_clustering", "status": job.get_status()}), 202
+
 
 @app.route('/api/status/<task_id>', methods=['GET'])
 def get_task_status_endpoint(task_id):
@@ -702,7 +732,7 @@ def get_task_status_endpoint(task_id):
                 details:
                   type: object
                   description: Detailed information about the task. Structure varies by task type and state.
-                  additionalProperties: true # Indicates the object can have various properties
+                  additionalProperties: true
                   example: {"log": ["Log message 1"], "current_album": "Album X"}
                 task_type_from_db:
                   type: string
@@ -1042,7 +1072,7 @@ def get_active_tasks_endpoint():
         ORDER BY timestamp DESC
         LIMIT 1
     """)
-    active_main_task_row = cur.fetchone() # This query was already good, just ensuring constants are used if it were checking status
+    active_main_task_row = cur.fetchone()
     cur.close()
 
     if active_main_task_row:
@@ -1148,6 +1178,12 @@ def get_config_endpoint():
                   nullable: true
                 clustering_runs:
                   type: integer
+                score_weight_diversity:
+                  type: number
+                  format: float
+                score_weight_silhouette:
+                  type: number
+                  format: float
                 score_weight_davies_bouldin:
                   type: number
                   format: float
@@ -1157,13 +1193,13 @@ def get_config_endpoint():
                 score_weight_purity:
                   type: number
                   format: float
+                score_weight_other_feature_diversity:
+                  type: number
+                  format: float
+                score_weight_other_feature_purity:
+                  type: number
+                  format: float
     """
-    # Ensure float values are represented correctly in the response
-    # Although jsonify handles floats, explicitly casting might be clearer
-    # for documentation purposes if needed, but the current approach is fine.
-    # The config values are already floats where appropriate.
-
-
     return jsonify({
         "jellyfin_url": JELLYFIN_URL, "jellyfin_user_id": JELLYFIN_USER_ID, "jellyfin_token": JELLYFIN_TOKEN,
         "num_recent_albums": NUM_RECENT_ALBUMS, "max_distance": MAX_DISTANCE,
@@ -1174,16 +1210,20 @@ def get_config_endpoint():
         "gmm_n_components_min": GMM_N_COMPONENTS_MIN, "gmm_n_components_max": GMM_N_COMPONENTS_MAX,
         "pca_components_min": PCA_COMPONENTS_MIN, "pca_components_max": PCA_COMPONENTS_MAX,
         "min_songs_per_genre_for_stratification": MIN_SONGS_PER_GENRE_FOR_STRATIFICATION,
-        "score_weight_diversity": SCORE_WEIGHT_DIVERSITY, # Add diversity weight
-        "score_weight_silhouette": SCORE_WEIGHT_SILHOUETTE, # Add silhouette weight
-        "score_weight_davies_bouldin": SCORE_WEIGHT_DAVIES_BOULDIN, # New: Add Davies-Bouldin weight
-        "score_weight_calinski_harabasz": SCORE_WEIGHT_CALINSKI_HARABASZ, # New: Add Calinski-Harabasz weight
-        "score_weight_purity": SCORE_WEIGHT_PURITY, # New: Add Purity weight
         "stratified_sampling_target_percentile": STRATIFIED_SAMPLING_TARGET_PERCENTILE,
-        "ai_model_provider": AI_MODEL_PROVIDER, # New provider config
+        "ai_model_provider": AI_MODEL_PROVIDER,
         "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
-        "gemini_api_key": GEMINI_API_KEY, "gemini_model_name": GEMINI_MODEL_NAME, # Gemini config
-        "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, "clustering_runs": CLUSTERING_RUNS
+        "gemini_api_key": GEMINI_API_KEY, "gemini_model_name": GEMINI_MODEL_NAME,
+        "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, "clustering_runs": CLUSTERING_RUNS,
+        # Scoring weights
+        "score_weight_diversity": SCORE_WEIGHT_DIVERSITY,
+        "score_weight_silhouette": SCORE_WEIGHT_SILHOUETTE,
+        "score_weight_davies_bouldin": SCORE_WEIGHT_DAVIES_BOULDIN,
+        "score_weight_calinski_harabasz": SCORE_WEIGHT_CALINSKI_HARABASZ,
+        "score_weight_purity": SCORE_WEIGHT_PURITY,
+        # *** NEW: Add new 'other_feature' weights to config response ***
+        "score_weight_other_feature_diversity": SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY,
+        "score_weight_other_feature_purity": SCORE_WEIGHT_OTHER_FEATURE_PURITY
     })
 
 @app.route('/api/playlists', methods=['GET'])
