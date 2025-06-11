@@ -76,7 +76,7 @@ def get_ollama_playlist_name(ollama_url, model_name, full_prompt):
     try:
         print(f"DEBUG AI (Ollama): Starting API call for model '{model_name}' at '{ollama_url}'.") # Debug print
 
-        response = requests.post(ollama_url, headers=headers, data=json.dumps(payload), stream=True, timeout=480) # Increased timeout
+        response = requests.post(ollama_url, headers=headers, data=json.dumps(payload), stream=True, timeout=960) # Increased timeout
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
         full_raw_response_content = ""
         for line in response.iter_lines():
@@ -135,7 +135,7 @@ def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
         model = genai.GenerativeModel(model_name)
 
         print(f"DEBUG AI (Gemini): Starting API call for model '{model_name}'.") # Debug print
-        response = model.generate_content(full_prompt, request_options={'timeout': 480}) # Increased timeout
+        response = model.generate_content(full_prompt, request_options={'timeout': 960}) # Increased timeout
 
         # Extract text from the response
         if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
@@ -167,7 +167,8 @@ def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key
     energy_description = "" # Initialize energy description
     if other_feature_scores_dict:
         # Extract energy score first, as it's handled separately
-        energy_score = other_feature_scores_dict.get('energy', 0.0)
+        # Check for 'energy_normalized' first, then fall back to 'energy'
+        energy_score = other_feature_scores_dict.get('energy_normalized', other_feature_scores_dict.get('energy', 0.0))
 
         # Create energy description based on score (example thresholds)
         if energy_score < 0.3:
@@ -176,10 +177,13 @@ def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key
             energy_description = " It has high energy."
         # No description if medium energy (between 0.3 and 0.7)
 
-        # Sort features by score descending to highlight the most prominent ones
-        # Use a threshold to only include features that are significantly present
-        # Explicitly exclude 'energy' from this list
-        sorted_other_features = sorted([(name, score) for name, score in other_feature_scores_dict.items() if name != 'energy'], key=lambda item: item[1], reverse=True)
+        # Sort other features by score descending to highlight the most prominent ones.
+        # Explicitly exclude both 'energy' and 'energy_normalized' from this list,
+        # as energy is handled separately by 'energy_description'.
+        sorted_other_features = sorted([
+            (name, score) for name, score in other_feature_scores_dict.items()
+            if name not in ['energy', 'energy_normalized'] # Exclude both potential energy keys
+        ], key=lambda item: item[1], reverse=True)
         # Example threshold: include features with score > 0.6 (adjust as needed)
         prominent_features = [f"{name}" for name, score in sorted_other_features if score > 0.6] # Example threshold
         if prominent_features:

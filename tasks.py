@@ -10,38 +10,39 @@ import uuid
 import traceback
 
 # Essentia and ML imports
-from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy # Import Energy, Removed TensorflowPredictVGGish
+from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture # type: ignore
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score # type: ignore
-from sklearn.preprocessing import StandardScaler # Import StandardScaler for feature standardization
+from sklearn.preprocessing import StandardScaler
 
 # RQ import
 from rq import get_current_job
+from rq.job import Job # Import Job class
+from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
-# Import necessary components from the main app.py file
-# This assumes app.py will define 'app', 'redis_conn', and the DB utility functions
+# Import necessary components from the main app.py file (ensure these are available)
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
                 track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus,
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
                 TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
-from config import TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, \
-    GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX, \
-    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, \
-    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME, DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, \
-    HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH, SCORE_WEIGHT_SILHOUETTE, \
-    SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, \
-    SCORE_WEIGHT_DIVERSITY, \
-    SCORE_WEIGHT_PURITY, \
-    SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, MUTATION_KMEANS_COORD_FRACTION, \
-    MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA, \
-    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES
-
-from rq.job import Job # Import Job class
-from rq.exceptions import NoSuchJobError, InvalidJobOperation
+from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
+    GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX,
+    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, REDIS_URL, DATABASE_URL,
+    OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME,
+    DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH,
+    SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ,
+    SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
+    MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
+    TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,  # type: ignore
+    TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
+    LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
+    STRATIFIED_SAMPLING_TARGET_PERCENTILE, # Import new config
+    OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY) # Import the new config
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
@@ -103,8 +104,8 @@ def download_track(jellyfin_url, headers, temp_dir, item):
             f.write(r.content)
         return path
     except Exception as e:
-        print(f"ERROR: download_track {item['Name']}: {e}")
-        return None
+            print(f"ERROR: download_track {item['Name']}: {e}")
+            return None
 
 def predict_moods(embeddings_input, prediction_model_path, mood_labels_list):
     """Predicts moods using pre-computed embeddings and a mood classification model."""
@@ -144,8 +145,6 @@ def predict_other_models(embeddings): # Now accepts embeddings
         except Exception as e:
             print(f"Error predicting {mood}: {e}")
             predictions[mood] = 0.0  # Default value in case of error
-
-    return predictions
 
 
 def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list):
@@ -368,7 +367,13 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url_param, jellyfin_user_id_
     """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists(jellyfin_url_param, jellyfin_user_id_param, headers_param)
     for base_name, cluster in playlists.items():
-        chunks = [cluster[i:i+max_songs_per_cluster_param] for i in range(0, len(cluster), max_songs_per_cluster_param)]
+        chunks = []
+        if max_songs_per_cluster_param > 0:
+            chunks = [cluster[i:i+max_songs_per_cluster_param] for i in range(0, len(cluster), max_songs_per_cluster_param)]
+        else:  # If max_songs_per_cluster_param is 0 or less, treat as no limit, so one chunk
+            if cluster: # Ensure cluster is not empty before adding as a chunk
+                chunks = [cluster]
+            # If cluster is empty, chunks remains empty, and the loop below won't run.
         for idx, chunk in enumerate(chunks, 1):
             playlist_name_on_jellyfin = f"{base_name} ({idx})" if len(chunks) > 1 else base_name
             item_ids = [item_id for item_id, _, _ in chunk]
@@ -521,11 +526,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         "moods": {k: round(v, 2) for k, v in moods.items()}
                     }
 
-                    # Filter moods to keep only TOP_N_MOODS before saving
-                    top_n_moods_to_save = {
-                        k: moods[k] for k in sorted(moods, key=moods.get, reverse=True)[:top_n_moods]
-                    }
-                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_n_moods_to_save, energy=energy, other_features=other_features_str) # Pass energy
+                    # Save ALL mood scores, not just top N, to allow for more accurate purity calculations
+                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods, energy=energy, other_features=other_features_str) # Pass full moods dict
                     tracks_analyzed_count += 1
                     mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
 
@@ -885,18 +887,31 @@ def _generate_or_mutate_kmeans_initial_centroids(
     return initial_centroids.tolist()
 
 def _perform_single_clustering_iteration(
-    run_idx, all_tracks_data_parsed,
+    run_idx, data_subset_for_clustering, # Changed from all_tracks_data_parsed
     clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges,
     max_songs_per_cluster, log_prefix="",
-    elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None):
+    elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
+    score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
+    score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None, # New weight overrides for DB and CH
+    score_weight_purity_override=None,
+    score_weight_other_feature_diversity_override=None, # Added missing parameter
+    score_weight_other_feature_purity_override=None): # Added missing parameter
     """
     Internal helper to perform a single clustering iteration. Not an RQ task.
+    Receives a subset of track data (rows) for clustering.
     Returns a result dictionary or None on failure.
     `num_clusters_min_max` is a tuple (min, max)
     `dbscan_params_ranges` is a dict like {"eps_min": ..., "eps_max": ..., "samples_min": ..., "samples_max": ...}
     `gmm_params_ranges` is a dict like {"n_components_min": ..., "n_components_max": ...}
     `pca_params_ranges` is a dict like {"components_min": ..., "components_max": ...}
     `elite_solutions_params_list`: A list of 'parameters' dicts from previous best runs.
+    `score_weight_diversity_override`: Specific weight for diversity for this run.
+    `score_weight_silhouette_override`: Specific weight for silhouette for this run.
+    `score_weight_davies_bouldin_override`: Specific weight for Davies-Bouldin for this run.
+    `score_weight_calinski_harabasz_override`: Specific weight for Calinski-Harabasz for this run.
+    `score_weight_purity_override`: Specific weight for mood purity for this run.
+    `score_weight_other_feature_diversity_override`: Specific weight for other feature diversity.
+    `score_weight_other_feature_purity_override`: Specific weight for other feature purity.
     `exploitation_probability`: Chance to use an elite solution for parameter generation.
     `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
@@ -906,10 +921,20 @@ def _perform_single_clustering_iteration(
         if "coord_mutation_fraction" not in mutation_config: # Ensure default if not passed
             mutation_config["coord_mutation_fraction"] = MUTATION_KMEANS_COORD_FRACTION
 
+        # Use override if provided, else use global config
+        current_score_weight_diversity = score_weight_diversity_override if score_weight_diversity_override is not None else SCORE_WEIGHT_DIVERSITY
+        current_score_weight_silhouette = score_weight_silhouette_override if score_weight_silhouette_override is not None else SCORE_WEIGHT_SILHOUETTE
+        current_score_weight_davies_bouldin = score_weight_davies_bouldin_override if score_weight_davies_bouldin_override is not None else SCORE_WEIGHT_DAVIES_BOULDIN
+        current_score_weight_calinski_harabasz = score_weight_calinski_harabasz_override if score_weight_calinski_harabasz_override is not None else SCORE_WEIGHT_CALINSKI_HARABASZ
+        current_score_weight_purity = score_weight_purity_override if score_weight_purity_override is not None else SCORE_WEIGHT_PURITY
+        current_score_weight_other_feature_diversity = score_weight_other_feature_diversity_override if score_weight_other_feature_diversity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY # Now uses defined param
+        current_score_weight_other_feature_purity = score_weight_other_feature_purity_override if score_weight_other_feature_purity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_PURITY # Now uses defined param
+
         # --- Data Preparation ---
-        X_original = np.array([score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in all_tracks_data_parsed])
+        # X_original is now derived from the passed data_subset_for_clustering
+        X_original = np.array([score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in data_subset_for_clustering])
         if X_original.shape[0] == 0:
-            print(f"{log_prefix} Iteration {run_idx}: No data to cluster.")
+            print(f"{log_prefix} Iteration {run_idx}: No data in subset to cluster.")
             return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}} # Add scaler_details
 
         # Standardize the data
@@ -1055,7 +1080,7 @@ def _perform_single_clustering_iteration(
             max_clusters_or_components_rand = data_for_clustering_current.shape[0]
             if max_clusters_or_components_rand == 0: # No data points after PCA
                  print(f"{log_prefix} Iteration {run_idx}: No data points available after PCA for random parameter generation.")
-                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"pca_config": pca_config}} # Add scaler_details
+                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
 
             if clustering_method == "kmeans":
                 k_rand = random.randint(max(1, num_clusters_min_max[0]), min(num_clusters_min_max[1], max_clusters_or_components_rand)) # Ensure min clusters is at least 1
@@ -1112,7 +1137,6 @@ def _perform_single_clustering_iteration(
 
             initial_centroids_np = np.array(params_from_config["initial_centroids"])
 
-            # Ensure n_clusters matches the number of initial centroids provided
             if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: # Empty array from empty list
                  print(f"{log_prefix} Iteration {run_idx}: KMeans initial_centroids resulted in empty numpy array. Cannot cluster.")
                  return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
@@ -1150,34 +1174,50 @@ def _perform_single_clustering_iteration(
             raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
 
         # --- Calculate Internal Validation Metrics ---
-        normalized_silhouette = 0.0
-        normalized_davies_bouldin = 0.0
-        normalized_calinski_harabasz = 0.0
-        
+        silhouette_metric_value = 0.0 # Will store the raw Silhouette score, or 0.0 if not applicable
+        davies_bouldin_metric_value = 0.0 # Initialize Davies-Bouldin metric
+        calinski_harabasz_metric_value = 0.0 # Initialize Calinski-Harabasz metric
+
+        # Initialize raw scores for logging, in case metrics are not calculated
+        s_score_raw_val_for_log = 0.0
+        db_score_raw_val_for_log = 0.0
+        ch_score_raw_val_for_log = 0.0
+
         num_actual_clusters = len(set(labels) - {-1}) # Number of clusters, excluding noise
         num_samples_for_metrics = data_for_clustering_current.shape[0]
 
         if num_actual_clusters >= 2 and num_actual_clusters < num_samples_for_metrics:
-            if SCORE_WEIGHT_SILHOUETTE > 0:
+            if current_score_weight_silhouette > 0: # Use current_score_weight_silhouette
                 try:
                     s_score = silhouette_score(data_for_clustering_current, labels, metric='euclidean')
-                    normalized_silhouette = (s_score + 1.0) / 2.0  # Normalize to [0, 1]
+                    s_score_raw_val_for_log = s_score # Store raw value for logging
+                    # Normalize Silhouette score from [-1, 1] to [0, 1]
+                    silhouette_metric_value = (s_score + 1) / 2.0
                 except ValueError as e_sil:
                     print(f"{log_prefix} Iteration {run_idx}: Silhouette score error: {e_sil}") # e.g. if all points in one cluster after filtering noise
-
-            if SCORE_WEIGHT_DAVIES_BOULDIN > 0:
+                    silhouette_metric_value = 0.0 # Default on error
+            if current_score_weight_davies_bouldin > 0: # Use current_score_weight_davies_bouldin
                 try:
-                    db_score = davies_bouldin_score(data_for_clustering_current, labels)
-                    normalized_davies_bouldin = 1.0 / (1.0 + db_score) # Lower is better, so invert; maps to (0, 1]
+                    db_score_raw = davies_bouldin_score(data_for_clustering_current, labels)
+                    db_score_raw_val_for_log = db_score_raw # Store raw value for logging
+                    # Normalize Davies-Bouldin: lower is better (0 is best).
+                    # Transform to make higher better, roughly in [0, 1] range.
+                    # (1 / (1 + davies_bouldin_score))
+                    davies_bouldin_metric_value = 1.0 / (1.0 + db_score_raw)
                 except ValueError as e_db:
                     print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin score error: {e_db}")
-
-            if SCORE_WEIGHT_CALINSKI_HARABASZ > 0:
+                    davies_bouldin_metric_value = 0.0 # Ensure it's 0 on error
+            if current_score_weight_calinski_harabasz > 0: # Use current_score_weight_calinski_harabasz
                 try:
-                    ch_score = calinski_harabasz_score(data_for_clustering_current, labels)
-                    normalized_calinski_harabasz = (1.0 - 1.0 / (1.0 + np.log1p(ch_score))) if ch_score > 0 else 0.0 # Maps positive CH to (0,1)
+                    ch_score_raw = calinski_harabasz_score(data_for_clustering_current, labels)
+                    ch_score_raw_val_for_log = ch_score_raw # Store raw value for logging
+                    # Normalize Calinski-Harabasz using diminishing returns.
+                    # The scaling factor (previously 5.0) needs to be larger to prevent
+                    # exp(-ch_score_raw / factor) from becoming 0 too quickly for typical CH scores.
+                    calinski_harabasz_metric_value = 1.0 - np.exp(-ch_score_raw / 500.0)  # Increased scaling factor
                 except ValueError as e_ch:
                     print(f"{log_prefix} Iteration {run_idx}: Calinski-Harabasz score error: {e_ch}")
+                    calinski_harabasz_metric_value = 0.0 # Ensure it's 0 on error
         del data_for_clustering_current # Free memory
 
         if labels is None or len(set(labels) - {-1}) == 0:
@@ -1186,7 +1226,8 @@ def _perform_single_clustering_iteration(
 
         max_dist = raw_distances.max()
         normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-        track_info_list = [{"row": all_tracks_data_parsed[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(all_tracks_data_parsed))]
+        # track_info_list now uses data_subset_for_clustering
+        track_info_list = [{"row": data_subset_for_clustering[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(data_subset_for_clustering))]
 
         filtered_clusters = defaultdict(list)
         for cid in set(labels):
@@ -1202,10 +1243,13 @@ def _perform_single_clustering_iteration(
                 if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                     selected_tracks.append(t_item)
                     count_per_artist[author] += 1
-                if len(selected_tracks) >= max_songs_per_cluster: break
+                # Only apply max_songs_per_cluster limit if it's greater than 0
+                if max_songs_per_cluster > 0 and len(selected_tracks) >= max_songs_per_cluster:
+                    break
             for t_item in selected_tracks:
                 item_id, title, author_val = t_item["row"]["item_id"], t_item["row"]["title"], t_item["row"]["author"]
                 filtered_clusters[cid].append((item_id, title, author_val))
+
 
         current_named_playlists = defaultdict(list)
         current_playlist_centroids = {}
@@ -1225,31 +1269,69 @@ def _perform_single_clustering_iteration(
                         unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score)
 
                 # New: Extract predominant other feature for diversity score
-                centroid_other_features_from_top_scores = {
+                # This dictionary contains other feature scores from the current centroid's top_scores
+                centroid_other_features_for_diversity_evaluation = {
                     label: top_scores.get(label, 0.0)
                     for label in OTHER_FEATURE_LABELS if label in top_scores
                 }
-                predominant_other_feature_key_for_diversity = None
-                max_other_feature_score_for_diversity = 0.3 # Threshold for considering a feature predominant
-                if centroid_other_features_from_top_scores:
-                    for feature_label, feature_score in centroid_other_features_from_top_scores.items():
-                        if feature_score > max_other_feature_score_for_diversity:
-                            max_other_feature_score_for_diversity = feature_score
-                            predominant_other_feature_key_for_diversity = feature_label
                 
-                if predominant_other_feature_key_for_diversity:
-                    unique_predominant_other_feature_scores[predominant_other_feature_key_for_diversity] = max(
-                        unique_predominant_other_feature_scores.get(predominant_other_feature_key_for_diversity, 0.0),
-                        max_other_feature_score_for_diversity
+                predominant_other_feature_key_for_diversity_score_calc = None # This will store the label of the single most predominant feature (above threshold)
+                # This variable will hold the *score* of the most predominant "other feature" found so far for this centroid.
+                # Initialize with a threshold. Only features scoring higher than this will be considered.
+                highest_predominant_other_feature_score_this_centroid = 0.3 # Threshold for considering a feature predominant
+
+                if centroid_other_features_for_diversity_evaluation: # Check if the dict is not empty
+                    for feature_label, feature_score in centroid_other_features_for_diversity_evaluation.items():
+                        if feature_score > highest_predominant_other_feature_score_this_centroid:
+                            highest_predominant_other_feature_score_this_centroid = feature_score # Update the max score found
+                            predominant_other_feature_key_for_diversity_score_calc = feature_label # Update the key of the predominant feature
+                
+                # If a predominant "other feature" (above threshold) was found for this centroid
+                if predominant_other_feature_key_for_diversity_score_calc:
+                     # Store/update the highest score found for this feature across all centroids
+                     unique_predominant_other_feature_scores[predominant_other_feature_key_for_diversity_score_calc] = max(
+                        unique_predominant_other_feature_scores.get(predominant_other_feature_key_for_diversity_score_calc, 0.0),
+                        highest_predominant_other_feature_score_this_centroid # Use the actual highest score of the predominant feature for this centroid
                     )
                 current_named_playlists[name].extend(songs_list)
                 current_playlist_centroids[name] = top_scores
 
         # --- Enhanced Score Calculation ---
-        base_diversity_score = sum(unique_predominant_mood_scores.values())
-        # Calculate playlist_purity_component
+        # Mood Diversity Score (raw_mood_diversity_score -> base_diversity_score after LN and scaling)
+        raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
+        base_diversity_score = 0.0  # This will be the final scaled score
+
+        if len(MOOD_LABELS) > 0: # Ensure MOOD_LABELS is not empty
+            # 1. Apply LN transformation
+            ln_mood_diversity = np.log1p(raw_mood_diversity_score) # log1p(x) = log(1+x)
+
+            # 2. Apply Z-score standardization using configured stats
+            # LN_MOOD_DIVERSITY_STATS from config.py is assumed to contain 'mean' and 'sd'
+            # of the log-transformed mood diversity scores.
+            config_mean_ln_diversity = LN_MOOD_DIVERSITY_STATS.get("mean")
+            config_sd_ln_diversity = LN_MOOD_DIVERSITY_STATS.get("sd")
+
+            if config_mean_ln_diversity is None or config_sd_ln_diversity is None:
+                print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_MOOD_DIVERSITY_STATS. Mood diversity score set to 0.")
+                base_diversity_score = 0.0
+            else:
+                # The mean from LN_MOOD_DIVERSITY_STATS is already log-transformed.
+                # So, we use it directly.
+                if abs(config_sd_ln_diversity) < 1e-9: # Check if SD is effectively zero
+                    # If SD is zero, and value is at the mean, Z-score is 0. Otherwise, it's undefined/infinity.
+                    # Setting to 0 to prevent extreme score impact.
+                    base_diversity_score = 0.0
+                else:
+                    base_diversity_score = (ln_mood_diversity - config_mean_ln_diversity) / config_sd_ln_diversity
+                    # Note: Z-scores are not typically clipped to [0,1]. Previous clip removed.
+        else:
+            base_diversity_score = 0.0
+
+        # Mood Purity Score (raw_playlist_purity_component -> playlist_purity_component after LN and scaling)
+        raw_playlist_purity_component = 0.0
         all_individual_playlist_purities = []
-        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(all_tracks_data_parsed)}
+        # item_id_to_song_index_map must now refer to the current data_subset_for_clustering
+        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(data_subset_for_clustering)}
 
         if current_named_playlists:
             for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
@@ -1261,48 +1343,109 @@ def _perform_single_clustering_iteration(
                 if not playlist_centroid_mood_data or not songs_in_playlist_info_list:
                     continue
 
-                # Determine the predominant mood for THIS specific playlist based on its centroid's mood data
-                predominant_mood_for_this_playlist = None
-                max_score_for_predominant = -1.0
-                for mood_label, mood_score in playlist_centroid_mood_data.items():
-                    if mood_label in MOOD_LABELS: # Ensure it's a mood label
-                        if mood_score > max_score_for_predominant:
-                            max_score_for_predominant = mood_score
-                            predominant_mood_for_this_playlist = mood_label
+                # Get all mood scores from the centroid for this playlist
+                centroid_mood_scores_for_purity_calc = {
+                    m_label: playlist_centroid_mood_data.get(m_label, 0.0)
+                    for m_label in MOOD_LABELS # Ensure we consider all possible moods
+                    if m_label in playlist_centroid_mood_data # And that the centroid has a score for it
+                }
 
-                if not predominant_mood_for_this_playlist:
+                if not centroid_mood_scores_for_purity_calc: # No mood data in centroid
                     continue
 
-                try:
-                    predominant_mood_index_in_labels = MOOD_LABELS.index(predominant_mood_for_this_playlist)
-                except ValueError:
-                    print(f"{log_prefix} Iteration {run_idx}: Warning: Predominant mood '{predominant_mood_for_this_playlist}' for playlist '{playlist_name_key}' not in MOOD_LABELS list.")
-                    continue
+                # Sort centroid moods by score to get the top K (TOP_K_MOODS_FOR_PURITY_CALCULATION)
+                sorted_centroid_moods_for_purity = sorted(
+                    centroid_mood_scores_for_purity_calc.items(),
+                    key=lambda item: item[1],
+                    reverse=True
+                )
+                
+                # Consider moods with at least some score (e.g., > 0.01)
+                top_k_centroid_mood_labels_for_purity = [
+                    mood_label for mood_label, score in sorted_centroid_moods_for_purity[:TOP_K_MOODS_FOR_PURITY_CALCULATION] if score > 0.01
+                ]
 
-                scores_of_predominant_mood_for_songs_in_playlist = []
+                if not top_k_centroid_mood_labels_for_purity: # No significant moods in centroid's top K
+                    all_individual_playlist_purities.append(0.0)
+                    continue
+                
+                # For each song, find its max score among these top_k_centroid_mood_labels_for_purity
+                current_playlist_song_purity_scores = []
                 for item_id, _, _ in songs_in_playlist_info_list:
                     song_original_index = item_id_to_song_index_map.get(item_id)
                     if song_original_index is not None:
                         # Corrected slicing for mood scores: X_original = [tempo, energy, moods..., other_features...]
                         song_mood_scores_vector = X_original[song_original_index][2 : 2 + len(MOOD_LABELS)]
-                        if predominant_mood_index_in_labels < len(song_mood_scores_vector): # Check bounds
-                            song_specific_score_for_predominant_mood = song_mood_scores_vector[predominant_mood_index_in_labels]
-                            scores_of_predominant_mood_for_songs_in_playlist.append(song_specific_score_for_predominant_mood)
+                        
+                        max_score_for_song_among_top_centroid_moods = 0.0
+                        for centroid_mood_label in top_k_centroid_mood_labels_for_purity:
+                            try:
+                                mood_idx = MOOD_LABELS.index(centroid_mood_label)
+                                if mood_idx < len(song_mood_scores_vector):
+                                    song_score_for_this_centroid_mood = song_mood_scores_vector[mood_idx]
+                                    if song_score_for_this_centroid_mood > max_score_for_song_among_top_centroid_moods:
+                                        max_score_for_song_among_top_centroid_moods = song_mood_scores_vector[mood_idx] # Keep only the highest score
+                            except ValueError: # Should not happen if MOOD_LABELS is consistent
+                                pass 
+                        if max_score_for_song_among_top_centroid_moods > 0: # Only add if there's a positive score
+                            current_playlist_song_purity_scores.append(max_score_for_song_among_top_centroid_moods)
+                if current_playlist_song_purity_scores:
+                    sum_purity_for_this_playlist = sum(current_playlist_song_purity_scores) # Changed from average to sum
+                    all_individual_playlist_purities.append(sum_purity_for_this_playlist) # Add sum to list
 
-                if scores_of_predominant_mood_for_songs_in_playlist:
-                    avg_purity_for_this_playlist = sum(scores_of_predominant_mood_for_songs_in_playlist) / len(scores_of_predominant_mood_for_songs_in_playlist)
-                    all_individual_playlist_purities.append(avg_purity_for_this_playlist)
-
-        playlist_purity_component = 0.0
         if all_individual_playlist_purities:
-            playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
+            raw_playlist_purity_component = sum(all_individual_playlist_purities)
+
+        # 1. Apply LN transformation to the raw summed purity
+        ln_mood_purity = np.log1p(raw_playlist_purity_component)
+
+        # 2. Apply Z-score standardization using configured stats
+        # LN_MOOD_PURITY_STATS from config.py is assumed to contain 'mean' and 'sd'
+        # of the log-transformed mood purity scores.
+        config_mean_ln_purity = LN_MOOD_PURITY_STATS.get("mean")
+        config_sd_ln_purity = LN_MOOD_PURITY_STATS.get("sd")
+
+        if config_mean_ln_purity is None or config_sd_ln_purity is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_MOOD_PURITY_STATS. Mood purity score set to 0.")
+            playlist_purity_component = 0.0
+        else:
+            # The mean from LN_MOOD_PURITY_STATS is already log-transformed.
+            # So, we use it directly.
+            if abs(config_sd_ln_purity) < 1e-9: # Check if SD is effectively zero
+                playlist_purity_component = 0.0
+            else:
+                playlist_purity_component = (ln_mood_purity - config_mean_ln_purity) / config_sd_ln_purity
+                # Note: Z-scores are not typically clipped to [0,1]. Previous clip removed.
+
+        # If raw_playlist_purity_component was 0 (e.g., no playlists or all songs had 0 relevant mood scores),
+        # then ln_mood_purity will be 0.
+        # If raw_sd_purity is not zero, playlist_purity_component will be -log_transformed_mean_purity / raw_sd_purity.
+        # This is the expected behavior for Z-scores when the value is 0.
+
 
         # New: Calculate other_features_diversity_score
-        other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
+        # This is already a sum of predominant "other feature" scores.
+        raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values()) # This sum is already based on scores > threshold
+        
+        # Apply LN transformation and Z-score standardization
+        ln_other_features_diversity = np.log1p(raw_other_features_diversity_score)
+        
+        config_mean_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("mean")
+        config_sd_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("sd")
+
+        if config_mean_ln_other_div is None or config_sd_ln_other_div is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_OTHER_FEATURES_DIVERSITY_STATS. OtherFeatDiv set to 0.")
+            other_features_diversity_score = 0.0
+        else:
+            if abs(config_sd_ln_other_div) < 1e-9:
+                other_features_diversity_score = 0.0
+            else:
+                other_features_diversity_score = (ln_other_features_diversity - config_mean_ln_other_div) / config_sd_ln_other_div
 
         # New: Calculate other_feature_purity_component
+        # This will now be a sum of sums, analogous to mood purity.
         all_individual_playlist_other_feature_purities = []
-        OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY = 0.3 # Can be tuned
+        # OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY = 0.3 # Now using from config
 
         if current_named_playlists and OTHER_FEATURE_LABELS: # Ensure there are other features defined
             for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
@@ -1316,7 +1459,7 @@ def _perform_single_clustering_iteration(
                 }
 
                 predominant_other_feature_for_this_playlist = None
-                max_score_for_predominant_other = OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY
+                max_score_for_predominant_other = CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY
                 if centroid_other_features_for_purity:
                     for feature_label, feature_score in centroid_other_features_for_purity.items():
                         if feature_score > max_score_for_predominant_other:
@@ -1341,28 +1484,48 @@ def _perform_single_clustering_iteration(
                         if predominant_other_feature_index_in_labels < len(song_other_features_vector):
                             song_specific_score = song_other_features_vector[predominant_other_feature_index_in_labels]
                             scores_of_predominant_other_feature_for_songs.append(song_specific_score)
-                
+
+                # Sum the scores of the predominant other feature for all songs in this playlist
                 if scores_of_predominant_other_feature_for_songs:
-                    avg_other_feature_purity = sum(scores_of_predominant_other_feature_for_songs) / len(scores_of_predominant_other_feature_for_songs)
-                    all_individual_playlist_other_feature_purities.append(avg_other_feature_purity)
+                    # Sum of scores for the predominant other feature in this playlist
+                    sum_other_feature_purity_for_playlist = sum(scores_of_predominant_other_feature_for_songs)
+                    all_individual_playlist_other_feature_purities.append(sum_other_feature_purity_for_playlist)
 
-        other_feature_purity_component = 0.0
+        raw_other_feature_purity_component = 0.0
         if all_individual_playlist_other_feature_purities:
-            other_feature_purity_component = sum(all_individual_playlist_other_feature_purities) / len(all_individual_playlist_other_feature_purities)
+            raw_other_feature_purity_component = sum(all_individual_playlist_other_feature_purities)
 
-        final_enhanced_score = (SCORE_WEIGHT_DIVERSITY * base_diversity_score) + \
-                               (SCORE_WEIGHT_PURITY * playlist_purity_component) + \
-                               (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \
-                               (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
-                               (SCORE_WEIGHT_SILHOUETTE * normalized_silhouette) + \
-                               (SCORE_WEIGHT_DAVIES_BOULDIN * normalized_davies_bouldin) + \
-                               (SCORE_WEIGHT_CALINSKI_HARABASZ * normalized_calinski_harabasz)
+        # Apply LN transformation and Z-score standardization
+        ln_other_features_purity = np.log1p(raw_other_feature_purity_component)
+
+        config_mean_ln_other_pur = LN_OTHER_FEATURES_PURITY_STATS.get("mean")
+        config_sd_ln_other_pur = LN_OTHER_FEATURES_PURITY_STATS.get("sd")
+
+        if config_mean_ln_other_pur is None or config_sd_ln_other_pur is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in LN_OTHER_FEATURES_PURITY_STATS. OtherFeatPur set to 0.")
+            other_feature_purity_component = 0.0
+        else:
+            if abs(config_sd_ln_other_pur) < 1e-9:
+                other_feature_purity_component = 0.0
+            else:
+                other_feature_purity_component = (ln_other_features_purity - config_mean_ln_other_pur) / config_sd_ln_other_pur
+
+        final_enhanced_score = (current_score_weight_diversity * base_diversity_score) +  (current_score_weight_purity * playlist_purity_component) + (current_score_weight_other_feature_diversity * other_features_diversity_score) + (current_score_weight_other_feature_purity * other_feature_purity_component) + (current_score_weight_silhouette * silhouette_metric_value) + (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
 
         print(f"{log_prefix} Iteration {run_idx}: "
-              f"MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
-              f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
-              f"Sil: {normalized_silhouette:.2f}, DB: {normalized_davies_bouldin:.2f}, CH: {normalized_calinski_harabasz:.2f}, "
-              f"FinalScore: {final_enhanced_score:.2f}")
+              f"Scores -> MoodDiv: {raw_mood_diversity_score:.2f}/{base_diversity_score:.2f}, "
+              f"MoodPur: {raw_playlist_purity_component:.2f}/{playlist_purity_component:.2f}, "
+              f"OtherFeatDiv: {raw_other_features_diversity_score:.2f}/{other_features_diversity_score:.2f}, "
+              f"OtherFeatPur: {raw_other_feature_purity_component:.2f}/{other_feature_purity_component:.2f}, "
+              f"Sil: {s_score_raw_val_for_log:.2f}/{silhouette_metric_value:.2f}, "
+              f"DB: {db_score_raw_val_for_log:.2f}/{davies_bouldin_metric_value:.2f}, "
+              f"CH: {ch_score_raw_val_for_log:.2f}/{calinski_harabasz_metric_value:.2f}, "
+              f"FinalScore: {final_enhanced_score:.2f} "
+              f"(Weights: MoodDiv={current_score_weight_diversity}, MoodPur={current_score_weight_purity}, "
+              f"OtherFeatDiv={current_score_weight_other_feature_diversity}, OtherFeatPur={current_score_weight_other_feature_purity}, "
+              f"Sil={current_score_weight_silhouette}, "
+              f"DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
+
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
             "diversity_score": float(final_enhanced_score), # Use the new enhanced score
@@ -1378,14 +1541,145 @@ def _perform_single_clustering_iteration(
         traceback.print_exc()
         return None # Indicate failure for this iteration
 
+# --- New Stratified Sampling Helper Function ---
+def _get_stratified_song_subset(
+    genre_to_full_track_data_map, # All available tracks, categorized by genre
+    target_songs_per_genre,       # Desired count per genre
+    previous_subset_track_ids=None, # List of item_ids from the previous subset
+    percentage_change=0.0         # Percentage of songs to swap out for mutation
+):
+    """
+    Generates a stratified sample of songs for clustering.
+    If previous_subset_track_ids is provided and percentage_change > 0,
+    it perturbs the existing subset while maintaining stratification.
+    Otherwise, it generates a fresh stratified sample.
+    """
+    new_subset_tracks_list = [] # Use a list to build the subset
+    # Use a set for efficient addition and uniqueness check for item_ids in the current iteration
+    current_ids_in_new_subset_for_this_iteration = set()
+
+    current_subset_track_ids_set = set(previous_subset_track_ids) if previous_subset_track_ids else set()
+    current_subset_tracks_by_genre = defaultdict(list)
+
+    if previous_subset_track_ids:
+        all_tracks_flat = [track for genre_list in genre_to_full_track_data_map.values() for track in genre_list]
+        id_to_track_map = {track['item_id']: track for track in all_tracks_flat}
+
+        for track_id in current_subset_track_ids_set:
+            track_data = id_to_track_map.get(track_id)
+            if track_data:
+                # Find the primary stratified genre for this track
+                top_mood_found = None
+                if 'mood_vector' in track_data and track_data['mood_vector']:
+                    mood_scores = {}
+                    for pair in track_data['mood_vector'].split(','):
+                        if ':' in pair:
+                            label, score = pair.split(':')
+                            mood_scores[label] = float(score)
+                    
+                    # Find the highest scoring mood that is also a stratified genre
+                    top_mood_in_stratified = None
+                    max_mood_score = -1
+                    for genre in STRATIFIED_GENRES:
+                        if genre in mood_scores and mood_scores[genre] > max_mood_score:
+                            max_mood_score = mood_scores[genre]
+                            top_mood_in_stratified = genre
+                    
+                    if top_mood_in_stratified:
+                        current_subset_tracks_by_genre[top_mood_in_stratified].append(track_data)
+                    else:
+                        # If no stratified genre is predominant, add to a 'misc' category for now
+                        current_subset_tracks_by_genre['__misc__'].append(track_data)
+                else:
+                    current_subset_tracks_by_genre['__misc__'].append(track_data)
+
+    for genre in STRATIFIED_GENRES:
+        available_tracks_for_genre = genre_to_full_track_data_map.get(genre, [])
+        num_available = len(available_tracks_for_genre)
+        songs_added_for_this_genre_count = 0
+
+        # 1. Keep songs from the previous subset for this genre (if applicable)
+        if previous_subset_track_ids and percentage_change > 0:
+            tracks_from_previous_for_this_genre = current_subset_tracks_by_genre.get(genre, [])
+            num_to_keep_from_previous = int(len(tracks_from_previous_for_this_genre) * (1.0 - percentage_change))
+            
+            # Ensure we don't try to keep more than available or more than the target
+            num_to_keep_from_previous = min(num_to_keep_from_previous, len(tracks_from_previous_for_this_genre), target_songs_per_genre)
+
+            if num_to_keep_from_previous > 0:
+                kept_tracks_for_genre = random.sample(tracks_from_previous_for_this_genre, num_to_keep_from_previous)
+                for track_to_keep in kept_tracks_for_genre:
+                    if track_to_keep['item_id'] not in current_ids_in_new_subset_for_this_iteration:
+                        new_subset_tracks_list.append(track_to_keep)
+                        current_ids_in_new_subset_for_this_iteration.add(track_to_keep['item_id'])
+                        songs_added_for_this_genre_count += 1
+                        if songs_added_for_this_genre_count >= target_songs_per_genre:
+                            break # Reached target for this genre
+            # print(f"  Genre {genre}: Kept {songs_added_for_this_genre_count} tracks from previous subset.")
+
+        # 2. Add new songs if still needed for this genre to reach its target
+        num_still_needed_for_genre = target_songs_per_genre - songs_added_for_this_genre_count
+
+        if num_still_needed_for_genre > 0 and num_available > 0:
+            # Get candidates from the full pool for this genre, excluding those already added in this iteration
+            new_candidates = [
+                track for track in available_tracks_for_genre
+                if track['item_id'] not in current_ids_in_new_subset_for_this_iteration
+            ]
+
+            num_new_to_add_for_genre = min(num_still_needed_for_genre, len(new_candidates))
+
+            if num_new_to_add_for_genre > 0:
+                selected_new_for_genre = random.sample(new_candidates, num_new_to_add_for_genre)
+                for track_to_add in selected_new_for_genre:
+                    # Double check uniqueness, though `new_candidates` should already handle it
+                    if track_to_add['item_id'] not in current_ids_in_new_subset_for_this_iteration:
+                        new_subset_tracks_list.append(track_to_add)
+                        current_ids_in_new_subset_for_this_iteration.add(track_to_add['item_id'])
+                        songs_added_for_this_genre_count += 1 # This count is per-genre, not strictly needed here
+                                                            # as we are just filling up to num_new_to_add_for_genre
+                # print(f"  Genre {genre}: Added {num_new_to_add_for_genre} new tracks.")
+
+    # If, after stratified sampling, the total number of tracks is less than expected
+    # (e.g., due to very few tracks in some genres), fill with random tracks from anywhere.
+    # This ensures a minimum dataset size for clustering, but might break perfect stratification.
+    # This step is a fallback. The user might want strictly stratified, even if it means fewer total songs.
+    # For now, I will prioritize strict stratification for the target genres.
+    # If a genre has fewer than target_songs_per_genre, it will simply contribute all its available songs.
+
+    # Shuffle the final subset to ensure random order for clustering
+    random.shuffle(new_subset_tracks_list)
+    return new_subset_tracks_list
+
+
 def run_clustering_batch_task(
-    batch_id_str, start_run_idx, num_iterations_in_batch, all_tracks_data_json,
-    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-    max_songs_per_cluster, parent_task_id,
-    elite_solutions_params_list_json=None, exploitation_probability=0.0, mutation_config_json=None):
-    """RQ task to run a batch of clustering iterations."""
+    batch_id_str, start_run_idx, num_iterations_in_batch,
+    all_tracks_data_json, # All tracks, used for initial categorization and sampling
+    genre_to_full_track_data_map_json, # Pre-categorized full track data
+    target_songs_per_genre, # The dynamically determined target count
+    sampling_percentage_change_per_run,
+    clustering_method,
+    num_clusters_min_max_tuple,
+    dbscan_params_ranges_dict,
+    gmm_params_ranges_dict,
+    pca_params_ranges_dict,
+    max_songs_per_cluster,
+    parent_task_id,
+    score_weight_diversity_param,
+    score_weight_silhouette_param,
+    score_weight_davies_bouldin_param, # Added Davies-Bouldin weight
+    score_weight_calinski_harabasz_param, # Added Calinski-Harabasz weight
+    score_weight_other_feature_diversity_param, # Added Other Feature Diversity weight
+    score_weight_other_feature_purity_param, # Added Other Feature Purity weight
+    score_weight_purity_param, # Added Purity weight
+    elite_solutions_params_list_json, # No default, will be passed positionally
+    exploitation_probability,         # No default, will be passed positionally
+    mutation_config_json,             # No default, will be passed positionally
+    initial_subset_track_ids_json     # No default, will be passed positionally
+    ):
+    """RQ task to run a batch of clustering iterations with stratified sampling."""
     current_job = get_current_job(redis_conn)
-    current_task_id = current_job.id if current_job else str(uuid.uuid4()) # This is the ID of the batch task itself
+    current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Clustering Batch Task {batch_id_str} (Job ID: {current_task_id}) started. Iterations: {start_run_idx} to {start_run_idx + num_iterations_in_batch - 1}."
@@ -1433,7 +1727,14 @@ def run_clustering_batch_task(
 
         try:
             log_and_update_batch_task(f"Processing {num_iterations_in_batch} iterations.", 5)
-            all_tracks_data = json.loads(all_tracks_data_json) # Load data once per batch task
+            # all_tracks_data is now actually full track objects
+            all_tracks_data_parsed = json.loads(all_tracks_data_json)
+            genre_to_full_track_data_map = json.loads(genre_to_full_track_data_map_json)
+
+            current_sampled_track_ids_in_batch = []
+            if initial_subset_track_ids_json:
+                current_sampled_track_ids_in_batch = json.loads(initial_subset_track_ids_json)
+            
             # === Cooperative Cancellation Check for Batch Task ===
             if current_job:
                 with app.app_context():
@@ -1468,6 +1769,17 @@ def run_clustering_batch_task(
             best_score_in_this_batch = -1.0
             iterations_actually_completed = 0
 
+            # Get initial subset for the first run of this batch
+            current_subset_data = _get_stratified_song_subset(
+                genre_to_full_track_data_map,
+                target_songs_per_genre,
+                previous_subset_track_ids=current_sampled_track_ids_in_batch, # Use the passed initial subset for the first run
+                percentage_change=0.0 if start_run_idx == 0 else SAMPLING_PERCENTAGE_CHANGE_PER_RUN # No change for first run of the very first batch
+            )
+            # Update current_sampled_track_ids_in_batch for subsequent iterations within this batch
+            current_sampled_track_ids_in_batch = [t['item_id'] for t in current_subset_data]
+
+
             for i in range(num_iterations_in_batch):
                 current_run_global_idx = start_run_idx + i
 
@@ -1479,15 +1791,33 @@ def run_clustering_batch_task(
                         if (task_db_info_iter_check and task_db_info_iter_check.get('status') == TASK_STATUS_REVOKED) or \
                            (parent_task_db_info_iter_check and parent_task_db_info_iter_check.get('status') in [TASK_STATUS_REVOKED, TASK_STATUS_FAILURE]):
                             log_and_update_batch_task(f"Batch task {batch_id_str} stopping mid-batch due to cancellation/parent failure before iteration {current_run_global_idx}.", current_progress_batch, task_state=TASK_STATUS_REVOKED)
-                            return {"status": "REVOKED", "message": "Batch task revoked mid-process.", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch}
+                            return {"status": "REVOKED", "message": "Batch task revoked mid-process.", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch} # Return final subset IDs
+
+                # Get the song subset for this specific iteration (perturb if not the very first run of first batch)
+                # For subsequent iterations within the same batch, perturb the current_sampled_track_ids_in_batch
+                if i > 0 or start_run_idx > 0: # If it's not the very first iteration of the very first batch
+                    current_subset_data = _get_stratified_song_subset(
+                        genre_to_full_track_data_map,
+                        target_songs_per_genre,
+                        previous_subset_track_ids=current_sampled_track_ids_in_batch, # Use the last sampled IDs
+                        percentage_change=SAMPLING_PERCENTAGE_CHANGE_PER_RUN
+                    )
+                    current_sampled_track_ids_in_batch = [t['item_id'] for t in current_subset_data] # Update IDs for next iteration
 
                 iteration_result = _perform_single_clustering_iteration(
-                    current_run_global_idx, all_tracks_data, clustering_method,
-                    num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
-                    max_songs_per_cluster, log_prefix=log_prefix_for_iter, # Pass max_songs_per_cluster
+                    current_run_global_idx, current_subset_data, # Pass the current subset
+                    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
+                    max_songs_per_cluster, log_prefix=log_prefix_for_iter,
                     elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
                     exploitation_probability=exploitation_probability,
-                    mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {})
+                    mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {}),
+                    score_weight_diversity_override=score_weight_diversity_param,
+                    score_weight_silhouette_override=score_weight_silhouette_param,
+                    score_weight_davies_bouldin_override=score_weight_davies_bouldin_param,       # Pass down DB weight
+                    score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param, # Pass down CH weight
+                    score_weight_purity_override=score_weight_purity_param,
+                    score_weight_other_feature_diversity_override=score_weight_other_feature_diversity_param, # Pass down Other Feature Diversity weight
+                    score_weight_other_feature_purity_override=score_weight_other_feature_purity_param # Pass down Other Feature Purity weight
                 )
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
@@ -1501,29 +1831,37 @@ def run_clustering_batch_task(
             final_batch_summary = {
                 "best_score_in_batch": best_score_in_this_batch,
                 "iterations_completed_in_batch": iterations_actually_completed,
-                "full_best_result_from_batch": best_result_in_this_batch # This is what the parent will use
+                "full_best_result_from_batch": best_result_in_this_batch,
+                "final_subset_track_ids": current_sampled_track_ids_in_batch # Return the last subset used for the batch
             }
             log_and_update_batch_task(f"Batch {batch_id_str} complete. Best score in batch: {best_score_in_this_batch:.2f}", 100, details_extra=final_batch_summary, task_state=TASK_STATUS_SUCCESS)
-            return {"status": "SUCCESS", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch}
+            return {"status": "SUCCESS", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch}
 
         except Exception as e:
             error_tb = traceback.format_exc()
             failure_details = {"error": str(e), "traceback": error_tb, "batch_id": batch_id_str}
             log_and_update_batch_task(f"Failed clustering batch {batch_id_str}: {e}", current_progress_batch, details_extra=failure_details, task_state=TASK_STATUS_FAILURE)
             print(f"ERROR: Clustering batch {batch_id_str} failed: {e}\n{error_tb}")
-            raise
+            # Ensure final_subset_track_ids is returned even on failure for subsequent batches to pick up
+            return {"status": "FAILURE", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": None, "final_subset_track_ids": current_sampled_track_ids_in_batch}
 
 
 def run_clustering_task(
     clustering_method, num_clusters_min, num_clusters_max,
-    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max,
+    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, # Keep these
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
-    gmm_n_components_min, gmm_n_components_max,
-    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param,
+    gmm_n_components_min, gmm_n_components_max, # GMM params
+    score_weight_diversity_param, score_weight_silhouette_param, # Existing score weights (Mood Diversity, Silhouette)
+    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # New score weights for DB and CH
+    score_weight_other_feature_diversity_param, # Added missing parameter
+    score_weight_other_feature_purity_param,    # Added missing parameter
+    score_weight_purity_param, # New score weight for Purity
+    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params must be after new score weights
     gemini_api_key_param, gemini_model_name_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
     current_job = get_current_job(redis_conn)
-    current_task_id = current_job.id if current_job else str(uuid.uuid4())
+    # Use job ID if available, otherwise generate one (though it should always be available for an RQ task)
+    current_task_id = current_job.id if current_job else str(uuid.uuid4()) # type: ignore
 
     with app.app_context():
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main clustering task started."
@@ -1537,6 +1875,13 @@ def run_clustering_task(
             "active_runs_count": 0,
             "best_score": -1.0,
             "clustering_run_job_ids": [],
+            "score_weight_diversity_for_run": score_weight_diversity_param,
+            "score_weight_silhouette_for_run": score_weight_silhouette_param,
+            "score_weight_davies_bouldin_for_run": score_weight_davies_bouldin_param,     # Log DB weight
+            "score_weight_calinski_harabasz_for_run": score_weight_calinski_harabasz_param, # Log CH weight
+            "score_weight_other_feature_diversity_for_run": score_weight_other_feature_diversity_param, # Log Other Feature Diversity weight
+            "score_weight_other_feature_purity_for_run": score_weight_other_feature_purity_param, # Log Other Feature Purity weight
+            "score_weight_purity_for_run": score_weight_purity_param, # Log Purity weight
             # Add AI config to initial details for logging/status
             "ai_model_provider_for_run": ai_model_provider_param,
             "ollama_model_name_for_run": ollama_model_name_param,
@@ -1605,8 +1950,68 @@ def run_clustering_task(
                 log_and_update_main_clustering("Number of clustering runs is 0. Nothing to do.", 100, task_state=TASK_STATUS_SUCCESS)
                 return {"status": "SUCCESS", "message": "Number of clustering runs was 0."}
 
-            serializable_rows = [dict(row) for row in rows]
-            all_tracks_data_json = json.dumps(serializable_rows)
+            # --- Stratified Sampling Preparation ---
+            genre_to_full_track_data_map = defaultdict(list)
+            for row in rows:
+                if 'mood_vector' in row and row['mood_vector']:
+                    mood_scores = {}
+                    for pair in row['mood_vector'].split(','):
+                        if ':' in pair:
+                            label, score_str = pair.split(':')
+                            mood_scores[label] = float(score_str)
+                    
+                    # Find the top mood for this track among the stratified genres
+                    top_stratified_genre = None
+                    max_score = -1.0
+                    for genre in STRATIFIED_GENRES:
+                        if genre in mood_scores and mood_scores[genre] > max_score:
+                            max_score = mood_scores[genre]
+                            top_stratified_genre = genre
+                    
+                    if top_stratified_genre:
+                        genre_to_full_track_data_map[top_stratified_genre].append(row)
+                    else:
+                        # Fallback for tracks that don't strongly belong to a stratified genre
+                        # We still want to include them in the overall pool, but not explicitly sample by genre
+                        genre_to_full_track_data_map['__other__'].append(row)
+                else:
+                    genre_to_full_track_data_map['__other__'].append(row)
+
+            # --- Determine the dynamic target_songs_per_genre based on percentile ---
+            songs_counts_for_stratified_genres = []
+            for genre in STRATIFIED_GENRES:
+                if genre in genre_to_full_track_data_map:
+                    songs_counts_for_stratified_genres.append(len(genre_to_full_track_data_map[genre]))
+
+            calculated_target_based_on_percentile = 0
+            if songs_counts_for_stratified_genres: # Avoid division by zero if list is empty
+                # Use np.percentile. Ensure percentile is within [0, 100]
+                percentile_to_use = np.clip(STRATIFIED_SAMPLING_TARGET_PERCENTILE, 0, 100)
+                calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use) # type: ignore
+                log_and_update_main_clustering(
+                    f"{percentile_to_use}th percentile of songs per stratified genre: {calculated_target_based_on_percentile:.2f}",
+                    current_progress, print_console=False
+                )
+            else:
+                log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
+
+            # Target is the max of the configured minimum and the calculated percentile value
+            target_songs_per_genre = max(MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, int(np.floor(calculated_target_based_on_percentile))) # type: ignore
+            # If no stratified genres have enough songs, or total available is low, adjust target
+            # Ensure target_songs_per_genre is not zero if there are any songs at all
+            if target_songs_per_genre == 0 and len(rows) > 0:
+                target_songs_per_genre = 1 # At least one song per genre if possible
+            log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)
+
+            # Store the raw track data in a serializable format for passing to batch jobs
+            all_tracks_data_json = json.dumps([dict(row) for row in rows]) # This should be the original full data
+            # Convert DictRow to dict for JSON serialization to prevent type errors in child tasks
+            genre_to_full_track_data_map_serializable = defaultdict(list)
+            for genre_key, track_list_val in genre_to_full_track_data_map.items():
+                genre_to_full_track_data_map_serializable[genre_key] = [dict(track_item) for track_item in track_list_val]
+            genre_to_full_track_data_map_json = json.dumps(genre_to_full_track_data_map_serializable)
+            # --- End Stratified Sampling Preparation ---
+
             best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
             best_clustering_results = None # Stores the full result dict of the best iteration
             elite_solutions_list = []      # List of {"score": float, "params": dict}
@@ -1620,9 +2025,6 @@ def run_clustering_task(
             exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
             all_launched_child_jobs_instances = []
             from app import rq_queue as main_rq_queue # Ensure we use the main queue
-
-            MAX_CONCURRENT_BATCH_JOBS = 10
-            ITERATIONS_PER_BATCH_JOB = 10
             active_jobs_map = {}
             total_iterations_completed_count = 0
             next_batch_job_idx_to_launch = 0
@@ -1630,8 +2032,10 @@ def run_clustering_task(
             _main_task_accumulated_details["total_batch_jobs"] = num_total_batch_jobs # Store total batches
             batches_completed_count = 0
 
-            log_and_update_main_clustering(f"Fetched {len(rows)} tracks. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 5)
+            # Store the last subset IDs from the previous batch. This will be updated by batch tasks.
+            last_subset_track_ids_for_batch_chaining = None
 
+            log_and_update_main_clustering(f"Fetched {len(rows)} tracks. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 5)
 
             while batches_completed_count < num_total_batch_jobs:
                 if current_job:
@@ -1654,10 +2058,14 @@ def run_clustering_task(
                         if db_task_info_child and db_task_info_child.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED]:
                             is_child_truly_completed_this_cycle = True
                         else:
-                            print(f"[MainClusteringTask-{current_task_id}] Warning: Active batch job {job_id} missing from RQ, not terminal in DB.")
+                            # Job missing from RQ, and DB status is not terminal.
+                            # Treat as completed (abnormally) to prevent stall.
+                            db_status_for_log = db_task_info_child.get('status') if db_task_info_child else "UNKNOWN (not in DB)"
+                            print(f"[MainClusteringTask-{current_task_id}] Warning: Active batch job {job_id} missing from RQ, DB status '{db_status_for_log}' is not terminal. Treating as completed (abnormally) to prevent stall.")
+                            is_child_truly_completed_this_cycle = True # Ensure it's marked completed
                     except Exception as e_monitor_child_active:
                         print(f"[MainClusteringTask-{current_task_id}] ERROR monitoring active batch job {job_id}: {e_monitor_child_active}. Treating as completed.")
-                        traceback.print_exc()
+                        # traceback.print_exc() # Potentially too verbose for this specific case
                         is_child_truly_completed_this_cycle = True
                     if is_child_truly_completed_this_cycle:
                         processed_in_this_cycle_ids.append(job_id)
@@ -1674,6 +2082,12 @@ def run_clustering_task(
                             iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
                             total_iterations_completed_count += iterations_from_batch
                             best_from_batch = batch_job_result.get("best_result_from_batch")
+                            
+                            # Update last_subset_track_ids_for_batch_chaining with the result from the *last* iteration of this batch
+                            # This ensures continuity across batches
+                            if "final_subset_track_ids" in batch_job_result and batch_job_result["final_subset_track_ids"] is not None:
+                                last_subset_track_ids_for_batch_chaining = batch_job_result["final_subset_track_ids"]
+
                             if best_from_batch and isinstance(best_from_batch, dict):
                                 batch_best_score = best_from_batch.get("diversity_score", -1.0)
                                 batch_best_params = best_from_batch.get("parameters")
@@ -1712,7 +2126,6 @@ def run_clustering_task(
                             next_batch_job_idx_to_launch +=1 # Ensure progress
                             continue
 
-
                         batch_id_for_logging = f"Batch_{next_batch_job_idx_to_launch}"
                         save_task_status(batch_job_task_id, "clustering_batch", "PENDING", parent_task_id=current_task_id, sub_type_identifier=batch_id_for_logging,
                                          details={"start_run_idx": current_batch_start_run_idx, "num_iterations": num_iterations_for_this_batch})
@@ -1726,17 +2139,29 @@ def run_clustering_task(
                         should_exploit_for_this_batch = (current_batch_start_run_idx >= exploitation_start_run_idx) and elite_solutions_list
                         exploitation_prob_for_this_batch = EXPLOITATION_PROBABILITY_CONFIG if should_exploit_for_this_batch else 0.0
 
-                        # Note: AI Naming parameters are NOT passed to batch jobs, only to the main task for the final step.
+                        # Pass the last_subset_track_ids_for_batch_chaining to the *new* batch job
+                        # This ensures the new batch continues the sampling perturbation from where the previous left off
+                        initial_subset_for_this_batch_json = json.dumps(last_subset_track_ids_for_batch_chaining) if last_subset_track_ids_for_batch_chaining else "[]"
+
                         new_job = main_rq_queue.enqueue(
                             run_clustering_batch_task,
                             args=(
-                                batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch, all_tracks_data_json,
+                                batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch,
+                                all_tracks_data_json, # Original full data, used for initial sampling inside batch
+                                genre_to_full_track_data_map_json, # Pre-categorized track data (JSON string)
+                                target_songs_per_genre,
+                                SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
                                 clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
+                                score_weight_diversity_param, score_weight_silhouette_param, # Pass down to batch task
+                                score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # Pass DB & CH weights to batch
+                                score_weight_other_feature_diversity_param, score_weight_other_feature_purity_param, # Pass Other Feature weights to batch
+                                score_weight_purity_param, # Pass Purity weight
                                 current_elite_params_for_batch_json,
-                                exploitation_prob_for_this_batch, # Pass exploitation probability
-                                mutation_config_json
+                                exploitation_prob_for_this_batch, # AI params are not passed to batch, but to main task
+                                mutation_config_json,
+                                initial_subset_for_this_batch_json # Pass the subset from the end of the previous batch
                             ),
                             job_id=batch_job_task_id,
                             description=f"Clustering Batch {next_batch_job_idx_to_launch} (Runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1})",
@@ -1865,7 +2290,7 @@ def run_clustering_task(
                             creative_prompt_template,
                             feature1, feature2, feature3, # Pass all three features
                             song_list_for_ai,
-                            centroid_features_for_ai) # Pass the comprehensive centroid features
+                            centroid_features_for_ai)
 
                         # Debug print for the raw AI-generated name string
                         print(f"{log_prefix_main_task_ai} Raw AI output for '{original_name}': '{ai_generated_name_str}'")
@@ -1983,9 +2408,9 @@ def run_clustering_task(
                             print(f"[MainClusteringTask-{current_task_id}] Error marking child batch job {child_job_instance.id} as REVOKED: {e_cancel_child_on_fail}")
             raise
         finally:
-            if 'all_tracks_data_json' in locals():
-                try: del all_tracks_data_json
-                except NameError: pass
+            # Removed direct deletion of all_tracks_data_json as it's now handled by the function's scope.
+            # If large data is processed in a temporary file, that cleanup would still be needed.
+            pass
 
 # --- Helper to get job result safely from RQ or DB ---
 def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_type_for_logging="child task"):
@@ -2020,7 +2445,8 @@ def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_ty
                              # This is the structure returned by run_clustering_batch_task in its DB details
                             run_result_data = {"status": "SUCCESS",
                                                "iterations_completed_in_batch": details_dict.get("iterations_completed_in_batch", 0),
-                                               "best_result_from_batch": details_dict.get("full_best_result_from_batch")}
+                                               "best_result_from_batch": details_dict.get("full_best_result_from_batch"),
+                                               "final_subset_track_ids": details_dict.get("final_subset_track_ids")} # Include final subset IDs
                         elif 'full_result' in details_dict: # Fallback for old single run tasks if any
                             run_result_data = details_dict['full_result']
                         else:
