@@ -14,7 +14,7 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
 # --- General Constants (Read from Environment Variables where applicable) ---
 MAX_DISTANCE = 0.5
-MAX_SONGS_PER_CLUSTER = 40
+MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "3000")) # Convert to int
 

@@ -886,7 +886,7 @@ def _perform_single_clustering_iteration(
     max_songs_per_cluster, log_prefix="",
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
-    score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None): # New weight overrides for DB and CH
+    score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None, # New weight overrides for DB and CH
     score_weight_purity_override=None): # New weight override for Purity
     """    
     Internal helper to perform a single clustering iteration. Not an RQ task.
@@ -1226,10 +1226,13 @@ def _perform_single_clustering_iteration(
                 if count_per_artist[author] < MAX_SONGS_PER_ARTIST:
                     selected_tracks.append(t_item)
                     count_per_artist[author] += 1
-                if len(selected_tracks) >= max_songs_per_cluster: break
+                # Only apply max_songs_per_cluster limit if it's greater than 0
+                if max_songs_per_cluster > 0 and len(selected_tracks) >= max_songs_per_cluster:
+                    break
             for t_item in selected_tracks:
                 item_id, title, author_val = t_item["row"]["item_id"], t_item["row"]["title"], t_item["row"]["author"]
                 filtered_clusters[cid].append((item_id, title, author_val))
+
 
         current_named_playlists = defaultdict(list)
         current_playlist_centroids = {}
