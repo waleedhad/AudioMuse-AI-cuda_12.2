@@ -887,7 +887,8 @@ def _perform_single_clustering_iteration(
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
     score_weight_davies_bouldin_override=None, score_weight_calinski_harabasz_override=None): # New weight overrides for DB and CH
-    """
+    score_weight_purity_override=None): # New weight override for Purity
+    """    
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Receives a subset of track data (rows) for clustering.
     Returns a result dictionary or None on failure.
@@ -900,6 +901,7 @@ def _perform_single_clustering_iteration(
     `score_weight_silhouette_override`: Specific weight for silhouette for this run.
     `score_weight_davies_bouldin_override`: Specific weight for Davies-Bouldin for this run.
     `score_weight_calinski_harabasz_override`: Specific weight for Calinski-Harabasz for this run.
+    `score_weight_purity_override`: Specific weight for purity for this run.
     `exploitation_probability`: Chance to use an elite solution for parameter generation.
     `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
@@ -914,6 +916,7 @@ def _perform_single_clustering_iteration(
         current_score_weight_silhouette = score_weight_silhouette_override if score_weight_silhouette_override is not None else SCORE_WEIGHT_SILHOUETTE
         current_score_weight_davies_bouldin = score_weight_davies_bouldin_override if score_weight_davies_bouldin_override is not None else SCORE_WEIGHT_DAVIES_BOULDIN
         current_score_weight_calinski_harabasz = score_weight_calinski_harabasz_override if score_weight_calinski_harabasz_override is not None else SCORE_WEIGHT_CALINSKI_HARABASZ
+        current_score_weight_purity = score_weight_purity_override if score_weight_purity_override is not None else SCORE_WEIGHT_PURITY
 
         # --- Data Preparation ---
         # X_original is now derived from the passed data_subset_for_clustering
@@ -1452,7 +1455,7 @@ def _perform_single_clustering_iteration(
             other_feature_purity_component = sum(all_individual_playlist_other_feature_purities) / len(all_individual_playlist_other_feature_purities)
 
         final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + \
-                               (SCORE_WEIGHT_PURITY * playlist_purity_component) + \
+                               (current_score_weight_purity * playlist_purity_component) + \
                                (SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY * other_features_diversity_score) + \
                                (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
                                (current_score_weight_silhouette * silhouette_metric_value) + \
@@ -1464,7 +1467,7 @@ def _perform_single_clustering_iteration(
               f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
               f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, "
               f"FinalScore: {final_enhanced_score:.2f} (Weights: MoodDiv={current_score_weight_diversity}, "
-              f"MoodPur={SCORE_WEIGHT_PURITY}, OtherFeatDiv={SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY}, "
+              f"MoodPur={current_score_weight_purity}, OtherFeatDiv={SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY}, "
               f"OtherFeatPur={SCORE_WEIGHT_OTHER_FEATURE_PURITY}, Sil={current_score_weight_silhouette}, "
               f"DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
 
@@ -1611,6 +1614,7 @@ def run_clustering_batch_task(
     score_weight_silhouette_param,
     score_weight_davies_bouldin_param, # Added Davies-Bouldin weight
     score_weight_calinski_harabasz_param, # Added Calinski-Harabasz weight
+    score_weight_purity_param, # Added Purity weight
     elite_solutions_params_list_json, # No default, will be passed positionally
     exploitation_probability,         # No default, will be passed positionally
     mutation_config_json,             # No default, will be passed positionally
@@ -1753,7 +1757,8 @@ def run_clustering_batch_task(
                     score_weight_diversity_override=score_weight_diversity_param,
                     score_weight_silhouette_override=score_weight_silhouette_param,
                     score_weight_davies_bouldin_override=score_weight_davies_bouldin_param,       # Pass down DB weight
-                    score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param # Pass down CH weight
+                    score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param, # Pass down CH weight
+                    score_weight_purity_override=score_weight_purity_param # Pass down Purity weight
                 )
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
@@ -1788,7 +1793,8 @@ def run_clustering_task(
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
     gmm_n_components_min, gmm_n_components_max, # GMM params
     score_weight_diversity_param, score_weight_silhouette_param, # Existing score weights
-    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # New score weights for DB and CH
+    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # New score weights for DB and CH    
+    score_weight_purity_param, # New score weight for Purity
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params must be after new score weights
     gemini_api_key_param, gemini_model_name_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
@@ -1812,6 +1818,7 @@ def run_clustering_task(
             "score_weight_silhouette_for_run": score_weight_silhouette_param,
             "score_weight_davies_bouldin_for_run": score_weight_davies_bouldin_param,     # Log DB weight
             "score_weight_calinski_harabasz_for_run": score_weight_calinski_harabasz_param, # Log CH weight
+            "score_weight_purity_for_run": score_weight_purity_param, # Log Purity weight
             # Add AI config to initial details for logging/status
             "ai_model_provider_for_run": ai_model_provider_param,
             "ollama_model_name_for_run": ollama_model_name_param,
@@ -2086,6 +2093,7 @@ def run_clustering_task(
                                 max_songs_per_cluster, current_task_id,
                                 score_weight_diversity_param, score_weight_silhouette_param, # Pass down to batch task
                                 score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, # Pass DB & CH weights
+                                score_weight_purity_param, # Pass Purity weight
                                 current_elite_params_for_batch_json,
                                 exploitation_prob_for_this_batch, # AI params are not passed to batch, but to main task
                                 mutation_config_json,

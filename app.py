@@ -1,4 +1,3 @@
-# /home/guido/Music/AudioMuse-AI/app.py
 import os
 import psycopg2
 from psycopg2.extras import DictCursor
@@ -22,6 +21,7 @@ from flasgger import Swagger, swag_from
 from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP_DIR, \
     REDIS_URL, DATABASE_URL, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST, NUM_RECENT_ALBUMS, \
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, \
+    SCORE_WEIGHT_PURITY, \
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
@@ -523,6 +523,11 @@ def start_clustering_endpoint():
                 format: float
                 description: Weight for the Calinski-Harabasz score component (higher is better).
                 default: "Configured SCORE_WEIGHT_CALINSKI_HARABASZ"
+              score_weight_purity:
+                type: number
+                format: float
+                description: Weight for playlist purity (intra-playlist mood consistency).
+                default: "Configured SCORE_WEIGHT_PURITY"
               min_songs_per_genre_for_stratification:
                 type: integer
                 description: Minimum number of songs to target per stratified genre.
@@ -617,6 +622,8 @@ def start_clustering_endpoint():
     # Retrieve new weights
     score_weight_davies_bouldin_val = float(data.get('score_weight_davies_bouldin', SCORE_WEIGHT_DAVIES_BOULDIN))
     score_weight_calinski_harabasz_val = float(data.get('score_weight_calinski_harabasz', SCORE_WEIGHT_CALINSKI_HARABASZ))
+    score_weight_purity_val = float(data.get('score_weight_purity', SCORE_WEIGHT_PURITY))
+
 
     pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
     num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
@@ -648,6 +655,7 @@ def start_clustering_endpoint():
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val, # Keep GMM params
             score_weight_diversity_val, score_weight_silhouette_val, # Pass the new weights
             score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val, # Pass the new weights for DB and CH
+            score_weight_purity_val, # Pass the new purity weight
             ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param # Pass ALL AI params
         ),
         job_id=job_id,
@@ -1146,6 +1154,9 @@ def get_config_endpoint():
                 score_weight_calinski_harabasz:
                   type: number
                   format: float
+                score_weight_purity:
+                  type: number
+                  format: float
     """
     # Ensure float values are represented correctly in the response
     # Although jsonify handles floats, explicitly casting might be clearer
@@ -1167,6 +1178,7 @@ def get_config_endpoint():
         "score_weight_silhouette": SCORE_WEIGHT_SILHOUETTE, # Add silhouette weight
         "score_weight_davies_bouldin": SCORE_WEIGHT_DAVIES_BOULDIN, # New: Add Davies-Bouldin weight
         "score_weight_calinski_harabasz": SCORE_WEIGHT_CALINSKI_HARABASZ, # New: Add Calinski-Harabasz weight
+        "score_weight_purity": SCORE_WEIGHT_PURITY, # New: Add Purity weight
         "stratified_sampling_target_percentile": STRATIFIED_SAMPLING_TARGET_PERCENTILE,
         "ai_model_provider": AI_MODEL_PROVIDER, # New provider config
         "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
