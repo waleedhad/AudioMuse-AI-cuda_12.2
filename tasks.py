@@ -367,7 +367,13 @@ def create_or_update_playlists_on_jellyfin(jellyfin_url_param, jellyfin_user_id_
     """Creates or updates playlists on Jellyfin based on clustering results."""
     delete_old_automatic_playlists(jellyfin_url_param, jellyfin_user_id_param, headers_param)
     for base_name, cluster in playlists.items():
-        chunks = [cluster[i:i+max_songs_per_cluster_param] for i in range(0, len(cluster), max_songs_per_cluster_param)]
+        chunks = []
+        if max_songs_per_cluster_param > 0:
+            chunks = [cluster[i:i+max_songs_per_cluster_param] for i in range(0, len(cluster), max_songs_per_cluster_param)]
+        else:  # If max_songs_per_cluster_param is 0 or less, treat as no limit, so one chunk
+            if cluster: # Ensure cluster is not empty before adding as a chunk
+                chunks = [cluster]
+            # If cluster is empty, chunks remains empty, and the loop below won't run.
         for idx, chunk in enumerate(chunks, 1):
             playlist_name_on_jellyfin = f"{base_name} ({idx})" if len(chunks) > 1 else base_name
             item_ids = [item_id for item_id, _, _ in chunk]
@@ -1495,11 +1501,11 @@ def _perform_single_clustering_iteration(
                 other_feature_purity_component = 0.0
             else:
                 other_feature_purity_component = (ln_other_features_purity - config_mean_ln_other_pur) / config_sd_ln_other_pur
-                
+
         final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + \
                                (current_score_weight_purity * playlist_purity_component) + \ # Mood Purity
                                (current_score_weight_other_feature_diversity * other_features_diversity_score) + \ # Other Feature Diversity
-                               (SCORE_WEIGHT_OTHER_FEATURE_PURITY * other_feature_purity_component) + \
+                               (current_score_weight_other_feature_purity * other_feature_purity_component) + \ # Other Feature Purity
                                (current_score_weight_silhouette * silhouette_metric_value) + \
                                (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + \
                                (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
@@ -1508,9 +1514,9 @@ def _perform_single_clustering_iteration(
               f"Scores -> MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
               f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
               f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, FinalScore: {final_enhanced_score:.2f} "
-              f"(Weights: MoodDiv={current_score_weight_diversity}, "
-              f"MoodPur={current_score_weight_purity}, OtherFeatDiv={SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY}, "
-              f"OtherFeatPur={SCORE_WEIGHT_OTHER_FEATURE_PURITY}, Sil={current_score_weight_silhouette}, "
+              f"(Weights: MoodDiv={current_score_weight_diversity}, MoodPur={current_score_weight_purity}, "
+              f"OtherFeatDiv={current_score_weight_other_feature_diversity}, OtherFeatPur={current_score_weight_other_feature_purity}, "
+              f"Sil={current_score_weight_silhouette}, "
               f"DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
 
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
