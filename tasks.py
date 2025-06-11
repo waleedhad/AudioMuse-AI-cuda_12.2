@@ -1461,12 +1461,13 @@ def _perform_single_clustering_iteration(
                                (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
 
         print(f"{log_prefix} Iteration {run_idx}: "
-              f"MoodDiv (Raw): {raw_mood_diversity_score:.2f}, MoodDiv (ScaledLn): {base_diversity_score:.2f}, "
-              f"MoodPur (Raw): {raw_playlist_purity_component:.2f}, MoodPur (ScaledLn): {playlist_purity_component:.2f}, "
-              f"OtherFeatDiv: {other_features_diversity_score:.2f} (Raw: {raw_other_features_diversity_score:.2f}), OtherFeatPur: {other_feature_purity_component:.2f}, "
+              f"Scores -> MoodDiv: {base_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
+              f"OtherFeatDiv: {other_features_diversity_score:.2f}, OtherFeatPur: {other_feature_purity_component:.2f}, "
               f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, "
-              f"FinalScore: {final_enhanced_score:.2f} (Weights: MoodDiv={current_score_weight_diversity}, MoodPur={SCORE_WEIGHT_PURITY}, "
-              f"Sil={current_score_weight_silhouette}, DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
+              f"FinalScore: {final_enhanced_score:.2f} (Weights: MoodDiv={current_score_weight_diversity}, "
+              f"MoodPur={SCORE_WEIGHT_PURITY}, OtherFeatDiv={SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY}, "
+              f"OtherFeatPur={SCORE_WEIGHT_OTHER_FEATURE_PURITY}, Sil={current_score_weight_silhouette}, "
+              f"DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
 
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
