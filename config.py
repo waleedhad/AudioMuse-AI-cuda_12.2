@@ -50,8 +50,8 @@ PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components 
 CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 
 # --- Batching Constants for Clustering Runs ---
-ITERATIONS_PER_BATCH_JOB = int(os.environ.get("ITERATIONS_PER_BATCH_JOB", "100")) # Number of clustering iterations per RQ batch job
-MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "5")) # Max number of batch jobs to run concurrently
+ITERATIONS_PER_BATCH_JOB = int(os.environ.get("ITERATIONS_PER_BATCH_JOB", "20")) # Number of clustering iterations per RQ batch job
+MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "6")) # Max number of batch jobs to run concurrently
 
 # --- Guided Evolutionary Clustering Constants ---
 TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10")) # Number of best solutions to keep as elites
@@ -62,8 +62,8 @@ MUTATION_FLOAT_ABS_DELTA = float(os.environ.get("CLUSTERING_MUTATION_FLOAT_ABS_D
 MUTATION_KMEANS_COORD_FRACTION = float(os.environ.get("CLUSTERING_MUTATION_KMEANS_COORD_FRACTION", "0.05")) # Fractional change for KMeans centroid coordinates based on data range
 
 # --- Scoring Weights for Enhanced Diversity Score ---
-SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "1.0")) # Weight for the base diversity (inter-playlist mood diversity)
-SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.0"))    # Weight for playlist purity (intra-playlist mood consistency)
+SCORE_WEIGHT_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_DIVERSITY", "2.0")) # Weight for the base diversity (inter-playlist mood diversity)
+SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "1.0"))    # Weight for playlist purity (intra-playlist mood consistency)
 SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY", "0.0")) # New: Weight for inter-playlist other feature diversity
 SCORE_WEIGHT_OTHER_FEATURE_PURITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_PURITY", "0.0"))       # New: Weight for intra-playlist other feature consistency
 # --- Weights for Internal Validation Metrics ---
@@ -72,6 +72,19 @@ SCORE_WEIGHT_DAVIES_BOULDIN = float(os.environ.get("SCORE_WEIGHT_DAVIES_BOULDIN"
 SCORE_WEIGHT_CALINSKI_HARABASZ = float(os.environ.get("SCORE_WEIGHT_CALINSKI_HARABASZ", "0.0")) # Set to 0 to effectively disable - This metric focuses on the ratio of between-cluster dispersion to within-cluster dispersion
 TOP_K_MOODS_FOR_PURITY_CALCULATION = int(os.environ.get("TOP_K_MOODS_FOR_PURITY_CALCULATION", "3")) # Number of centroid's top moods to consider for purity
 
+# --- Statistics for Raw Score Scaling (Mood Diversity and Purity) ---
+# These are based on observed typical ranges for the raw scores.
+# The 'sd' (standard deviation) is stored as requested but not used in the current LN + MinMax scaling.
+RAW_MOOD_DIVERSITY_STATS = {
+    "min": float(os.environ.get("RAW_MOOD_DIVERSITY_MIN", "0.83")),
+    "max": float(os.environ.get("RAW_MOOD_DIVERSITY_MAX", "4.72")),
+    "sd": float(os.environ.get("RAW_MOOD_DIVERSITY_SD", "0.86"))
+}
+RAW_MOOD_PURITY_STATS = { # For the non-normalized (summed) mood purity
+    "min": float(os.environ.get("RAW_MOOD_PURITY_MIN", "2.01")),
+    "max": float(os.environ.get("RAW_MOOD_PURITY_MAX", "1456.62")),
+    "sd": float(os.environ.get("RAW_MOOD_PURITY_SD", "343.97"))
+}
 
 # --- AI Playlist Naming ---
 # USE_AI_PLAYLIST_NAMING is replaced by AI_MODEL_PROVIDER

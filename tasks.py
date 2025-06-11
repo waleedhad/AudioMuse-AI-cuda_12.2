@@ -38,7 +38,8 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, TOP_K_MOODS_FOR_PURITY_CALCULATION,
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,
+    TOP_K_MOODS_FOR_PURITY_CALCULATION, RAW_MOOD_DIVERSITY_STATS, RAW_MOOD_PURITY_STATS, # Import new stats
     STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Import new config
 
 # Import AI naming function and prompt template
@@ -1266,12 +1267,39 @@ def _perform_single_clustering_iteration(
                 current_playlist_centroids[name] = top_scores
 
         # --- Enhanced Score Calculation ---
+        # Mood Diversity Score (raw_mood_diversity_score -> base_diversity_score after LN and scaling)
         raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
-        if len(MOOD_LABELS) > 0 and current_score_weight_diversity > 0: # Use current_score_weight_diversity
-            base_diversity_score = raw_mood_diversity_score # Use the raw sum directly
+        base_diversity_score = 0.0  # This will be the final scaled score
+
+        if len(MOOD_LABELS) > 0: # Ensure MOOD_LABELS is not empty
+            # 1. Apply LN transformation
+            ln_mood_diversity = np.log1p(raw_mood_diversity_score) # log1p(x) = log(1+x)
+
+            # 2. Apply Z-score standardization using configured stats
+            # ASSUMPTION: RAW_MOOD_DIVERSITY_STATS in config.py will be updated to include a "mean" key.
+            # E.g., RAW_MOOD_DIVERSITY_STATS = {"min": ..., "max": ..., "mean": ..., "sd": ...}
+            # The "sd" from config is used directly. For a more conventional Z-score of log-transformed data,
+            # the SD of the log-transformed data itself would be used.
+            raw_mean_diversity = RAW_MOOD_DIVERSITY_STATS.get("mean")
+            raw_sd_diversity = RAW_MOOD_DIVERSITY_STATS.get("sd")
+
+            if raw_mean_diversity is None or raw_sd_diversity is None:
+                print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in RAW_MOOD_DIVERSITY_STATS. Mood diversity score set to 0.")
+                base_diversity_score = 0.0
+            else:
+                log_transformed_mean_diversity = np.log1p(raw_mean_diversity)
+                if abs(raw_sd_diversity) < 1e-9: # Check if SD is effectively zero
+                    # If SD is zero, and value is at the mean, Z-score is 0. Otherwise, it's undefined/infinity.
+                    # Setting to 0 to prevent extreme score impact.
+                    base_diversity_score = 0.0
+                else:
+                    base_diversity_score = (ln_mood_diversity - log_transformed_mean_diversity) / raw_sd_diversity
+                    # Note: Z-scores are not typically clipped to [0,1]. Previous clip removed.
         else:
             base_diversity_score = 0.0
-        # Calculate playlist_purity_component
+
+        # Mood Purity Score (raw_playlist_purity_component -> playlist_purity_component after LN and scaling)
+        raw_playlist_purity_component = 0.0
         all_individual_playlist_purities = []
         # item_id_to_song_index_map must now refer to the current data_subset_for_clustering
         item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(data_subset_for_clustering)}
@@ -1333,12 +1361,38 @@ def _perform_single_clustering_iteration(
                         current_playlist_song_purity_scores.append(max_score_for_song_among_top_centroid_moods)
 
                 if current_playlist_song_purity_scores:
-                    avg_purity_for_this_playlist = sum(current_playlist_song_purity_scores) / len(current_playlist_song_purity_scores)
-                    all_individual_playlist_purities.append(avg_purity_for_this_playlist)
+                    sum_purity_for_this_playlist = sum(current_playlist_song_purity_scores) # Changed from average to sum
+                    all_individual_playlist_purities.append(sum_purity_for_this_playlist) # Add sum to list
 
-        playlist_purity_component = 0.0
         if all_individual_playlist_purities:
-            playlist_purity_component = sum(all_individual_playlist_purities) / len(all_individual_playlist_purities)
+            raw_playlist_purity_component = sum(all_individual_playlist_purities)
+
+        # 1. Apply LN transformation to the raw summed purity
+        ln_mood_purity = np.log1p(raw_playlist_purity_component)
+
+        # 2. Apply Z-score standardization using configured stats
+        # ASSUMPTION: RAW_MOOD_PURITY_STATS in config.py will be updated to include a "mean" key.
+        # E.g., RAW_MOOD_PURITY_STATS = {"min": ..., "max": ..., "mean": ..., "sd": ...}
+        # The "sd" from config is used directly.
+        raw_mean_purity = RAW_MOOD_PURITY_STATS.get("mean")
+        raw_sd_purity = RAW_MOOD_PURITY_STATS.get("sd")
+
+        if raw_mean_purity is None or raw_sd_purity is None:
+            print(f"{log_prefix} Iteration {run_idx}: 'mean' or 'sd' missing in RAW_MOOD_PURITY_STATS. Mood purity score set to 0.")
+            playlist_purity_component = 0.0
+        else:
+            log_transformed_mean_purity = np.log1p(raw_mean_purity)
+            if abs(raw_sd_purity) < 1e-9: # Check if SD is effectively zero
+                playlist_purity_component = 0.0
+            else:
+                playlist_purity_component = (ln_mood_purity - log_transformed_mean_purity) / raw_sd_purity
+                # Note: Z-scores are not typically clipped to [0,1]. Previous clip removed.
+
+        # If raw_playlist_purity_component was 0 (e.g., no playlists or all songs had 0 relevant mood scores),
+        # then ln_mood_purity will be 0.
+        # If raw_sd_purity is not zero, playlist_purity_component will be -log_transformed_mean_purity / raw_sd_purity.
+        # This is the expected behavior for Z-scores when the value is 0.
+
 
         # New: Calculate other_features_diversity_score
         raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values())
@@ -1407,10 +1461,12 @@ def _perform_single_clustering_iteration(
                                (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
 
         print(f"{log_prefix} Iteration {run_idx}: "
-              f"MoodDiv: {raw_mood_diversity_score:.2f}, MoodPur: {playlist_purity_component:.2f}, "
+              f"MoodDiv (Raw): {raw_mood_diversity_score:.2f}, MoodDiv (ScaledLn): {base_diversity_score:.2f}, "
+              f"MoodPur (Raw): {raw_playlist_purity_component:.2f}, MoodPur (ScaledLn): {playlist_purity_component:.2f}, "
               f"OtherFeatDiv: {other_features_diversity_score:.2f} (Raw: {raw_other_features_diversity_score:.2f}), OtherFeatPur: {other_feature_purity_component:.2f}, "
               f"Sil: {silhouette_metric_value:.2f}, DB: {davies_bouldin_metric_value:.2f}, CH: {calinski_harabasz_metric_value:.2f}, "
-              f"FinalScore: {final_enhanced_score:.2f} (Weights: Div={current_score_weight_diversity}, Sil={current_score_weight_silhouette}, DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
+              f"FinalScore: {final_enhanced_score:.2f} (Weights: MoodDiv={current_score_weight_diversity}, MoodPur={SCORE_WEIGHT_PURITY}, "
+              f"Sil={current_score_weight_silhouette}, DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
 
         pca_model_details = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} if pca_model_for_this_iteration and pca_config["enabled"] else None
         result = {
