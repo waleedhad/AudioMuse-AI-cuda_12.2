@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioMuse-AI - Instant Playlist</title>
+    <style>
+        /* --- Base & Typography (Reverted to Light Mode) --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            margin: 0;
+            background-color: #F9FAFB; /* Light mode background */
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* --- Minimal Tailwind CSS Utilities (Replaces CDN) - Light Mode Colors Applied --- */
+        /* Layout & Box Model */
+        .w-full { width: 100%; }
+        .max-w-2xl { max-width: 42rem; }
+        .mx-auto { margin-left: auto; margin-right: auto; }
+        .p-4 { padding: 1rem; }
+        .p-6 { padding: 1.5rem; }
+        .p-8 { padding: 2rem; }
+        .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+        .pb-6 { padding-bottom: 1.5rem; }
+        .pb-3 { padding-bottom: 0.75rem; }
+        .pt-4 { padding-top: 1rem; }
+        .mb-1 { margin-bottom: 0.25rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mb-6 { margin-bottom: 1.5rem; }
+        .mt-2 { margin-top: 0.5rem; }
+        .mt-8 { margin-top: 2rem; }
+        .min-h-screen { min-height: 100vh; }
+        .min-h-[100px] { min-height: 100px; }
+
+        /* Flexbox & Grid */
+        .flex { display: flex; }
+        .grid { display: grid; }
+        .grid-cols-1 { grid-template-columns: 1fr; }
+        .items-start { align-items: flex-start; }
+        .justify-center { justify-content: center; }
+        .gap-4 { gap: 1rem; }
+        
+        /* Typography */
+        .text-sm { font-size: 0.875rem; }
+        .text-lg { font-size: 1.125rem; }
+        .text-xl { font-size: 1.25rem; }
+        .text-2xl { font-size: 1.5rem; }
+        .text-3xl { font-size: 1.875rem; }
+        .font-bold { font-weight: 700; }
+        .font-medium { font-weight: 500; }
+        .font-semibold { font-weight: 600; }
+        .text-center { text-align: center; }
+        .italic { font-style: italic; }
+        
+        /* Colors (Light Mode Palette) */
+        .bg-gray-50 { background-color: #F9FAFB; }
+        .bg-white { background-color: #FFFFFF; }
+        .bg-gray-100 { background-color: #F3F4F6; }
+        .text-gray-800 { color: #1F2937; }
+        .text-gray-900 { color: #111827; }
+        .text-gray-600 { color: #4B5563; }
+        .text-gray-700 { color: #374151; }
+        .text-gray-500 { color: #6B7280; }
+        .text-red-600 { color: #DC2626; }
+        .bg-blue-600 { background-color: #2563EB; }
+        .hover\:bg-blue-700:hover { background-color: #1D4ED8; }
+        .text-white { color: #FFFFFF; }
+
+        /* Borders (Light Mode Palette) */
+        .border-b { border-bottom-width: 1px; }
+        .border-gray-200 { border-color: #E5E7EB; }
+        .border-gray-300 { border-color: #D1D5DB; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .rounded-2xl { border-radius: 1rem; }
+        .rounded-md { border-radius: 0.375rem; }
+        .border { border-width: 1px; }
+
+        /* Effects & Transitions */
+        .shadow-sm { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        .transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+        
+        /* Form & Interaction (Light Mode) */
+        select, textarea {
+            background-color: #fff;
+            border: 1px solid #D1D5DB;
+            color: #111827;
+        }
+        .form-input { transition: border-color 0.2s, box-shadow 0.2s; }
+        .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
+        .focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+        .focus\:ring-2:focus { --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color); --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000); }
+        .focus\:ring-offset-2:focus { --tw-ring-offset-width: 2px; }
+        .focus\:ring-blue-500:focus { --tw-ring-color: #3B82F6; }
+        .disabled\:bg-blue-300:disabled { background-color: #93C5FD; }
+        .disabled\:cursor-wait:disabled { cursor: wait; }
+
+        /* Whitespace & Word Break */
+        .whitespace-pre-wrap { white-space: pre-wrap; }
+        .break-words { overflow-wrap: break-word; }
+
+        /* Lists */
+        .list-decimal { list-style-type: decimal; }
+        .list-inside { list-style-position: inside; }
+        .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
+
+        /* --- Custom Styles --- */
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 flex items-start justify-center min-h-screen p-4 sm:p-6">
+
+    <main class="bg-white w-full max-w-2xl mx-auto p-6 sm:p-8 rounded-2xl shadow-lg">
+        <!-- Header Section -->
+        <header class="text-center border-b border-gray-200 pb-6 mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">AudioMuse-AI - Instant Playlist</h1>
+            <p class="mt-2 text-gray-600">Tell me your mood, and I'll craft the perfect playlist for you.</p>
+        </header>
+
+        <!-- Main Form -->
+        <form id="playlistForm">
+            <!-- AI Configuration Section -->
+            <fieldset class="border border-gray-300 rounded-lg p-4 mb-6">
+                <legend class="text-lg font-medium text-gray-700 px-2">AI Configuration</legend>
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label for="aiProvider" class="block text-sm font-medium text-gray-700 mb-1">AI Provider</label>
+                        <select id="aiProvider" class="form-input w-full p-2 rounded-md shadow-sm">
+                            <option value="NONE">None</option>
+                            <option value="OLLAMA">Ollama</option>
+                            <option value="GEMINI">Gemini</option>
+                        </select>
+                    </div>
+                    <div id="ollamaConfig" class="hidden">
+                        <label for="ollamaModel" class="block text-sm font-medium text-gray-700 mb-1">Ollama Model</label>
+                        <select id="ollamaModel" class="form-input w-full p-2 rounded-md shadow-sm"></select>
+                    </div>
+                    <div id="geminiConfig" class="hidden">
+                        <label for="geminiModel" class="block text-sm font-medium text-gray-700 mb-1">Gemini Model</label>
+                        <input type="text" id="geminiModel" class="form-input w-full p-2 rounded-md shadow-sm" placeholder="e.g., gemini-1.5-flash-latest">
+                        <div class="mt-4">
+                            <label for="geminiApiKey" class="block text-sm font-medium text-gray-700 mb-1">Gemini API Key (for testing)</label>
+                            <input type="password" id="geminiApiKey" class="form-input w-full p-2 rounded-md shadow-sm" placeholder="Enter Gemini API Key">
+                        </div>
+                    </div>
+                </div>
+            </fieldset>
+
+            <!-- User Input Section -->
+            <div class="mb-4">
+                <label for="userInput" class="block text-sm font-medium text-gray-700 mb-2">What kind of music are you in the mood for?</label>
+                <textarea id="userInput" class="form-input w-full p-3 rounded-md shadow-sm" placeholder="e.g., Upbeat indie rock for a summer road trip" rows="4" required></textarea>
+            </div>
+
+            <!-- Submit Button -->
+            <button type="submit" id="submitChat" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300 disabled:cursor-wait transition-colors">
+                <span>Get Playlist Idea</span>
+            </button>
+        </form>
+
+        <!-- Response Section -->
+        <section class="mt-8">
+            <h2 class="text-2xl font-bold text-gray-900 border-b border-gray-200 pb-3 mb-4">AI Response</h2>
+            <div id="responseArea" class="bg-gray-100 p-4 rounded-lg min-h-[100px] text-gray-700 whitespace-pre-wrap break-words">
+                <p class="text-gray-500 italic">Your generated playlist will appear here...</p>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // --- Self-Executing Anonymous Function to Encapsulate Code ---
+        (() => {
+            let globalConfig = {};
+
+            // --- DOM Element References ---
+            const aiProviderSelect = document.getElementById('aiProvider');
+            const ollamaConfigDiv = document.getElementById('ollamaConfig');
+            const geminiConfigDiv = document.getElementById('geminiConfig');
+            const ollamaModelSelect = document.getElementById('ollamaModel');
+            const geminiApiKeyInput = document.getElementById('geminiApiKey'); // Added API key input
+            const geminiModelSelect = document.getElementById('geminiModel');
+            const playlistForm = document.getElementById('playlistForm');
+            const userInput = document.getElementById('userInput');
+            const submitButton = document.getElementById('submitChat');
+            const responseArea = document.getElementById('responseArea');
+            const submitButtonText = submitButton.querySelector('span');
+
+            // --- Core Functions ---
+
+            /**
+             * Fetches the initial AI configuration from the server.
+             */
+            async function fetchConfig() {
+                try {
+                    const response = await fetch('/api/config'); // This endpoint is in app.py
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    globalConfig = await response.json();
+                    populateAIConfigSelectors();
+                    updateAIProviderVisibility();
+                } catch (error) {
+                    console.error("Failed to fetch config:", error);
+                    showError('Error: Could not load AI configuration.');
+                }
+            }
+
+            /**
+             * Populates the model dropdowns based on the fetched configuration.
+             */
+            function populateAIConfigSelectors() {
+                if (globalConfig.ai_model_provider) {
+                    aiProviderSelect.value = globalConfig.ai_model_provider.toUpperCase();
+                }
+
+                ollamaModelSelect.innerHTML = ''; 
+                ollamaModelSelect.add(new Option(globalConfig.ollama_model_name || "No model configured", globalConfig.ollama_model_name || ""));
+                
+                geminiModelSelect.innerHTML = '';
+                geminiModelSelect.value = globalConfig.gemini_model_name || "gemini-1.5-flash-latest"; // Set default value for input
+            }
+
+            /**
+             * Shows or hides model selection based on the chosen provider.
+             */
+            function updateAIProviderVisibility() {
+                const provider = aiProviderSelect.value;
+                ollamaConfigDiv.style.display = (provider === 'OLLAMA') ? 'block' : 'none';
+                geminiConfigDiv.style.display = (provider === 'GEMINI') ? 'block' : 'none';
+            }
+
+            /**
+             * Handles the form submission to the chat API.
+             * @param {Event} event - The form submission event.
+             */
+            async function handleChatSubmit(event) {
+                event.preventDefault(); // Prevent default form submission
+
+                if (!userInput.value.trim()) {
+                    showError('Please enter your music preference.');
+                    return;
+                }
+
+                setLoadingState(true);
+
+                const payload = {
+                    userInput: userInput.value,
+                    ai_provider: aiProviderSelect.value,
+                    ai_model: null
+                };
+
+                if (payload.ai_provider === 'OLLAMA') {
+                    payload.ai_model = ollamaModelSelect.value;
+                } else if (payload.ai_provider === 'GEMINI') {
+                    payload.ai_model = geminiModelSelect.value;
+                    payload.gemini_api_key = geminiApiKeyInput.value; // Include API key for Gemini
+                }
+                try {
+                    const response = await fetch('/chat/api/chatPlaylist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: "An unknown error occurred." }));
+                        throw new Error(`API Error: ${response.status} - ${errorData.detail || "Failed to get details"}`);
+                    }
+
+                    const data = await response.json();
+                    renderPlaylist(data.response.message); // Pass the message string to renderPlaylist
+
+                } catch (error) {
+                    console.error('Error submitting chat:', error);
+                    showError(`Error: ${error.message}`);
+                } finally {
+                    setLoadingState(false);
+                }
+            }
+            
+            // --- UI Helper Functions ---
+
+            /**
+             * Toggles the loading state of the submit button.
+             * @param {boolean} isLoading - Whether the app is in a loading state.
+             */
+            function setLoadingState(isLoading) {
+                submitButton.disabled = isLoading;
+                if (isLoading) {
+                    submitButtonText.textContent = 'Processing...';
+                } else {
+                    submitButtonText.textContent = 'Get Playlist Idea';
+                }
+            }
+
+            /**
+             * Renders the AI's playlist response in a formatted way.
+             * @param {string} responseText - The message string from the AI (expected to be plain text or SQL query).
+             */
+            function renderPlaylist(responseText) {
+                responseArea.innerHTML = '';
+                responseArea.classList.remove('text-red-600', 'font-semibold');
+                try {
+                    // Attempt to parse if the responseText MIGHT be JSON in other contexts,
+                    // but for the current SQL query, this will fail and go to catch.
+                    const playlist = JSON.parse(responseText);
+                    
+                    const title = document.createElement('h3');
+                    title.className = 'text-xl font-bold text-gray-900 mb-2';
+                    title.textContent = playlist.playlist_name || 'Your Playlist';
+                    
+                    const description = document.createElement('p');
+                    description.className = 'text-gray-600 mb-4 italic';
+                    description.textContent = playlist.description || '';
+                    
+                    const songList = document.createElement('ol');
+                    songList.className = 'list-decimal list-inside space-y-2 text-gray-800';
+                    
+                    playlist.songs.forEach(song => {
+                        const listItem = document.createElement('li');
+                        listItem.textContent = `${song.title} by ${song.artist}`;
+                        songList.appendChild(listItem);
+                    });
+                    
+                    responseArea.appendChild(title);
+                    responseArea.appendChild(description);
+                    responseArea.appendChild(songList);
+                    
+                } catch (e) {
+                    // If parsing fails (expected for SQL query), show the raw text.
+                    console.error("Could not parse AI response as JSON:", e);
+                    responseArea.textContent = responseText;
+                }
+            }
+            
+            /**
+             * Displays an error message in the response area.
+             * @param {string} message - The error message to display.
+             */
+            function showError(message) {
+                responseArea.innerHTML = '';
+                responseArea.classList.add('text-red-600', 'font-semibold');
+                responseArea.textContent = message;
+            }
+
+            // --- Event Listeners ---
+            document.addEventListener('DOMContentLoaded', fetchConfig);
+            aiProviderSelect.addEventListener('change', updateAIProviderVisibility);
+            playlistForm.addEventListener('submit', handleChatSubmit);
+
+        })();
+    </script>
+</body>
+</html>

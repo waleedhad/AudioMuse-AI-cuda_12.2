@@ -31,6 +31,9 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
 # --- Flask App Setup ---
 app = Flask(__name__)
 
+# --- Import Blueprints ---
+from app_chat import chat_bp # Import the chat blueprint
+
 # --- Swagger Setup ---
 app.config['SWAGGER'] = {
     'title': 'AudioMuse-AI API',
@@ -142,6 +145,10 @@ def init_db():
 
 with app.app_context():
     init_db()
+
+# --- Register Blueprints ---
+app.register_blueprint(chat_bp, url_prefix='/chat') # All routes in chat_bp will be prefixed with /chat
+
 
 # --- DB Cleanup Utility ---
 def clean_successful_task_details_on_new_start():
