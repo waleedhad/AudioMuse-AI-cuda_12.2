@@ -1257,7 +1257,7 @@ def run_clustering_task(
     score_weight_other_feature_purity_param,    # Added missing parameter
     score_weight_purity_param, # New score weight for Purity
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params
-    gemini_api_key_param, gemini_model_name_param):
+    gemini_api_key_param, gemini_model_name_param, top_n_moods_for_clustering_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
     current_job = get_current_job(redis_conn)
     # Use job ID if available, otherwise generate one (though it should always be available for an RQ task)
@@ -1554,11 +1554,11 @@ def run_clustering_task(
                             args=(
                                 batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch,
                                 all_tracks_data_json, # Original full data, used for initial sampling inside batch
-                                genre_to_full_track_data_map_json, # Pre-categorized track data (JSON string)
+                                genre_to_full_track_data_map_json,
                                 target_songs_per_genre,
                                 SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
                                 clustering_method, active_mood_labels, # Pass active_mood_labels
-                                clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
+                                num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
                                 score_weight_diversity_param, score_weight_silhouette_param, # Pass down to batch task

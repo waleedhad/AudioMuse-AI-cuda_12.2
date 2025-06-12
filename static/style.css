@@ -203,14 +203,22 @@ select {
 /* Task Status */
 #task-status-display p {
     margin: 0.5rem 0;
+    color: #9ca3af; /* Default text color for status lines, including the '%' symbol */
 }
 
 #task-status-display .status-label {
-    color: #60a5fa;
+    color: #60a5fa; /* Specific color for labels like "Task ID:", "Type:", etc. */
 }
 
 #status-status {
     color: #fbbf24;
+}
+
+/* Make Task ID, Type value, and Progress percentage number more visible */
+#status-task-id,
+#status-task-type,
+#status-progress {
+    color: #9ca3af; /* Same color as other labels */
 }
 
 .progress-bar-container {
