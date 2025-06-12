@@ -576,6 +576,10 @@ def start_clustering_endpoint():
                 description: Override for the Gemini model name for this run.
                 nullable: true
                 default: "Defaults to server-configured GEMINI_MODEL_NAME"
+              top_n_moods:
+                type: integer
+                description: Number of top moods to consider for clustering feature vectors (uses the first N from global MOOD_LABELS).
+                default: "Configured TOP_N_MOODS"
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -664,6 +668,7 @@ def start_clustering_endpoint():
     ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
     gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
     gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
+    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS)) # New parameter for clustering
     job_id = str(uuid.uuid4())
 
     # Clean up details of previously successful tasks before starting a new one
@@ -684,8 +689,9 @@ def start_clustering_endpoint():
             # *** NEW: Pass the new 'other_feature' weights to the task ***
             score_weight_other_feature_diversity_val,
             score_weight_other_feature_purity_val,
-            # Pass AI params
-            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param
+            # Pass AI params and new top_n_moods for clustering
+            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param,
+            top_n_moods_for_clustering # Pass to the task
         ),
         job_id=job_id,
         description="Main Music Clustering",

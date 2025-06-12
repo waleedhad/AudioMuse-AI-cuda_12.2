@@ -306,7 +306,7 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     tempo = analysis_results.get("tempo", 0.0)
                     key = analysis_results.get("key", "")
                     scale = analysis_results.get("scale", "")
-                    moods = analysis_results.get("moods", {})
+                    all_moods_predicted = analysis_results.get("moods", {}) # All moods initially
                     # Include new predictions directly
                     danceable = analysis_results.get("danceable", 0.0)
                     energy = analysis_results.get("energy", 0.0) # Get energy
@@ -316,25 +316,27 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     relaxed = analysis_results.get("relaxed", 0.0)
                     sad = analysis_results.get("sad", 0.0)
 
+                    # Select only the top_n_moods for saving and detailed logging
+                    sorted_moods_for_saving = sorted(all_moods_predicted.items(), key=lambda item: item[1], reverse=True)
+                    top_moods_to_save_dict = dict(sorted_moods_for_saving[:top_n_moods])
+
                     # Prepare for database storage
                     other_features_str = f"danceable:{danceable:.2f},aggressive:{aggressive:.2f},happy:{happy:.2f},party:{party:.2f},relaxed:{relaxed:.2f},sad:{sad:.2f}" # Ensure no spaces for easier parsing
-
                     current_track_details_for_api = {
                         "name": track_name_full,
                         "tempo": round(tempo, 2),
                         "key": key,
                         "scale": scale,
-                        "moods": {k: round(v, 2) for k, v in moods.items()}
+                        "moods": {k: round(v, 2) for k, v in all_moods_predicted.items()}
                     }
-
-                    # Save ALL mood scores, not just top N, to allow for more accurate purity calculations
-                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, moods, energy=energy, other_features=other_features_str) # Pass full moods dict
+                    # Save only the top_n_moods
+                    save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_moods_to_save_dict, energy=energy, other_features=other_features_str)
                     tracks_analyzed_count += 1
-                    mood_details_str = ', '.join(f'{k}:{v:.2f}' for k,v in moods.items())
 
-                    # Prepare for logging: Get top N moods
-                    sorted_moods = sorted(moods.items(), key=lambda item: item[1], reverse=True)
-                    top_n_moods_for_log = sorted_moods[:top_n_moods] # Use the function argument
+                    # For logging, we already have the top_moods_to_save_dict
+                    # If top_n_moods passed to task is different from a global TOP_N_MOODS for logging, adjust here.
+                    # Assuming top_n_moods arg is the definitive count for both saving and logging summary.
+                    top_n_moods_for_log = list(top_moods_to_save_dict.items()) # Already top N
                     mood_details_str_log = ', '.join(f'{k}:{v:.2f}' for k,v in top_n_moods_for_log)
 
                     # Prepare for logging: New features

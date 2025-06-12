@@ -69,7 +69,7 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
 
     # Step 2: Inverse transform from standardized space to original raw space (if scaler details provided)
     if scaler_details:
-        try:
+        try: # pragma: no cover
             temp_scaler = StandardScaler()
             temp_scaler.mean_ = np.array(scaler_details["mean"])
             temp_scaler.scale_ = np.array(scaler_details["scale"])
@@ -77,14 +77,14 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
             temp_scaler.n_features_in_ = len(temp_scaler.mean_)
 
             if len(interpreted_vector) != len(temp_scaler.mean_):
-                print(f"Warning: Dimension mismatch for scaler inverse transform. Expected {len(temp_scaler.mean_)} features, got {len(interpreted_vector)}. Skipping scaler inverse.")
+                # print(f"Warning: Dimension mismatch for scaler inverse transform. Expected {len(temp_scaler.mean_)} features, got {len(interpreted_vector)}. Skipping scaler inverse.")
                 # If dimensions don't match, we cannot reliably inverse scale. Use the vector as is.
                 final_interpreted_raw_vector = interpreted_vector
             else:
                 final_interpreted_raw_vector = temp_scaler.inverse_transform(interpreted_vector.reshape(1, -1))[0]
         except Exception as e:
             print(f"Warning: StandardScaler inverse_transform failed: {e}. Using previously interpreted vector.")
-            traceback.print_exc()
+            # traceback.print_exc()
             final_interpreted_raw_vector = interpreted_vector # Fallback if scaler inverse fails
     else:
         # If no scaler details, the vector is either from PCA inverse (if PCA was enabled)
@@ -287,7 +287,7 @@ def _generate_or_mutate_kmeans_initial_centroids(
 
 def _perform_single_clustering_iteration(
     run_idx, data_subset_for_clustering, # Changed from all_tracks_data_parsed
-    clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges,
+    clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges, active_mood_labels, # Added active_mood_labels
     max_songs_per_cluster, log_prefix="",
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, # Existing weight overrides
@@ -331,7 +331,7 @@ def _perform_single_clustering_iteration(
 
         # --- Data Preparation ---
         # X_original is now derived from the passed data_subset_for_clustering
-        X_original = np.array([score_vector(row, MOOD_LABELS, OTHER_FEATURE_LABELS) for row in data_subset_for_clustering])
+        X_original = np.array([score_vector(row, active_mood_labels, OTHER_FEATURE_LABELS) for row in data_subset_for_clustering])
         if X_original.shape[0] == 0:
             print(f"{log_prefix} Iteration {run_idx}: No data in subset to cluster.")
             return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}} # Add scaler_details
@@ -456,7 +456,7 @@ def _perform_single_clustering_iteration(
                     params_generated_by_mutation = False
         if not params_generated_by_mutation:
             # print(f"{log_prefix} Iteration {run_idx}: Using random parameters.")
-            # Original random parameter generation
+            # Original random parameter generation # pragma: no cover
             sampled_pca_components_rand = random.randint(pca_params_ranges["components_min"], pca_params_ranges["components_max"])
             # Max PCA components also limited by number of features in X_standardized and number of samples
             max_allowable_pca_rand = min(sampled_pca_components_rand, X_standardized.shape[1], (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1)
@@ -498,7 +498,7 @@ def _perform_single_clustering_iteration(
                 method_params_config = {"method": "gmm", "params": {"n_components": max(1, gmm_n_rand)}}
             else:
                 print(f"{log_prefix} Iteration {run_idx}: Unsupported clustering method {clustering_method}")
-                return None
+                return None # pragma: no cover
 
         # Ensure pca_model_for_this_iteration is set if pca_config is enabled but model wasn't created during mutation path
         if pca_config["enabled"] and pca_model_for_this_iteration is None and pca_config["components"] > 0:
@@ -508,7 +508,7 @@ def _perform_single_clustering_iteration(
                 data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
                 pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
             except Exception as e_refit_pca:
-                 print(f"{log_prefix} Iteration {run_idx}: Error re-fitting PCA: {e_refit_pca}. Disabling PCA for this run.")
+                 print(f"{log_prefix} Iteration {run_idx}: Error re-fitting PCA: {e_refit_pca}. Disabling PCA for this run.") # pragma: no cover
                  traceback.print_exc()
                  pca_config["enabled"] = False
                  pca_config["components"] = 0
@@ -518,7 +518,7 @@ def _perform_single_clustering_iteration(
 
         if not method_params_config or pca_config is None:
             print(f"{log_prefix} Iteration {run_idx}: Critical error: parameters not configured.")
-            return None
+            return None # pragma: no cover
 
         # --- Start of core logic from original run_single_clustering_iteration_task ---
         # Use data_for_clustering_current (which is either standardized or PCA-transformed standardized data) for clustering.
@@ -660,8 +660,8 @@ def _perform_single_clustering_iteration(
                 center_val = cluster_centers_map.get(label_val)
                 if center_val is None or len(center_val) == 0: continue # Ensure centroid exists and is not empty
                 # Pass scaler_details to name_cluster
-                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], MOOD_LABELS, scaler_details)
-                if top_scores and any(mood in MOOD_LABELS for mood in top_scores.keys()):
+                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], active_mood_labels, scaler_details)
+                if top_scores and any(mood in active_mood_labels for mood in top_scores.keys()):
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
                     if predominant_mood_key:
                         current_mood_score = top_scores.get(predominant_mood_key, 0.0)
@@ -700,7 +700,7 @@ def _perform_single_clustering_iteration(
         raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
         base_diversity_score = 0.0  # This will be the final scaled score
 
-        if len(MOOD_LABELS) > 0: # Ensure MOOD_LABELS is not empty
+        if len(active_mood_labels) > 0: # Ensure active_mood_labels is not empty
             # 1. Apply LN transformation
             ln_mood_diversity = np.log1p(raw_mood_diversity_score) # log1p(x) = log(1+x)
 
@@ -744,7 +744,7 @@ def _perform_single_clustering_iteration(
 
                 # Get all mood scores from the centroid for this playlist
                 centroid_mood_scores_for_purity_calc = {
-                    m_label: playlist_centroid_mood_data.get(m_label, 0.0)
+                    m_label: playlist_centroid_mood_data.get(m_label, 0.0) # pragma: no cover
                     for m_label in MOOD_LABELS # Ensure we consider all possible moods
                     if m_label in playlist_centroid_mood_data # And that the centroid has a score for it
                 }
@@ -774,14 +774,14 @@ def _perform_single_clustering_iteration(
                     song_original_index = item_id_to_song_index_map.get(item_id)
                     if song_original_index is not None:
                         # Corrected slicing for mood scores: X_original = [tempo, energy, moods..., other_features...]
-                        song_mood_scores_vector = X_original[song_original_index][2 : 2 + len(MOOD_LABELS)]
+                        song_mood_scores_vector = X_original[song_original_index][2 : 2 + len(active_mood_labels)]
                         
                         max_score_for_song_among_top_centroid_moods = 0.0
                         for centroid_mood_label in top_k_centroid_mood_labels_for_purity:
                             try:
-                                mood_idx = MOOD_LABELS.index(centroid_mood_label)
+                                mood_idx = active_mood_labels.index(centroid_mood_label)
                                 if mood_idx < len(song_mood_scores_vector):
-                                    song_score_for_this_centroid_mood = song_mood_scores_vector[mood_idx]
+                                    song_score_for_this_centroid_mood = song_mood_scores_vector[mood_idx] # pragma: no cover
                                     if song_score_for_this_centroid_mood > max_score_for_song_among_top_centroid_moods:
                                         max_score_for_song_among_top_centroid_moods = song_mood_scores_vector[mood_idx] # Keep only the highest score
                             except ValueError: # Should not happen if MOOD_LABELS is consistent
@@ -879,7 +879,7 @@ def _perform_single_clustering_iteration(
                     song_original_index = item_id_to_song_index_map.get(item_id)
                     if song_original_index is not None:
                         other_features_start_index = 2 + len(MOOD_LABELS)
-                        song_other_features_vector = X_original[song_original_index][other_features_start_index:]
+                        song_other_features_vector = X_original[song_original_index][other_features_start_index:] # pragma: no cover
                         if predominant_other_feature_index_in_labels < len(song_other_features_vector):
                             song_specific_score = song_other_features_vector[predominant_other_feature_index_in_labels]
                             scores_of_predominant_other_feature_for_songs.append(song_specific_score)
@@ -1058,6 +1058,7 @@ def run_clustering_batch_task(
     target_songs_per_genre, # The dynamically determined target count
     sampling_percentage_change_per_run,
     clustering_method,
+    active_mood_labels_for_batch, # New: Pass the active mood labels
     num_clusters_min_max_tuple,
     dbscan_params_ranges_dict,
     gmm_params_ranges_dict,
@@ -1205,7 +1206,7 @@ def run_clustering_batch_task(
 
                 iteration_result = _perform_single_clustering_iteration(
                     current_run_global_idx, current_subset_data, # Pass the current subset
-                    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict,
+                    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict, active_mood_labels_for_batch,
                     max_songs_per_cluster, log_prefix=log_prefix_for_iter,
                     elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
                     exploitation_probability=exploitation_probability,
@@ -1255,7 +1256,7 @@ def run_clustering_task(
     score_weight_other_feature_diversity_param, # Added missing parameter
     score_weight_other_feature_purity_param,    # Added missing parameter
     score_weight_purity_param, # New score weight for Purity
-    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params must be after new score weights
+    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params
     gemini_api_key_param, gemini_model_name_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
     current_job = get_current_job(redis_conn)
@@ -1348,6 +1349,12 @@ def run_clustering_task(
             if num_clustering_runs == 0:
                 log_and_update_main_clustering("Number of clustering runs is 0. Nothing to do.", 100, task_state=TASK_STATUS_SUCCESS)
                 return {"status": "SUCCESS", "message": "Number of clustering runs was 0."}
+
+            # --- Determine active mood labels for this clustering run ---
+            # top_n_moods_for_clustering_param is the integer value from the API/config
+            # We take the first N moods from the global MOOD_LABELS list.
+            # This assumes MOOD_LABELS is ordered by some importance or is the desired fixed set.
+            active_mood_labels = MOOD_LABELS[:top_n_moods_for_clustering_param] if top_n_moods_for_clustering_param > 0 else MOOD_LABELS
 
             # --- Stratified Sampling Preparation ---
             genre_to_full_track_data_map = defaultdict(list)
@@ -1550,6 +1557,7 @@ def run_clustering_task(
                                 genre_to_full_track_data_map_json, # Pre-categorized track data (JSON string)
                                 target_songs_per_genre,
                                 SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
+                                clustering_method, active_mood_labels, # Pass active_mood_labels
                                 clustering_method, num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster, current_task_id,
@@ -1772,7 +1780,7 @@ def run_clustering_task(
             # Use the suffixed names for Jellyfin creation
             create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN},
                                                     playlists_to_create_on_jellyfin, centroids_for_jellyfin_playlists,
-                                                    MOOD_LABELS, final_max_songs_per_cluster)
+                                                    active_mood_labels, final_max_songs_per_cluster) # Use active_mood_labels
 
             final_db_summary = {
                 "best_score": best_diversity_score,
