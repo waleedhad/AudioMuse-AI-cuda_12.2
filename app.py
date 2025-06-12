@@ -411,7 +411,7 @@ def start_analysis_endpoint():
                   type: string
     """
     # Import task function here to break circular dependency
-    from tasks import run_analysis_task
+    from tasks import run_analysis_task  # Import from the tasks package
 
     data = request.json or {}
     jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
@@ -609,7 +609,7 @@ def start_clustering_endpoint():
                             type: string
     """
     # Import task function here to break circular dependency
-    from tasks import run_clustering_task
+    from tasks import run_clustering_task # Import from the tasks package
 
     # Check if a main_clustering task is already active
     db = get_db()

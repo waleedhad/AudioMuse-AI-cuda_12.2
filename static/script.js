@@ -13,7 +13,7 @@ const basicAlgorithmDisplay = document.getElementById('basic-algorithm-display')
 // Config Form
 const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
 const dbscanParamsDiv = document.getElementById('dbscan-params');
-const kmeansParamsDiv = document.getElementById('kmeans-params');
+// const kmeansParamsDiv = document.getElementById('kmeans-params'); // This element doesn't exist, kmeansParamsBasic is used
 const gmmParamsDiv = document.getElementById('gmm-params');
 const aiModelProviderSelect = document.getElementById('config-ai_model_provider');
 const ollamaConfigGroup = document.getElementById('ollama-config-group');
@@ -52,14 +52,14 @@ function switchView(viewToShow) {
         basicViewBtn.classList.add('active');
         advancedViewBtn.classList.remove('active');
         advancedParams.forEach(el => el.classList.add('hidden'));
-        kmeansParamsBasic.classList.remove('hidden');
-        basicAlgorithmDisplay.classList.remove('hidden');
-
+        if (kmeansParamsBasic) kmeansParamsBasic.classList.remove('hidden'); // Show K-Means params in basic
+        if (basicAlgorithmDisplay) basicAlgorithmDisplay.classList.remove('hidden');
+        if (clusterAlgorithmSelect) clusterAlgorithmSelect.classList.add('hidden'); // Hide algorithm dropdown in basic
 
         // In basic view, we only support K-Means
-        clusterAlgorithmSelect.value = 'kmeans';
-        // Trigger change to ensure correct logic runs if it depends on it
-        clusterAlgorithmSelect.dispatchEvent(new Event('change'));
+        if (clusterAlgorithmSelect) {
+            clusterAlgorithmSelect.value = 'kmeans';
+        }
 
     } else { // advanced view
         basicViewBtn.classList.remove('active');
@@ -67,7 +67,7 @@ function switchView(viewToShow) {
         advancedParams.forEach(el => el.classList.remove('hidden'));
         kmeansParamsBasic.classList.add('hidden'); // Hide the basic K-Means inputs
         basicAlgorithmDisplay.classList.add('hidden');
-
+        if (clusterAlgorithmSelect) clusterAlgorithmSelect.classList.remove('hidden'); // Show algorithm dropdown in advanced
     }
      // This function handles showing/hiding algorithm-specific params
     toggleClusteringParams();
@@ -144,14 +144,21 @@ function toggleClusteringParams() {
     const selectedAlgorithm = clusterAlgorithmSelect.value;
     dbscanParamsDiv.classList.add('hidden');
     gmmParamsDiv.classList.add('hidden');
-    if (kmeansParamsDiv) kmeansParamsDiv.classList.add('hidden');
+    // K-Means params (kmeansParamsBasic) are handled based on view below
 
     // Only show algorithm-specific params in advanced view
     if (advancedViewBtn.classList.contains('active')) {
+        // First, ensure K-Means params are hidden if K-Means is NOT selected
+        if (selectedAlgorithm !== 'kmeans' && kmeansParamsBasic) {
+            kmeansParamsBasic.classList.add('hidden');
+        }
+
         if (selectedAlgorithm === 'dbscan') {
             dbscanParamsDiv.classList.remove('hidden');
         } else if (selectedAlgorithm === 'gmm') {
             gmmParamsDiv.classList.remove('hidden');
+        } else if (selectedAlgorithm === 'kmeans' && kmeansParamsBasic) { 
+            kmeansParamsBasic.classList.remove('hidden'); // Show K-Means params if K-Means is selected
         }
     }
 }
