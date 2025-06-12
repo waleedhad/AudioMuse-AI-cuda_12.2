@@ -4,6 +4,57 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AudioMuse-AI</title>
+    <style>
+        /* Keyframe animation for the loading spinner */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* View switcher styles */
+        .view-switcher button {
+            background-color: #374151;
+            color: #d1d5db;
+            border: 1px solid #4b5563;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .view-switcher button.active {
+            background-color: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+
+        .param-group {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+
+        /* Class to hide elements */
+        .hidden {
+            display: none !important;
+        }
+
+        #config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        /* Responsive layout for the configuration header */
+        @media (max-width: 500px) {
+            #config-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+        }
+    </style>
 </head>
 <body style="background-color: #1a1a1a; padding: 1.5rem;">
     <div style="width: 100%; max-width: 960px; margin-left: auto; margin-right: auto;">
@@ -16,34 +67,33 @@
             <p style="margin-left: 1rem; color: #93c5fd; font-size: 1.125rem;">Loading...</p>
         </div>
 
-        <style>
-            /* Keyframe animation for the loading spinner */
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-        </style>
-
         <div id="main-content" style="display: none;">
             <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
-                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
-                    Configuration Parameters
-                </h2>
+                <div id="config-header">
+                    <h2 style="font-size: 1.5rem; color: #93c5fd; margin: 0;">
+                        Configuration Parameters
+                    </h2>
+                    <div class="view-switcher">
+                        <button id="basic-view-btn" class="active">Basic</button>
+                        <button id="advanced-view-btn">Advanced</button>
+                    </div>
+                </div>
+
                 <form id="config-form" style="color: #d1d5db;">
-                    <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
-                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                    <fieldset class="advanced-param hidden" style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem;">
                             General Parameters
                         </legend>
-                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
-                            <div style="margin-bottom: 0.5rem;">
+                        <div class="param-group">
+                            <div>
                                 <label for="config-jellyfin_url" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin URL:</label>
                                 <input type="text" id="config-jellyfin_url" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-jellyfin_user_id" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin User ID:</label>
                                 <input type="text" id="config-jellyfin_user_id" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-jellyfin_token" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Jellyfin Token:</label>
                                 <input type="text" id="config-jellyfin_token" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
@@ -51,15 +101,15 @@
                     </fieldset>
 
                     <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
-                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem;">
                             Analysis Parameters
                         </legend>
-                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
-                            <div style="margin-bottom: 0.5rem;">
+                        <div class="param-group">
+                            <div>
                                 <label for="config-num_recent_albums" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Number of Recent Albums:</label>
                                 <input type="number" id="config-num_recent_albums" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-top_n_moods" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Top N Moods:</label>
                                 <input type="number" id="config-top_n_moods" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
@@ -67,11 +117,15 @@
                     </fieldset>
 
                     <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
-                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem;">
                             Clustering Parameters
                         </legend>
-                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
-                            <div style="margin-bottom: 0.5rem;">
+                        <div class="param-group">
+                            <div id="basic-algorithm-display">
+                                <label style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Algorithm:</label>
+                                <p style="font-weight: bold; color: #4ade80; padding: 0.5rem 0; margin:0;">K-Means</p>
+                            </div>
+                            <div class="advanced-param hidden">
                                 <label for="config-cluster_algorithm" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Algorithm:</label>
                                 <select id="config-cluster_algorithm" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                     <option value="kmeans">K-Means</option>
@@ -79,126 +133,118 @@
                                     <option value="gmm">GMM</option>
                                 </select>
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
-                                <label for="config-max_distance" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Distance:</label>
-                                <input type="number" step="0.01" id="config-max_distance" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                            </div>
-                            <div style="margin-bottom: 0.5rem;">
-                                <label for="config-max_songs_per_cluster" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Songs Per Cluster:</label>
-                                <input type="number" id="config-max_songs_per_cluster" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                            </div>
-                            <div style="margin-bottom: 0.5rem;">
-                                <label for="config-pca_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Min:</label>
-                                <input type="number" id="config-pca_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                            </div>
-                            <div style="margin-bottom: 0.5rem;">
-                                <label for="config-pca_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Max:</label>
-                                <input type="number" id="config-pca_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                            </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-clustering_runs" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Clustering Runs:</label>
                                 <input type="number" id="config-clustering_runs" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <!-- New Clustering Parameters -->
-                            <div style="margin-bottom: 0.5rem;">
+                             <div id="kmeans-params-basic" style="display: grid; gap: 1rem;">
+                                <div>
+                                    <label for="config-num_clusters_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Min Clusters:</label>
+                                    <input type="number" id="config-num_clusters_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                </div>
+                                <div>
+                                    <label for="config-num_clusters_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Clusters:</label>
+                                    <input type="number" id="config-num_clusters_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                                </div>
+                            </div>
+                            <div class="advanced-param hidden">
+                                <label for="config-max_distance" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Distance:</label>
+                                <input type="number" step="0.01" id="config-max_distance" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div class="advanced-param hidden">
+                                <label for="config-max_songs_per_cluster" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Songs Per Cluster:</label>
+                                <input type="number" id="config-max_songs_per_cluster" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                             <div class="advanced-param hidden">
+                                <label for="config-pca_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Min:</label>
+                                <input type="number" id="config-pca_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div class="advanced-param hidden">
+                                <label for="config-pca_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">PCA Components Max:</label>
+                                <input type="number" id="config-pca_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
+                            </div>
+                            <div class="advanced-param hidden">
                                 <label for="config-min_songs_per_genre_for_stratification" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Min Songs Per Genre for Stratification:</label>
                                 <input type="number" id="config-min_songs_per_genre_for_stratification" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-stratified_sampling_target_percentile" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Stratified Sampling Target Percentile:</label>
                                 <input type="number" id="config-stratified_sampling_target_percentile" min="0" max="100" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <!-- Added SCORE_WEIGHT_DIVERSITY -->
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_diversity" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Diversity Score Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_diversity" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <!-- Added SCORE_WEIGHT_PURITY -->
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_purity" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Purity Score Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_purity" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            
-                            <!-- START: New Other Feature Score Weights -->
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_other_feature_diversity" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Other Feature Diversity Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_other_feature_diversity" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_other_feature_purity" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Other Feature Purity Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_other_feature_purity" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <!-- END: New Other Feature Score Weights -->
-                            
-                            <!-- Added SCORE_WEIGHT_SILHOUETTE -->
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_silhouette" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Silhouette Score Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_silhouette" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <!-- New Davies-Bouldin and Calinski-Harabasz Score Weights -->
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_davies_bouldin" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Davies-Bouldin Score Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_davies_bouldin" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div class="advanced-param hidden">
                                 <label for="config-score_weight_calinski_harabasz" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Calinski-Harabasz Score Weight:</label>
                                 <input type="number" step="0.01" id="config-score_weight_calinski_harabasz" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <!-- End New Davies-Bouldin and Calinski-Harabasz Score Weights -->
                         </div>
 
-                        <div id="dbscan-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                        <div id="dbscan-params" class="advanced-param hidden" style="grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
                             <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">DBSCAN Specific:</h4>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-dbscan_eps_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Epsilon Min:</label>
                                 <input type="number" step="0.01" id="config-dbscan_eps_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-dbscan_eps_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Epsilon Max:</label>
                                 <input type="number" step="0.01" id="config-dbscan_eps_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-dbscan_min_samples_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Min Samples Min:</label>
                                 <input type="number" id="config-dbscan_min_samples_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-dbscan_min_samples_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">DBSCAN Min Samples Max:</label>
                                 <input type="number" id="config-dbscan_min_samples_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
                         </div>
 
-                        <div id="kmeans-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
-                            <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">K-Means Specific:</h4>
-                            <div style="margin-bottom: 0.5rem;">
-                                <label for="config-num_clusters_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Min Clusters:</label>
-                                <input type="number" id="config-num_clusters_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                            </div>
-                            <div style="margin-bottom: 0.5rem;">
-                                <label for="config-num_clusters_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Max Clusters:</label>
-                                <input type="number" id="config-num_clusters_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
-                            </div>
+                        <div id="kmeans-params" class="advanced-param hidden" style="grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                           <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">K-Means Specific:</h4>
+                           <!-- Content moved to basic view -->
                         </div>
 
-                        <div id="gmm-params" style="display: none; grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
+                        <div id="gmm-params" class="advanced-param hidden" style="grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem;">
                             <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">GMM Specific:</h4>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-gmm_n_components_min" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">GMM Components Min:</label>
                                 <input type="number" id="config-gmm_n_components_min" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
-                            <div style="margin-bottom: 0.5rem;">
+                            <div>
                                 <label for="config-gmm_n_components_max" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">GMM Components Max:</label>
                                 <input type="number" id="config-gmm_n_components_max" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                             </div>
                         </div>
                     </fieldset>
 
-                    <!-- START: AI Playlist Naming Parameters -->
                     <fieldset style="border: 1px solid #1e40af; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
-                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem; display: flex; align-items: center;">
+                        <legend style="color: #93c5fd; font-size: 1.25rem; padding: 0 0.5rem; margin-left: -0.5rem;">
                             AI Playlist Naming
                         </legend>
-                        <div style="display: grid; grid-template-columns: 1fr; gap: 1rem;">
-                            <div style="margin-bottom: 0.5rem;">
+                        <div class="param-group">
+                            <div>
                                 <label for="config-ai_model_provider" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">AI Provider:</label>
                                 <select id="config-ai_model_provider" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                     <option value="OLLAMA">Ollama</option>
@@ -207,68 +253,60 @@
                                 </select>
                             </div>
 
-                            <!-- Ollama Config Group -->
-                            <div id="ollama-config-group" style="border: 1px dashed #4b5563; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; background-color: #1f2937; display: none; grid-template-columns: 1fr; gap: 1rem;">
+                            <div id="ollama-config-group" class="hidden" style="border: 1px dashed #4b5563; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; background-color: #1f2937; grid-template-columns: 1fr; gap: 1rem;">
                                  <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">Ollama Configuration:</h4>
-                                <div style="margin-bottom: 0.5rem;">
+                                <div>
                                     <label for="config-ollama_server_url" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Ollama Server URL:</label>
                                     <input type="text" id="config-ollama_server_url" value="http://127.0.0.1:11434/api/generate" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                 </div>
-                                <div style="margin-bottom: 0.5rem;">
+                                <div>
                                     <label for="config-ollama_model_name" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Ollama Model Name:</label>
                                     <input type="text" id="config-ollama_model_name" value="mistral:7b" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                 </div>
                             </div>
 
-                            <!-- Gemini Config Group -->
-                            <div id="gemini-config-group" style="border: 1px dashed #4b5563; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; background-color: #1f2937; display: none; grid-template-columns: 1fr; gap: 1rem;">
+                            <div id="gemini-config-group" class="hidden" style="border: 1px dashed #4b5563; border-radius: 0.5rem; padding: 1rem; margin-top: 1rem; background-color: #1f2937; grid-template-columns: 1fr; gap: 1rem;">
                                  <h4 style="grid-column: span 1 / span 1; font-size: 1.125rem; color: #60a5fa; margin-bottom: 0.5rem;">Gemini Configuration:</h4>
-                                <div style="margin-bottom: 0.5rem;">
+                                <div>
                                     <label for="config-gemini_api_key" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Gemini API Key:</label>
                                     <input type="text" id="config-gemini_api_key" value="" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                 </div>
-                                <div style="margin-bottom: 0.5rem;">
+                                <div>
                                     <label for="config-gemini_model_name" style="display: block; font-size: 0.875rem; color: #9ca3af; margin-bottom: 0.25rem;">Gemini Model Name:</label>
                                     <input type="text" id="config-gemini_model_name" value="gemini-1.5-flash-latest" style="width: 100%; padding: 0.5rem; border-radius: 0.375rem; background-color: #374151; border: 1px solid #4b5563; color: #e5e7eb;">
                                 </div>
                             </div>
                         </div>
                     </fieldset>
-                    <!-- END: AI Playlist Naming Parameters -->
-
                 </form>
             </section>
 
             <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
-                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem;">
                     Run Tasks
                 </h2>
                 <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem;">
-                    <button id="start-analysis-btn" 
-                            style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
+                    <button id="start-analysis-btn" style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
                         Start Analysis
                     </button>
-                    <button id="start-clustering-btn"
-                            style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
+                    <button id="start-clustering-btn" style="flex-grow: 1; background-color: #2563eb; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
                         Start Clustering
                     </button>
-                    <button id="fetch-playlists-btn"
-                            style="flex-grow: 1; background-color: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%; margin-top: 0.5rem;">
+                    <button id="fetch-playlists-btn" style="flex-grow: 1; background-color: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; width: 100%;">
                         Fetch Playlists
                     </button>
                 </div>
-                <button id="cancel-task-btn"
-                        style="width: 100%; background-color: #dc2626; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; margin-top: 1rem; opacity: 0.5; cursor: not-allowed;">
+                <button id="cancel-task-btn" style="width: 100%; background-color: #dc2626; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; border: none; cursor: pointer; margin-top: 1rem; opacity: 0.5; cursor: not-allowed;">
                     Cancel Current Task
                 </button>
             </section>
 
             <section style="margin-bottom: 2rem; padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af;">
-                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem;">
                     Task Status
                 </h2>
                 <div id="task-status-display" style="color: #d1d5db;">
-                    <p><span style="color: #60a5fa;">Task ID:</span> <span id="status-task-id">N/A</span></p>
+                     <p><span style="color: #60a5fa;">Task ID:</span> <span id="status-task-id">N/A</span></p>
                     <p><span style="color: #60a5fa;">Type:</span> <span id="status-task-type">N/A</span></p>
                     <p><span style="color: #60a5fa;">Status:</span> <span id="status-status" style="color: #fbbf24;">IDLE</span></p>
                     <p><span style="color: #60a5fa;">Progress:</span> <span id="status-progress">0</span>%</p>
@@ -283,7 +321,7 @@
             </section>
 
             <section id="playlists-section" style="padding: 1.5rem; background-color: #111827; border-radius: 0.5rem; border: 1px solid #1e40af; display: none;">
-                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem; display: flex; align-items: center;">
+                <h2 style="font-size: 1.5rem; color: #93c5fd; margin-bottom: 1rem;">
                     Generated Playlists
                 </h2>
                 <div id="playlists-container" style="color: #d1d5db;">
@@ -294,46 +332,84 @@
     </div>
 
     <script>
-        const configForm = document.getElementById('config-form');
+        // --- DOM Element References ---
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const mainContent = document.getElementById('main-content');
+        
+        // View switcher
+        const basicViewBtn = document.getElementById('basic-view-btn');
+        const advancedViewBtn = document.getElementById('advanced-view-btn');
+        const advancedParams = document.querySelectorAll('.advanced-param');
+        const kmeansParamsBasic = document.getElementById('kmeans-params-basic');
+        const basicAlgorithmDisplay = document.getElementById('basic-algorithm-display');
+
+
+        // Config Form
+        const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
+        const dbscanParamsDiv = document.getElementById('dbscan-params');
+        const kmeansParamsDiv = document.getElementById('kmeans-params');
+        const gmmParamsDiv = document.getElementById('gmm-params');
+        const aiModelProviderSelect = document.getElementById('config-ai_model_provider');
+        const ollamaConfigGroup = document.getElementById('ollama-config-group');
+        const geminiConfigGroup = document.getElementById('gemini-config-group');
+
+        // Task Buttons
         const startAnalysisBtn = document.getElementById('start-analysis-btn');
         const startClusteringBtn = document.getElementById('start-clustering-btn');
         const fetchPlaylistsBtn = document.getElementById('fetch-playlists-btn');
-
         const cancelTaskBtn = document.getElementById('cancel-task-btn');
+
+        // Task Status Display
         const statusTaskId = document.getElementById('status-task-id');
         const statusTaskType = document.getElementById('status-task-type');
         const statusStatus = document.getElementById('status-status');
         const statusProgress = document.getElementById('status-progress');
         const progressBar = document.getElementById('progress-bar');
         const statusDetails = document.getElementById('status-details');
-        const loadingSpinner = document.getElementById('loading-spinner');
-        const mainContent = document.getElementById('main-content');
+
+        // Playlists
         const playlistsSection = document.getElementById('playlists-section');
         const playlistsContainer = document.getElementById('playlists-container');
 
-        // Clustering parameter containers
-        const dbscanParamsDiv = document.getElementById('dbscan-params');
-        const kmeansParamsDiv = document.getElementById('kmeans-params');
-        const gmmParamsDiv = document.getElementById('gmm-params');
-        const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
+        // --- State Variables ---
+        let currentTaskId = null;
+        let lastPolledTaskDetails = {};
 
-        // AI Naming parameter containers
-        const aiModelProviderSelect = document.getElementById('config-ai_model_provider');
-        const ollamaConfigGroup = document.getElementById('ollama-config-group');
-        const geminiConfigGroup = document.getElementById('gemini-config-group');
+        // --- Functions ---
+
+        /**
+         * Switches between basic and advanced configuration views.
+         * @param {('basic'|'advanced')} viewToShow The view to display.
+         */
+        function switchView(viewToShow) {
+            if (viewToShow === 'basic') {
+                basicViewBtn.classList.add('active');
+                advancedViewBtn.classList.remove('active');
+                advancedParams.forEach(el => el.classList.add('hidden'));
+                kmeansParamsBasic.classList.remove('hidden');
+                basicAlgorithmDisplay.classList.remove('hidden');
 
 
-        let currentTaskId = null; 
-        let lastPolledTaskDetails = {}; 
+                // In basic view, we only support K-Means
+                clusterAlgorithmSelect.value = 'kmeans';
+                // Trigger change to ensure correct logic runs if it depends on it
+                clusterAlgorithmSelect.dispatchEvent(new Event('change'));
+
+            } else { // advanced view
+                basicViewBtn.classList.remove('active');
+                advancedViewBtn.classList.add('active');
+                advancedParams.forEach(el => el.classList.remove('hidden'));
+                kmeansParamsBasic.classList.add('hidden'); // Hide the basic K-Means inputs
+                basicAlgorithmDisplay.classList.add('hidden');
+
+            }
+             // This function handles showing/hiding algorithm-specific params
+            toggleClusteringParams();
+        }
 
         function showLoading(show) {
-            if (show) {
-                loadingSpinner.style.display = 'flex';
-                mainContent.style.display = 'none';
-            } else {
-                loadingSpinner.style.display = 'none';
-                mainContent.style.display = 'block'; 
-            }
+            loadingSpinner.style.display = show ? 'flex' : 'none';
+            mainContent.style.display = show ? 'none' : 'block';
         }
 
         async function fetchConfig() {
@@ -342,8 +418,9 @@
                 const response = await fetch('/api/config');
                 const config = await response.json();
                 renderConfig(config);
-                toggleClusteringParams(); 
-                toggleAiConfig(); // Add this call
+                // Call switchView here to ensure the view is set correctly *before* showing the content
+                switchView('basic'); 
+                toggleAiConfig();
             } catch (error) {
                 console.error('Error fetching config:', error);
                 showMessageBox('Error', 'Failed to load configuration. Please check the backend server.');
@@ -353,47 +430,43 @@
         }
 
         function renderConfig(config) {
+            // General
             document.getElementById('config-jellyfin_url').value = config.jellyfin_url || '';
             document.getElementById('config-jellyfin_user_id').value = config.jellyfin_user_id || '';
             document.getElementById('config-jellyfin_token').value = config.jellyfin_token || '';
 
+            // Analysis
             document.getElementById('config-num_recent_albums').value = config.num_recent_albums || 0;
             document.getElementById('config-top_n_moods').value = config.top_n_moods || 0;
 
+            // Clustering
             clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm') ? config.cluster_algorithm : 'kmeans';
-
             document.getElementById('config-max_distance').value = config.max_distance || 0;
             document.getElementById('config-max_songs_per_cluster').value = config.max_songs_per_cluster || 0;
             document.getElementById('config-pca_components_min').value = config.pca_components_min || 0;
             document.getElementById('config-pca_components_max').value = config.pca_components_max || 0;
             document.getElementById('config-clustering_runs').value = config.clustering_runs || 0;
-
-            // New Clustering Parameters
             document.getElementById('config-min_songs_per_genre_for_stratification').value = config.min_songs_per_genre_for_stratification || 0;
             document.getElementById('config-stratified_sampling_target_percentile').value = config.stratified_sampling_target_percentile || 0;
-            document.getElementById('config-score_weight_diversity').value = config.score_weight_diversity || 0; // Set default value
-            document.getElementById('config-score_weight_purity').value = config.score_weight_purity || 0; // Set default value for purity
-            document.getElementById('config-score_weight_silhouette').value = config.score_weight_silhouette || 0; // Set default value
-            document.getElementById('config-score_weight_davies_bouldin').value = config.score_weight_davies_bouldin || 0; // Set default value
-            document.getElementById('config-score_weight_calinski_harabasz').value = config.score_weight_calinski_harabasz || 0; // Set default value
-            
-            // START: Set new config values
+            document.getElementById('config-score_weight_diversity').value = config.score_weight_diversity || 0;
+            document.getElementById('config-score_weight_purity').value = config.score_weight_purity || 0;
+            document.getElementById('config-score_weight_silhouette').value = config.score_weight_silhouette || 0;
+            document.getElementById('config-score_weight_davies_bouldin').value = config.score_weight_davies_bouldin || 0;
+            document.getElementById('config-score_weight_calinski_harabasz').value = config.score_weight_calinski_harabasz || 0;
             document.getElementById('config-score_weight_other_feature_diversity').value = config.score_weight_other_feature_diversity || 0;
             document.getElementById('config-score_weight_other_feature_purity').value = config.score_weight_other_feature_purity || 0;
-            // END: Set new config values
 
+            // Algorithm Specific
             document.getElementById('config-dbscan_eps_min').value = config.dbscan_eps_min || 0;
             document.getElementById('config-dbscan_eps_max').value = config.dbscan_eps_max || 0;
             document.getElementById('config-dbscan_min_samples_min').value = config.dbscan_min_samples_min || 0;
             document.getElementById('config-dbscan_min_samples_max').value = config.dbscan_min_samples_max || 0;
-
             document.getElementById('config-num_clusters_min').value = config.num_clusters_min || 0;
             document.getElementById('config-num_clusters_max').value = config.num_clusters_max || 0;
-
             document.getElementById('config-gmm_n_components_min').value = config.gmm_n_components_min || 0;
             document.getElementById('config-gmm_n_components_max').value = config.gmm_n_components_max || 0;
 
-            // Populate AI Naming Parameters
+            // AI Naming
             aiModelProviderSelect.value = config.ai_model_provider || 'NONE';
             document.getElementById('config-ollama_server_url').value = config.ollama_server_url || 'http://127.0.0.1:11434/api/generate';
             document.getElementById('config-ollama_model_name').value = config.ollama_model_name || 'mistral:7b';
@@ -403,43 +476,36 @@
 
         function toggleClusteringParams() {
             const selectedAlgorithm = clusterAlgorithmSelect.value;
-            dbscanParamsDiv.style.display = 'none';
-            kmeansParamsDiv.style.display = 'none';
-            gmmParamsDiv.style.display = 'none';
+            dbscanParamsDiv.classList.add('hidden');
+            gmmParamsDiv.classList.add('hidden');
+            if (kmeansParamsDiv) kmeansParamsDiv.classList.add('hidden');
 
-            if (selectedAlgorithm === 'dbscan') {
-                dbscanParamsDiv.style.display = 'grid'; 
-            } else if (selectedAlgorithm === 'kmeans') {
-                kmeansParamsDiv.style.display = 'grid'; 
-            } else if (selectedAlgorithm === 'gmm') {
-                gmmParamsDiv.style.display = 'grid'; 
+            // Only show algorithm-specific params in advanced view
+            if (advancedViewBtn.classList.contains('active')) {
+                if (selectedAlgorithm === 'dbscan') {
+                    dbscanParamsDiv.classList.remove('hidden');
+                } else if (selectedAlgorithm === 'gmm') {
+                    gmmParamsDiv.classList.remove('hidden');
+                }
             }
         }
         
-        // START: Added toggleAiConfig function
         function toggleAiConfig() {
             const provider = aiModelProviderSelect.value;
-            ollamaConfigGroup.style.display = 'none';
-            geminiConfigGroup.style.display = 'none';
+            ollamaConfigGroup.classList.add('hidden');
+            geminiConfigGroup.classList.add('hidden');
 
             if (provider === 'OLLAMA') {
-                ollamaConfigGroup.style.display = 'grid'; // Use grid to match other param groups
+                ollamaConfigGroup.classList.remove('hidden');
             } else if (provider === 'GEMINI') {
-                geminiConfigGroup.style.display = 'grid'; // Use grid to match other param groups
+                geminiConfigGroup.classList.remove('hidden');
             }
         }
-        // END: Added toggleAiConfig function
-
-
+        
         function updateCancelButtonState(isDisabled) {
             cancelTaskBtn.disabled = isDisabled;
-            if (isDisabled) {
-                cancelTaskBtn.style.opacity = '0.5';
-                cancelTaskBtn.style.cursor = 'not-allowed';
-            } else {
-                cancelTaskBtn.style.opacity = '1';
-                cancelTaskBtn.style.cursor = 'pointer';
-            }
+            cancelTaskBtn.style.opacity = isDisabled ? '0.5' : '1';
+            cancelTaskBtn.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
         }
 
         async function checkActiveTasks() {
@@ -449,173 +515,119 @@
 
                 if (mainActiveTask && mainActiveTask.task_id) {
                     currentTaskId = mainActiveTask.task_id;
-                    
-                    const previousDetailsForThisTask = lastPolledTaskDetails[currentTaskId];
-                    const currentStatusUpper = mainActiveTask.status ? mainActiveTask.status.toUpperCase() : (mainActiveTask.state ? mainActiveTask.state.toUpperCase() : 'UNKNOWN');
+                    const currentStatusUpper = (mainActiveTask.status || mainActiveTask.state || 'UNKNOWN').toUpperCase();
                     const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
 
                     displayTaskStatus(mainActiveTask); 
+                    
+                    const previousStateWasTerminal = lastPolledTaskDetails[currentTaskId]?.state && terminalStates.includes(lastPolledTaskDetails[currentTaskId].state.toUpperCase());
 
-                    const currentTaskIsTerminal = terminalStates.includes(currentStatusUpper);
-                    const previousTaskStateWasTerminal = previousDetailsForThisTask && previousDetailsForThisTask.state && terminalStates.includes(previousDetailsForThisTask.state.toUpperCase());
-    
-                    if (currentTaskIsTerminal && !previousTaskStateWasTerminal) {
-                            let alertTitle = 'Task Update';
-                            let alertMessage = `Task ${mainActiveTask.task_id} (${mainActiveTask.task_type_from_db || mainActiveTask.task_type || 'Unknown Type'}) has ${currentStatusUpper.toLowerCase()}.`;
-                            if (currentStatusUpper === 'SUCCESS' || currentStatusUpper === 'FINISHED') alertTitle = 'Task Completed';
-                            else if (currentStatusUpper === 'FAILURE' || currentStatusUpper === 'FAILED') alertTitle = 'Task Failed';
-                            else if (currentStatusUpper === 'REVOKED' || currentStatusUpper === 'CANCELED') alertTitle = 'Task Canceled';
-                            
-                            if (alertTitle) {
-                                showMessageBox(alertTitle, alertMessage);
-                            }
-                        }
-                    lastPolledTaskDetails[currentTaskId] = { state: currentStatusUpper !== 'UNKNOWN' ? mainActiveTask.status || mainActiveTask.state : 'UNKNOWN', task_type: mainActiveTask.task_type_from_db || mainActiveTask.task_type, task_id: mainActiveTask.task_id };
+                    if (terminalStates.includes(currentStatusUpper) && !previousStateWasTerminal) {
+                        let alertTitle = 'Task Update';
+                        let alertMessage = `Task ${mainActiveTask.task_id} (${mainActiveTask.task_type_from_db || 'Unknown Type'}) has ${currentStatusUpper.toLowerCase()}.`;
+                        if (['SUCCESS', 'FINISHED'].includes(currentStatusUpper)) alertTitle = 'Task Completed';
+                        else if (['FAILURE', 'FAILED'].includes(currentStatusUpper)) alertTitle = 'Task Failed';
+                        else if (['REVOKED', 'CANCELED'].includes(currentStatusUpper)) alertTitle = 'Task Canceled';
+                        
+                        showMessageBox(alertTitle, alertMessage);
+                    }
+                    lastPolledTaskDetails[currentTaskId] = { state: currentStatusUpper, ...mainActiveTask };
                     disableTaskButtons(true);
-                    fetchPlaylistsBtn.disabled = true;
-                    fetchPlaylistsBtn.style.opacity = '0.5';
-                    fetchPlaylistsBtn.style.cursor = 'not-allowed';
                     updateCancelButtonState(false);
-
                     return true; 
-                } else {
-                    const previouslyTrackedTaskId = currentTaskId; 
+                } else if (currentTaskId) {
+                    const finishedTaskId = currentTaskId;
+                    const previousDetails = lastPolledTaskDetails[finishedTaskId];
                     currentTaskId = null;
 
-                    if (previouslyTrackedTaskId) {
-                        try {
-                            const finalStatusResponse = await fetch(`/api/status/${previouslyTrackedTaskId}`);
-                            if (finalStatusResponse.ok) {
-                                const finalStatusData = await finalStatusResponse.json();
-                                const upperFinalStatus = finalStatusData.state ? finalStatusData.state.toUpperCase() : 'UNKNOWN';
-                                const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
-                                const previousDetailsForFinishedTask = lastPolledTaskDetails[previouslyTrackedTaskId];
+                    try {
+                        const finalStatusResponse = await fetch(`/api/status/${finishedTaskId}`);
+                        if (finalStatusResponse.ok) {
+                            const finalStatusData = await finalStatusResponse.json();
+                            const upperFinalStatus = (finalStatusData.state || 'UNKNOWN').toUpperCase();
+                            const terminalStates = ['SUCCESS', 'FINISHED', 'FAILURE', 'FAILED', 'REVOKED', 'CANCELED'];
+                            
+                            const finalStatusIsTerminal = terminalStates.includes(upperFinalStatus);
+                            const previousStateWasTerminal = previousDetails && previousDetails.state && terminalStates.includes(previousDetails.state.toUpperCase());
 
-                                const finalStatusIsTerminal = terminalStates.includes(upperFinalStatus);
-                                const previousFinishedStateWasTerminal = previousDetailsForFinishedTask && previousDetailsForFinishedTask.state && terminalStates.includes(previousDetailsForFinishedTask.state.toUpperCase());
-
-                                if (finalStatusIsTerminal && !previousFinishedStateWasTerminal) {
-                                        let alertTitle = 'Task Update';
-                                        let alertMessage = `Task ${finalStatusData.task_id} (${finalStatusData.task_type_from_db || finalStatusData.task_type || 'Unknown Type'}) has ${upperFinalStatus.toLowerCase()}.`;
-                                        if (upperFinalStatus === 'SUCCESS' || upperFinalStatus === 'FINISHED') alertTitle = 'Task Completed';
-                                        else if (upperFinalStatus === 'FAILURE' || upperFinalStatus === 'FAILED') alertTitle = 'Task Failed';
-                                        else if (upperFinalStatus === 'REVOKED' || upperFinalStatus === 'CANCELED') alertTitle = 'Task Canceled';
-                                        
-                                        if (alertTitle) {
-                                            showMessageBox(alertTitle, alertMessage);
-                                        }
-                                    }
-                                displayTaskStatus(finalStatusData); 
-                            } else {
-                                console.warn('Failed to fetch /api/last_task. Displaying IDLE.');
-                                displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Previously active task finished or cleared.' });
+                            if (finalStatusIsTerminal && !previousStateWasTerminal) {
+                                let alertTitle = 'Task Update';
+                                let alertMessage = `Task ${finalStatusData.task_id} (${finalStatusData.task_type_from_db || 'Unknown Type'}) has ${upperFinalStatus.toLowerCase()}.`;
+                                if (['SUCCESS', 'FINISHED'].includes(upperFinalStatus)) alertTitle = 'Task Completed';
+                                else if (['FAILURE', 'FAILED'].includes(upperFinalStatus)) alertTitle = 'Task Failed';
+                                else if (['REVOKED', 'CANCELED'].includes(upperFinalStatus)) alertTitle = 'Task Canceled';
+                                
+                                showMessageBox(alertTitle, alertMessage);
                             }
-                        } catch (e) {
-                            console.error(`Error fetching final status for ${previouslyTrackedTaskId}:`, e);
-                            displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'Error fetching status of previously active task.' });
+                            displayTaskStatus(finalStatusData);
+                        } else {
+                            showMessageBox('Task Finished', `Task ${finishedTaskId} is no longer active. Final status could not be retrieved.`);
+                            displayTaskStatus({ task_id: finishedTaskId, state: 'FINISHED', progress: 100 });
                         }
-                        delete lastPolledTaskDetails[previouslyTrackedTaskId]; 
+                    } catch (e) {
+                         console.error(`Error fetching final status for ${finishedTaskId}:`, e);
+                    } finally {
+                        delete lastPolledTaskDetails[finishedTaskId];
                         disableTaskButtons(false);
-                        fetchPlaylistsBtn.disabled = false;
-                        fetchPlaylistsBtn.style.opacity = '1';
-                        fetchPlaylistsBtn.style.cursor = 'pointer';
-                        updateCancelButtonState(true);
-                        return true; 
-                    } else {
-                        disableTaskButtons(false);
-                        fetchPlaylistsBtn.disabled = false;
-                        fetchPlaylistsBtn.style.opacity = '1';
-                        fetchPlaylistsBtn.style.cursor = 'pointer';
                         updateCancelButtonState(true);
                     }
+                    return true;
+                } else {
+                    disableTaskButtons(false);
+                    updateCancelButtonState(true);
                 }
-                return false; 
             } catch (error) {
                 console.error('Error checking active tasks:', error);
-                displayTaskStatus({
-                    task_id: 'Error',
-                    task_type: 'Error',
-                    state: 'ERROR', 
-                    progress: 0,
-                    details: `Failed to check active main task: ${error.message}. Polling will continue.`
-                });
+                displayTaskStatus({ task_id: 'Error', task_type: 'Error', state: 'ERROR', progress: 0, details: `Polling error: ${error.message}` });
+                currentTaskId = null;
                 disableTaskButtons(false); 
-                fetchPlaylistsBtn.disabled = false;
-                fetchPlaylistsBtn.style.opacity = '1';
-                fetchPlaylistsBtn.style.cursor = 'pointer';
                 updateCancelButtonState(true);
-                currentTaskId = null; 
             }
-            return false; 
+            return false;
         }
 
         function disableTaskButtons(isDisabled) {
             startAnalysisBtn.disabled = isDisabled;
             startClusteringBtn.disabled = isDisabled;
-            if (isDisabled) {
-                startAnalysisBtn.style.opacity = '0.5';
-                startAnalysisBtn.style.cursor = 'not-allowed';
-                startClusteringBtn.style.opacity = '0.5';
-                startClusteringBtn.style.cursor = 'not-allowed';
-            } else {
-                startAnalysisBtn.style.opacity = '1';
-                startAnalysisBtn.style.cursor = 'pointer';
-                startClusteringBtn.style.opacity = '1';
-                startClusteringBtn.style.cursor = 'pointer';
-            }
+            fetchPlaylistsBtn.disabled = isDisabled;
+            
+            [startAnalysisBtn, startClusteringBtn, fetchPlaylistsBtn].forEach(btn => {
+                btn.style.opacity = isDisabled ? '0.5' : '1';
+                btn.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
+            });
         }
 
         function displayTaskStatus(task) {
-            statusTaskId.textContent = task.task_id;
-            statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A'; 
-            const taskStateUpper = task.status ? task.status.toUpperCase() : (task.state ? task.state.toUpperCase() : 'UNKNOWN');
-            statusStatus.textContent = taskStateUpper;
-            statusProgress.textContent = task.progress;
-            progressBar.style.width = `${task.progress}%`;
+            statusTaskId.textContent = task.task_id || 'N/A';
+            statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A';
+            const stateUpper = (task.state || task.status || 'IDLE').toUpperCase();
+            statusStatus.textContent = stateUpper;
+            statusProgress.textContent = task.progress || 0;
+            progressBar.style.width = `${task.progress || 0}%`;
 
-            statusStatus.style.color = ''; 
-            if (taskStateUpper === 'PENDING' || taskStateUpper === 'STARTED' || taskStateUpper === 'QUEUED' || taskStateUpper === 'PROGRESS') {
-                statusStatus.style.color = '#fbbf24'; 
-            } else if (taskStateUpper === 'SUCCESS' || taskStateUpper === 'FINISHED') {
-                statusStatus.style.color = '#4ade80'; 
-                if ((task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
-                    console.log('Clustering task successful, automatically fetching playlists...');
-                    fetchPlaylists(); 
-                }
-            } else if (taskStateUpper === 'FAILURE' || taskStateUpper === 'FAILED' || taskStateUpper === 'REVOKED' || taskStateUpper === 'CANCELED') {
-                statusStatus.style.color = '#f87171'; 
-                playlistsSection.style.display = 'none'; 
-            } else { 
-                statusStatus.style.color = '#60a5fa'; 
+            let color = '#fbbf24'; // Yellow for pending/progress
+            if (['SUCCESS', 'FINISHED'].includes(stateUpper)) color = '#4ade80'; // Green for success
+            else if (['FAILURE', 'FAILED', 'REVOKED', 'CANCELED'].includes(stateUpper)) color = '#f87171'; // Red for failure
+            else if (stateUpper === 'IDLE') color = '#d1d5db'; // Gray for idle
+
+            statusStatus.style.color = color;
+            
+            if (['SUCCESS', 'FINISHED'].includes(stateUpper) && (task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
+                fetchPlaylists(); 
             }
 
-            try {
-                let detailsText = task.details;
-                if (typeof task.details === 'object' && task.details !== null) {
-                    detailsText = JSON.stringify(task.details, null, 2);
-                }
-                statusDetails.textContent = detailsText;
-            } catch (e) {
-                statusDetails.textContent = `Error parsing details: ${e.message}\nRaw: ${task.details}`;
-            }
-            statusDetails.scrollTop = statusDetails.scrollHeight; 
+            statusDetails.textContent = typeof task.details === 'object' ? JSON.stringify(task.details, null, 2) : task.details;
+            statusDetails.scrollTop = statusDetails.scrollHeight;
         }
 
         async function startTask(taskType) {
-            disableTaskButtons(true); 
-            updateCancelButtonState(true); 
-            fetchPlaylistsBtn.disabled = true; 
-            fetchPlaylistsBtn.style.opacity = '0.5';
-            fetchPlaylistsBtn.style.cursor = 'not-allowed';
-
-            const jellyfinUrl = document.getElementById('config-jellyfin_url').value;
-            const jellyfinUserId = document.getElementById('config-jellyfin_user_id').value;
-            const jellyfinToken = document.getElementById('config-jellyfin_token').value;
+            disableTaskButtons(true);
+            updateCancelButtonState(true);
 
             const payload = {
-                jellyfin_url: jellyfinUrl,
-                jellyfin_user_id: jellyfinUserId,
-                jellyfin_token: jellyfinToken
+                jellyfin_url: document.getElementById('config-jellyfin_url').value,
+                jellyfin_user_id: document.getElementById('config-jellyfin_user_id').value,
+                jellyfin_token: document.getElementById('config-jellyfin_token').value
             };
 
             if (taskType === 'analysis') {
@@ -624,113 +636,79 @@
             } else if (taskType === 'clustering') {
                 playlistsSection.style.display = 'none';
                 playlistsContainer.innerHTML = '';
-                payload.clustering_method = clusterAlgorithmSelect.value;
-                payload.max_distance = parseFloat(document.getElementById('config-max_distance').value);
-                payload.max_songs_per_cluster = parseInt(document.getElementById('config-max_songs_per_cluster').value);
-                payload.pca_components_min = parseInt(document.getElementById('config-pca_components_min').value);
-                payload.pca_components_max = parseInt(document.getElementById('config-pca_components_max').value);
-                payload.clustering_runs = parseInt(document.getElementById('config-clustering_runs').value);
-
-                // New Clustering Parameters
-                payload.min_songs_per_genre_for_stratification = parseInt(document.getElementById('config-min_songs_per_genre_for_stratification').value);
-                payload.stratified_sampling_target_percentile = parseInt(document.getElementById('config-stratified_sampling_target_percentile').value);
-                payload.score_weight_diversity = parseFloat(document.getElementById('config-score_weight_diversity').value); // Get value
-                payload.score_weight_purity = parseFloat(document.getElementById('config-score_weight_purity').value); // Get value for purity
-                payload.score_weight_silhouette = parseFloat(document.getElementById('config-score_weight_silhouette').value); // Get value
-                // Get new weights
-                payload.score_weight_davies_bouldin = parseFloat(document.getElementById('config-score_weight_davies_bouldin').value);
-                payload.score_weight_calinski_harabasz = parseFloat(document.getElementById('config-score_weight_calinski_harabasz').value);
                 
-                // START: Add new 'other_feature' weights to payload
-                payload.score_weight_other_feature_diversity = parseFloat(document.getElementById('config-score_weight_other_feature_diversity').value);
-                payload.score_weight_other_feature_purity = parseFloat(document.getElementById('config-score_weight_other_feature_purity').value);
-                // END: Add new 'other_feature' weights to payload
-
-                if (payload.clustering_method === 'dbscan') {
-                    payload.dbscan_eps_min = parseFloat(document.getElementById('config-dbscan_eps_min').value);
-                    payload.dbscan_eps_max = parseFloat(document.getElementById('config-dbscan_eps_max').value);
-                    payload.dbscan_min_samples_min = parseInt(document.getElementById('config-dbscan_min_samples_min').value);
-                    payload.dbscan_min_samples_max = parseInt(document.getElementById('config-dbscan_min_samples_max').value);
-                } else if (payload.clustering_method === 'kmeans') {
-                    payload.num_clusters_min = parseInt(document.getElementById('config-num_clusters_min').value);
-                    payload.num_clusters_max = parseInt(document.getElementById('config-num_clusters_max').value);
-                } else if (payload.clustering_method === 'gmm') {
-                    payload.gmm_n_components_min = parseInt(document.getElementById('config-gmm_n_components_min').value);
-                    payload.gmm_n_components_max = parseInt(document.getElementById('config-gmm_n_components_max').value);
-                }
-                // START: Add AI parameters to payload
-                payload.ai_model_provider = aiModelProviderSelect.value;
-                if (payload.ai_model_provider === 'OLLAMA') {
-                    payload.ollama_server_url = document.getElementById('config-ollama_server_url').value;
-                    payload.ollama_model_name = document.getElementById('config-ollama_model_name').value;
-                } else if (payload.ai_model_provider === 'GEMINI') {
-                    payload.gemini_api_key = document.getElementById('config-gemini_api_key').value;
-                    payload.gemini_model_name = document.getElementById('config-gemini_model_name').value;
-                }
-                // END: Add AI parameters to payload
+                // Always collect all params, backend can decide what to use based on algorithm
+                Object.assign(payload, {
+                    clustering_method: clusterAlgorithmSelect.value,
+                    max_distance: parseFloat(document.getElementById('config-max_distance').value),
+                    max_songs_per_cluster: parseInt(document.getElementById('config-max_songs_per_cluster').value),
+                    pca_components_min: parseInt(document.getElementById('config-pca_components_min').value),
+                    pca_components_max: parseInt(document.getElementById('config-pca_components_max').value),
+                    clustering_runs: parseInt(document.getElementById('config-clustering_runs').value),
+                    min_songs_per_genre_for_stratification: parseInt(document.getElementById('config-min_songs_per_genre_for_stratification').value),
+                    stratified_sampling_target_percentile: parseInt(document.getElementById('config-stratified_sampling_target_percentile').value),
+                    score_weight_diversity: parseFloat(document.getElementById('config-score_weight_diversity').value),
+                    score_weight_purity: parseFloat(document.getElementById('config-score_weight_purity').value),
+                    score_weight_silhouette: parseFloat(document.getElementById('config-score_weight_silhouette').value),
+                    score_weight_davies_bouldin: parseFloat(document.getElementById('config-score_weight_davies_bouldin').value),
+                    score_weight_calinski_harabasz: parseFloat(document.getElementById('config-score_weight_calinski_harabasz').value),
+                    score_weight_other_feature_diversity: parseFloat(document.getElementById('config-score_weight_other_feature_diversity').value),
+                    score_weight_other_feature_purity: parseFloat(document.getElementById('config-score_weight_other_feature_purity').value),
+                    dbscan_eps_min: parseFloat(document.getElementById('config-dbscan_eps_min').value),
+                    dbscan_eps_max: parseFloat(document.getElementById('config-dbscan_eps_max').value),
+                    dbscan_min_samples_min: parseInt(document.getElementById('config-dbscan_min_samples_min').value),
+                    dbscan_min_samples_max: parseInt(document.getElementById('config-dbscan_min_samples_max').value),
+                    num_clusters_min: parseInt(document.getElementById('config-num_clusters_min').value),
+                    num_clusters_max: parseInt(document.getElementById('config-num_clusters_max').value),
+                    gmm_n_components_min: parseInt(document.getElementById('config-gmm_n_components_min').value),
+                    gmm_n_components_max: parseInt(document.getElementById('config-gmm_n_components_max').value),
+                    ai_model_provider: aiModelProviderSelect.value,
+                    ollama_server_url: document.getElementById('config-ollama_server_url').value,
+                    ollama_model_name: document.getElementById('config-ollama_model_name').value,
+                    gemini_api_key: document.getElementById('config-gemini_api_key').value,
+                    gemini_model_name: document.getElementById('config-gemini_model_name').value,
+                });
             }
 
             try {
                 const response = await fetch(`/api/${taskType}/start`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
                 const result = await response.json();
-                if (response.ok && result.task_id) { 
+                if (response.ok && result.task_id) {
                     currentTaskId = result.task_id;
-                    displayTaskStatus({
-                        task_id: result.task_id,
-                        task_type: result.task_type,
-                        state: result.state || result.status || 'PENDING', 
-                        progress: 0,
-                        details: { message: 'Task enqueued successfully.' }
-                    });
-                    lastPolledTaskDetails[result.task_id] = { state: result.state || result.status || 'PENDING', task_type: result.task_type, task_id: result.task_id }; 
-                    updateCancelButtonState(false); 
+                    displayTaskStatus({ task_id: result.task_id, task_type: result.task_type, state: 'PENDING', progress: 0, details: 'Task enqueued.' });
+                    lastPolledTaskDetails[result.task_id] = { state: 'PENDING', task_type: result.task_type, task_id: result.task_id };
+                    updateCancelButtonState(false);
                 } else {
-                    throw new Error(result.message || 'Failed to start task. No task ID received.');
+                    throw new Error(result.message || 'Failed to start task.');
                 }
             } catch (error) {
                 console.error(`Error starting ${taskType} task:`, error);
                 showMessageBox('Error', `Failed to start ${taskType} task: ${error.message}`);
-                disableTaskButtons(false); 
+                disableTaskButtons(false);
                 updateCancelButtonState(true);
-                fetchPlaylistsBtn.disabled = false; 
-                fetchPlaylistsBtn.style.opacity = '1';
-                fetchPlaylistsBtn.style.cursor = 'pointer';
-                currentTaskId = null;
             }
         }
 
         async function cancelTask() {
-            if (!currentTaskId) {
-                showMessageBox('Info', 'No active task to cancel.');
-                return;
-            }
-
-            updateCancelButtonState(true); 
+            if (!currentTaskId) return;
+            updateCancelButtonState(true);
             try {
-                const response = await fetch(`/api/cancel/${currentTaskId}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
+                const response = await fetch(`/api/cancel/${currentTaskId}`, { method: 'POST' });
                 const result = await response.json();
                 if (response.ok) {
                     showMessageBox('Success', result.message);
-                    await checkActiveTasks(); 
+                    checkActiveTasks();
                 } else {
                     throw new Error(result.message || 'Failed to cancel task.');
                 }
             } catch (error) {
                 console.error('Error cancelling task:', error);
                 showMessageBox('Error', `Failed to cancel task: ${error.message}`);
-            } finally {
-                updateCancelButtonState(!currentTaskId); 
+                updateCancelButtonState(false);
             }
         }
 
@@ -739,6 +717,7 @@
             playlistsSection.style.display = 'block';
             try {
                 const response = await fetch('/api/playlists');
+                if (!response.ok) throw new Error(`Server responded with ${response.status}`);
                 const playlistsData = await response.json();
                 renderPlaylists(playlistsData);
             } catch (error) {
@@ -748,125 +727,77 @@
         }
 
         function renderPlaylists(playlistsData) {
-            playlistsContainer.innerHTML = ''; 
-            if (Object.keys(playlistsData).length === 0) {
+            playlistsContainer.innerHTML = '';
+            if (!playlistsData || Object.keys(playlistsData).length === 0) {
                 playlistsContainer.innerHTML = '<p style="color: #9ca3af;">No playlists found.</p>';
                 return;
             }
-
-            for (const playlistName in playlistsData) {
-                const songs = playlistsData[playlistName];
+            for (const [playlistName, songs] of Object.entries(playlistsData)) {
                 const playlistDiv = document.createElement('div');
-                playlistDiv.style.marginBottom = '1rem';
-                playlistDiv.style.padding = '1rem';
-                playlistDiv.style.backgroundColor = '#1f2937'; 
-                playlistDiv.style.borderRadius = '0.375rem';
-
-                const headerP = document.createElement('p');
-                headerP.style.color = '#93c5fd'; 
-                headerP.innerHTML = `
-                    <strong style="color: #e5e7eb;">${playlistName}</strong> - (${songs.length} songs)
-                    <button class="show-songs-btn" style="margin-left: 0.5rem; background-color: #3b82f6; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;">SHOW</button>
-                `;
-
-                const songListUl = document.createElement('ul');
-                songListUl.style.display = 'none';
-                songListUl.style.marginTop = '0.5rem';
-                songListUl.style.listStyleType = 'disc';
-                songListUl.style.paddingLeft = '1.5rem';
-
-                songs.forEach(song => {
-                    const songLi = document.createElement('li');
-                    songLi.textContent = `${song.title} by ${song.author}`;
-                    songListUl.appendChild(songLi);
+                playlistDiv.style.cssText = 'margin-bottom: 1rem; padding: 1rem; background-color: #1f2937; border-radius: 0.375rem;';
+                playlistDiv.innerHTML = `
+                    <p style="color: #93c5fd;">
+                        <strong style="color: #e5e7eb;">${playlistName}</strong> - (${songs.length} songs)
+                        <button class="show-songs-btn" style="margin-left: 0.5rem; background-color: #3b82f6; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;">SHOW</button>
+                    </p>
+                    <ul class="song-list" style="display: none; margin-top: 0.5rem; list-style-type: disc; padding-left: 1.5rem;">
+                        ${songs.map(song => `<li>${song.title} by ${song.author}</li>`).join('')}
+                    </ul>`;
+                playlistDiv.querySelector('.show-songs-btn').addEventListener('click', e => {
+                    const btn = e.target;
+                    const list = btn.closest('div').querySelector('.song-list');
+                    list.style.display = list.style.display === 'none' ? 'block' : 'none';
+                    btn.textContent = list.style.display === 'none' ? 'SHOW' : 'HIDE';
                 });
-
-                headerP.querySelector('.show-songs-btn').addEventListener('click', () => {
-                    songListUl.style.display = songListUl.style.display === 'none' ? 'block' : 'none';
-                });
-
-                playlistDiv.appendChild(headerP);
-                playlistDiv.appendChild(songListUl);
                 playlistsContainer.appendChild(playlistDiv);
             }
         }
 
         function showMessageBox(title, message) {
-            const existingBox = document.getElementById('custom-message-box');
-            if (existingBox) {
-                existingBox.remove();
-            }
-
+            const boxId = 'custom-message-box';
+            document.getElementById(boxId)?.remove();
             const messageBox = document.createElement('div');
-            messageBox.id = 'custom-message-box'; 
-            messageBox.style.cssText = `
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background-color: #333;
-                color: white;
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                z-index: 1000;
-                border: 1px solid #3b82f6; 
-                max-width: 400px;
-                text-align: center;
-            `;
-            messageBox.innerHTML = `
-                <h3 style="font-weight: bold; margin-bottom: 10px; color: #93c5fd;">${title}</h3>
-                <p>${message}</p>
-                <button style="margin-top: 15px; padding: 8px 15px; background-color: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;" onclick="this.parentNode.remove()">OK</button>
-            `;
+            messageBox.id = boxId;
+            messageBox.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #333; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); z-index: 1000; border: 1px solid #3b82f6; max-width: 400px; text-align: center;';
+            messageBox.innerHTML = `<h3 style="font-weight: bold; margin-bottom: 10px; color: #93c5fd;">${title}</h3><p>${message}</p><button style="margin-top: 15px; padding: 8px 15px; background-color: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;" onclick="this.parentNode.remove()">OK</button>`;
             document.body.appendChild(messageBox);
         }
-        
+
         async function fetchAndDisplayOverallLastTask() {
             try {
-                const response = await fetch('/api/last_task'); 
+                const response = await fetch('/api/last_task');
                 if (response.ok) {
                     const lastTask = await response.json();
-                    if (lastTask && lastTask.task_id && (lastTask.state || lastTask.status)) {
-                        console.log('Displaying overall last task from /api/last_task:', lastTask);
-                        displayTaskStatus(lastTask);
-                    } else {
-                        console.log('No significant last task found from /api/last_task or state/status missing.');
-                        displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. No last task data.' });
-                    }
+                    if (lastTask && lastTask.task_id) displayTaskStatus(lastTask);
+                    else displayTaskStatus({ state: 'IDLE', details: 'No previous task found.' });
                 } else {
-                    console.warn('Failed to fetch /api/last_task. Displaying IDLE.');
-                    displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. Could not fetch last task status.' });
+                    displayTaskStatus({ state: 'IDLE', details: 'Could not fetch last task status.' });
                 }
             } catch (error) {
-                console.error('Error fetching overall last task status:', error);
-                displayTaskStatus({ task_id: 'N/A', task_type: 'N/A', state: 'IDLE', progress: 0, details: 'No active task. Error fetching last task status.' });
+                console.error('Error fetching last task status:', error);
+                displayTaskStatus({ state: 'IDLE', details: 'Error fetching last task status.' });
             }
         }
 
+        // --- Event Listeners & Initialization ---
         document.addEventListener('DOMContentLoaded', async () => {
-            await fetchConfig(); 
-
-            const isActiveTaskRunningOrJustFinished = await checkActiveTasks();
-
-            if (!isActiveTaskRunningOrJustFinished) {
+            await fetchConfig();
+            if (!await checkActiveTasks()) {
                 await fetchAndDisplayOverallLastTask();
-                updateCancelButtonState(true); 
+                updateCancelButtonState(true);
             }
-
-            setInterval(checkActiveTasks, 3000); 
-            clusterAlgorithmSelect.addEventListener('change', toggleClusteringParams);
-            // START: Added event listener for AI provider
-            if (aiModelProviderSelect) {
-                aiModelProviderSelect.addEventListener('change', toggleAiConfig);
-            }
-            // END: Added event listener for AI provider
+            setInterval(checkActiveTasks, 3000);
         });
 
+        basicViewBtn.addEventListener('click', () => switchView('basic'));
+        advancedViewBtn.addEventListener('click', () => switchView('advanced'));
+        clusterAlgorithmSelect.addEventListener('change', toggleClusteringParams);
+        aiModelProviderSelect.addEventListener('change', toggleAiConfig);
         startAnalysisBtn.addEventListener('click', () => startTask('analysis'));
         startClusteringBtn.addEventListener('click', () => startTask('clustering'));
         fetchPlaylistsBtn.addEventListener('click', fetchPlaylists);
         cancelTaskBtn.addEventListener('click', cancelTask);
+
     </script>
 </body>
 </html>
