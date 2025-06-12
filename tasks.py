@@ -66,13 +66,17 @@ def clean_temp(temp_dir):
 def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
     """Fetches recent albums from Jellyfin."""
     url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
+    # Base parameters
     params = {
         "IncludeItemTypes": "MusicAlbum",
         "SortBy": "DateCreated",
         "SortOrder": "Descending",
-        "Limit": limit,
         "Recursive": True,
     }
+    # If limit is greater than 0, add it to the parameters.
+    # If limit is 0 (or less, though typically 0 means all), omit the Limit parameter to fetch all.
+    if limit > 0:
+        params["Limit"] = limit
     try:
         r = requests.get(url, headers=headers, params=params, timeout=30)
         r.raise_for_status()
