@@ -175,124 +175,50 @@ def chat_playlist_api():
     RULES:
     - Return ONLY the raw SQL query. No comments, no markdown, no explanations.
     - Always select: item_id, title, author
-    - Always apply: LIMIT 25 on the final outer SELECT
-    - Apply ORDER BY random() in the final outer SELECT unless the user asks for top/best/famous songs.
+    - Always apply: LIMIT 25 on the final outer SELECT.
+    - Apply ORDER BY random() in the final outer SELECT unless the user explicitly asks for top/best/famous songs.
 
     FOR TOP / FAMOUS / BEST SONGS:
-    - If famous songs for the artist are known, use ORDER BY CASE WHEN title IN (list of famous songs) THEN 1 ELSE 2 END, energy DESC
-    - Otherwise: ORDER BY energy DESC
+    - If famous songs for the artist are known, use ORDER BY CASE WHEN title IN (list of famous songs) THEN 1 ELSE 2 END, energy DESC inside each SELECT.
+    - Otherwise, ORDER BY energy DESC inside each SELECT.
+    - If multiple artists requested, combine SELECTs using UNION ALL, each SELECT wrapped in parentheses without aliasing.
+    - Wrap the entire UNION ALL block inside a FROM (...) AS combined_results.
+    - Apply ORDER BY random() and LIMIT 25 only on the outer SELECT.
+    - Give MINIMUM 10 songs responses.
+    - If it ask for top RADIO, MTV, or other music service use your knowledge.
 
     AUTHOR FILTERING:
-    - Use ILIKE with variations if artist is specified (e.g. '%Red Hot Chili Peppers%', '%RedHotChiliPeppers%')
+    - Use ILIKE with variations for artist matching (e.g. '%Red Hot Chili Peppers%', '%RedHotChiliPeppers%').
 
     MOOD / FEATURE FILTERING:
-    - mood_vector and other_features contain comma-separated label:score pairs (0-1)
-    - Extract numeric value like:
-    CAST(regexp_replace(substring(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= threshold
-    - Similarly for other_features (e.g. 'party')
-    - Use the following labels to filter on:
-
-    MOOD_LABELS = [
-    'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s',
-    'alternative rock', 'jazz', 'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock',
-    'soul', 'indie rock', 'electronica', '80s', 'folk', '90s', 'chill', 'instrumental', 'punk',
-    'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental', 'female vocalist', 'guitar',
-    'Hip-Hop', '70s', 'party', 'country', 'funk', 'electro', 'heavy metal', '60s', 'rnb', 'indie pop', 'House'
-    ]
-
-    OTHER_FEATURE_LABELS = ['danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad']
+    - mood_vector and other_features columns contain comma-separated label:score pairs (0-1).
+    - Extract numeric values using regex and CAST as float, e.g.:
+    CAST(regexp_replace(substring(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= threshold.
+    - Use provided MOOD_LABELS and OTHER_FEATURE_LABELS for filtering.
 
     UNION / MULTI-SELECT LOGIC:
-    - If combining multiple SELECTs (UNION ALL):
-    - Wrap each SELECT in parentheses ()
-    - Combine them inside FROM ( ... ) AS subquery
-    - Apply ORDER BY random() and LIMIT 25 on the outer SELECT only
-    - Never apply ORDER BY random() directly after UNION without a FROM wrapper
-    - Avoid repeating identical author filters unless the purpose differs
+    - Wrap each SELECT with ORDER BY and LIMIT inside parentheses.
+    - Do NOT alias individual SELECTs inside UNION ALL.
+    - Wrap the full UNION ALL inside a FROM (...) AS combined_results.
+    - Apply ORDER BY random() and LIMIT 25 only in the outermost SELECT.
 
-    NO DIRECT COLUMN "party":
-    - No column named "party" exists; extract it from other_features using regex as above
-
-    COMPLEX ARTIST + MOOD MIX REQUESTS:
-    - For requests mixing multiple artists plus mood/feature filters (e.g. Metal and Hard Rock artists like AC/DC, Iron Maiden, Deep Purple):
-    - Use separate SELECTs per artist with relevant mood filters
-    - Use one more SELECT for other artists with similar mood characteristics but excluding the specified artists
-    - Use mood threshold valuesof 0.2 to balance results
-    - Example:
-
-    SELECT item_id, title, author FROM (
-    (
-        SELECT item_id, title, author FROM public.score
-        WHERE
-        (author ILIKE '%AC%DC%' OR author ILIKE 'AC/DC' OR author ILIKE 'AC DC')
-        AND (
-            CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'metal:([0-9]*\\.?[0-9]+)'), 'metal:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'hard rock:([0-9]*\\.?[0-9]+)'), 'hard rock:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= 0.4
-        )
-        ORDER BY random()
-        LIMIT 8
-    )
-    UNION ALL
-    (
-        SELECT item_id, title, author FROM public.score
-        WHERE
-        (author ILIKE '%Iron Maiden%' OR author ILIKE 'Iron%Maiden' OR author ILIKE 'Iron Maiden%')
-        AND (
-            CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'metal:([0-9]*\\.?[0-9]+)'), 'metal:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'hard rock:([0-9]*\\.?[0-9]+)'), 'hard rock:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= 0.4
-        )
-        ORDER BY random()
-        LIMIT 8
-    )
-    UNION ALL
-    (
-        SELECT item_id, title, author FROM public.score
-        WHERE
-        (author ILIKE '%Deep Purple%' OR author ILIKE 'Deep%Purple' OR author ILIKE 'Deep Purple%')
-        AND (
-            CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'metal:([0-9]*\\.?[0-9]+)'), 'metal:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'hard rock:([0-9]*\\.?[0-9]+)'), 'hard rock:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= 0.4
-        )
-        ORDER BY random()
-        LIMIT 8
-    )
-    UNION ALL
-    (
-        SELECT item_id, title, author FROM public.score
-        WHERE
-        author NOT ILIKE '%AC%DC%' AND author NOT ILIKE '%Iron Maiden%' AND author NOT ILIKE '%Deep Purple%'
-        AND (
-            CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'metal:([0-9]*\\.?[0-9]+)'), 'metal:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'hard rock:([0-9]*\\.?[0-9]+)'), 'hard rock:', '') AS float) >= 0.3
-            OR CAST(REGEXP_REPLACE(SUBSTRING(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= 0.4
-        )
-        ORDER BY random()
-        LIMIT 8
-    )
-    ) AS combined_results
-    ORDER BY random()
-    LIMIT 25;
+    ALWAYS DOUBLE-CHECK POSTGRESQL SYNTAX TO AVOID ERRORS.
 
     GENERAL:
     - Table: public.score
     - Columns: item_id, title, author, tempo, key, scale, mood_vector, other_features, energy
-    - Do not repeat redundant SELECTs filtering on the same author unless they serve distinct purposes
+    - No direct "party" column; extract from other_features.
     - tempo have value between 40 and 200
     - energy have value between 0 and 0.15
-    - a typical mood_vector probability is between 0.2 and 0.3. >= of 0.3 is very high value
-    - typical other_features high value are >= 0.5
+    - mood_vector have value between 0 and 1, 0.2 is already a good score
+    - other_features have value between 0 and 1, 0.5 is already a good score
+    - mood_vector possible values: 'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s', 'alternative rock', 'jazz', 'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock', 'soul', 'indie rock', 'electronica', '80s', 'folk', '90s', 'chill', 'instrumental', 'punk', 'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental', 'female vocalist', 'guitar', 'Hip-Hop', '70s', 'party', 'country', 'funk', 'electro', 'heavy metal', '60s', 'rnb', 'indie pop', 'House'
+    - other_features possible values: 'danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad'
 
     Your task: Convert the following user request into the correct SQL query:
 
     "{user_input_placeholder}"
     """
-
-
-
-
 
 
 
