@@ -129,6 +129,10 @@ POSTGRES_DB = os.environ.get("POSTGRES_DB", "audiomusedb")
 
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
+# --- AI User for Chat SQL Execution ---
+AI_CHAT_DB_USER_NAME = os.environ.get("AI_CHAT_DB_USER_NAME", "ai_user")
+AI_CHAT_DB_USER_PASSWORD = os.environ.get("AI_CHAT_DB_USER_PASSWORD", "ChangeThisSecurePassword123!") # IMPORTANT: Change this default and use environment variables
+
 # --- Classifier Constant ---
 MOOD_LABELS = [
     'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s', 'alternative rock', 'jazz',

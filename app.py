@@ -143,6 +143,13 @@ def init_db():
 with app.app_context():
     init_db()
 
+# --- Import and Register Blueprints ---
+# Import here to avoid circular dependencies during initial module loading
+from app_chat import chat_bp
+
+app.register_blueprint(chat_bp, url_prefix='/chat') # All routes in chat_bp will be prefixed with /chat
+
+
 # --- DB Cleanup Utility ---
 def clean_successful_task_details_on_new_start():
     """
@@ -411,7 +418,7 @@ def start_analysis_endpoint():
                   type: string
     """
     # Import task function here to break circular dependency
-    from tasks import run_analysis_task
+    from tasks import run_analysis_task  # Import from the tasks package
 
     data = request.json or {}
     jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
@@ -576,6 +583,10 @@ def start_clustering_endpoint():
                 description: Override for the Gemini model name for this run.
                 nullable: true
                 default: "Defaults to server-configured GEMINI_MODEL_NAME"
+              top_n_moods:
+                type: integer
+                description: Number of top moods to consider for clustering feature vectors (uses the first N from global MOOD_LABELS).
+                default: "Configured TOP_N_MOODS"
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -609,7 +620,7 @@ def start_clustering_endpoint():
                             type: string
     """
     # Import task function here to break circular dependency
-    from tasks import run_clustering_task
+    from tasks import run_clustering_task # Import from the tasks package
 
     # Check if a main_clustering task is already active
     db = get_db()
@@ -644,7 +655,7 @@ def start_clustering_endpoint():
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
     min_songs_per_genre_for_stratification_val = int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION))
     stratified_sampling_target_percentile_val = int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE))
-    
+
     # Retrieve score weights from request, falling back to config defaults
     score_weight_diversity_val = float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY))
     score_weight_silhouette_val = float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE))
@@ -664,6 +675,7 @@ def start_clustering_endpoint():
     ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
     gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
     gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
+    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS)) # New parameter for clustering
     job_id = str(uuid.uuid4())
 
     # Clean up details of previously successful tasks before starting a new one
@@ -684,8 +696,9 @@ def start_clustering_endpoint():
             # *** NEW: Pass the new 'other_feature' weights to the task ***
             score_weight_other_feature_diversity_val,
             score_weight_other_feature_purity_val,
-            # Pass AI params
-            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param
+            # Pass AI params and new top_n_moods for clustering
+            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param,
+            top_n_moods_for_clustering # Pass to the task
         ),
         job_id=job_id,
         description="Main Music Clustering",
@@ -862,7 +875,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
 
     # Define terminal statuses for the query
     terminal_statuses_tuple = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
-                               JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED)
+                               JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED) # JobStatus for completeness if used directly
 
     # Fetch children that are not already in a terminal state
     cur.execute("""

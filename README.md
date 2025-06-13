@@ -13,7 +13,8 @@ Addional important information on this project can also be found here:
 
 ## **Table of Contents**
 
-- [Quick Start on K3S](#quick-start-on-k3s)
+- [Quick Start Deployment on K3S](#quick-start-deployment-on-k3s)
+- [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
 - [Configuration Parameters](#configuration-parameters)
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
@@ -35,7 +36,7 @@ Addional important information on this project can also be found here:
 - [Future Possibilities](#future-possibilities)
 - [Contributing](#contributing)
 
-## **Quick Start on K3S**
+## **Quick Start Deployment on K3S**
 
 This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster.
 
@@ -60,6 +61,51 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
 4.  **Access:**
     *   **Main UI:** Access at `http://<EXTERNAL-IP>:8000`
     *   **API Docs (Swagger UI):** Explore the API at `http://<EXTERNAL-IP>:8000/apidocs`
+
+## **Front-End Quick Start: Analysis and Clustering Parameters**
+
+After deploying with the K3S Quick Start, you'll want to run an **Analysis Task** first to process your music library, followed by a **Clustering Task** to generate playlists. Here are the most important parameters to consider for your first few runs, accessible via the UI or API:
+
+### **Analysis Task Quick Start**
+
+1.  **`NUM_RECENT_ALBUMS`** (Default: `3000`)
+    *   How many of your most recently added albums to scan and analyze. Set to `0` to analyze *all* albums in your library (can take a very long time for large libraries).
+    *   **Recommendation:** For a first run, you might want to set this to a smaller number (e.g., `50`, `100`) to see results quickly. For a full analysis, use `0` or a large number.
+
+### **Clustering Task Quick Start**
+
+1.  **`CLUSTER_ALGORITHM`** (Default: `kmeans`)
+    *   **Recommendation:** For most users, especially when starting, **`kmeans`** is recommended. It's the fastest algorithm and works well when you have a general idea of the number of playlists you'd like to generate. The other algorithms (`gmm`, `dbscan`) are available for more advanced experimentation.
+
+2.  **K-Means Specific: `NUM_CLUSTERS_MIN` & `NUM_CLUSTERS_MAX`**
+    *   **`NUM_CLUSTERS_MIN`** (Default: `40`): The minimum number of playlists (clusters) the algorithm should try to create.
+    *   **`NUM_CLUSTERS_MAX`** (Default: `100`): The maximum number of playlists (clusters) the algorithm should try to create.
+    *   **Guidance:**
+        *   Think about how many distinct playlists you'd ideally like. These parameters define the range the evolutionary algorithm will explore for the K-Means `K` value.
+        *   The number of clusters cannot exceed the number of songs in the dataset being clustered for a given run. The system will automatically cap the `K` value if your `NUM_CLUSTERS_MAX` is too high for the available songs in a particular iteration's sample.
+        *   For a smaller library or a quick test, you might reduce both `NUM_CLUSTERS_MIN` and `NUM_CLUSTERS_MAX` (e.g., min 10, max 30). For larger libraries, the defaults are a reasonable starting point.
+
+3.  **`CLUSTERING_RUNS`** (Default: `5000`)
+    *   This is the number of iterations the evolutionary algorithm will perform. More runs mean a more thorough search for good playlist configurations but will take longer.
+    *   **Recommendation:** For a quick test, you can reduce this to `500`-`1000`. For better results, keep it high.
+
+4.  **Scoring Weights (Primary)**:
+    *   **`SCORE_WEIGHT_DIVERSITY`** (Default: `2.0`): How much to prioritize variety *between* different playlists (based on their main mood).
+    *   **`SCORE_WEIGHT_PURITY`** (Default: `1.0`): How much to prioritize consistency *within* each playlist (songs matching the playlist's main mood).
+    *   **Recommendation:** Start with these defaults. If you want more varied playlists, increase `SCORE_WEIGHT_DIVERSITY`. If you want playlists where songs are very similar to each other, increase `SCORE_WEIGHT_PURITY`.
+    *   **Note:** Other weights like `SCORE_WEIGHT_SILHOUETTE`, `SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY`, etc., default to `0.0` (disabled). They are actually there for future test and implementation
+
+5.  **`MAX_SONGS_PER_CLUSTER`** (Default: `0` - no limit)
+    *   If you want to limit the maximum number of songs in any single generated playlist, set this to a positive number (e.g., `20`, `30`). In the case of limitation is set, the algorithm will split the playlist in two or more.
+
+6.  **AI Playlist Naming (`AI_MODEL_PROVIDER`)** (Default: `NONE`)
+    *   If you've configured Ollama or Gemini (see `GEMINI_API_KEY` in secrets, and `OLLAMA_SERVER_URL` in the ConfigMap), you can set this to `OLLAMA` or `GEMINI` to get AI-generated playlist names. Otherwise, playlists will have names like "Rock_Fast_Automatic". For a first run you can keep it as `NONE`.
+
+**To run your first tasks:**
+*   Go to the UI (`http://<EXTERNAL-IP>:8000`).
+*   Start Analysis: adjust `NUM_RECENT_ALBUMS` if desired, and submit. Wait for it to complete (it can takes a couple of days depending on your library size).
+*   Start Clustering: Adjust the clustering parameters above as desired in the form, and Submit. Wait for it to complete (it can takes between minutes and 1-2 hours depending on your library size and the number of `CLUSTERING_RUNS`).
+
 
 ## **Kubernetes Deployment (K3S Example)**
 
@@ -99,7 +145,7 @@ The **mandatory** parameter that you need to change from the example are this:
 
 | Parameter          | Description                                    | Default Value                     |
 |--------------------|------------------------------------------------|-----------------------------------|
-| `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://your_jellyfin_url:8096`   |
+| `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://YOUR_JELLYFIN_IP:8096`    |
 | `JELLYFIN_USER_ID` | (Required) Jellyfin User ID.                   | *(N/A - from Secret)* |
 | `JELLYFIN_TOKEN`   | (Required) Jellyfin API Token.                 | *(N/A - from Secret)* |
 | `POSTGRES_USER`    | (Required) PostgreSQL username.                | *(N/A - from Secret)* |
@@ -125,38 +171,27 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `3000`                               |
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
-| `TOP_N_OTHER_FEATURES`                   | Number of top "other features" to consider for clustering vector.            | `2`                                  |
-| `ENERGY_MIN`                             | Minimum value for energy normalization.                                      | `0.01`                               |
-| `ENERGY_MAX`                             | Maximum value for energy normalization.                                      | `0.15`                               |
-| `TEMPO_MIN_BPM`                          | Minimum BPM for tempo normalization.                                         | `40.0`                               |
-| `TEMPO_MAX_BPM`                          | Maximum BPM for tempo normalization.                                         | `200.0`                              |
-| **Clustering General**                   |                                                                              |                                      |
-| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                               | `kmeans`                             |
-| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment (0 for no limit).                   | `0`                                  |
+| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
+| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `40`                                 |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
-| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `5000`                               |
+| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
-| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                 |
-| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `6`                                  |
+| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `100`                                |
+| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `5`                                  |
 | `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
-| `OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY` | Threshold for an "other feature" to be predominant for purity calculation. | `0.3`                                |
 | `SAMPLING_PERCENTAGE_CHANGE_PER_RUN`     | Percentage of songs to swap out in the stratified sample between runs (0.0 to 1.0). | `0.2`                                |
 | `MIN_SONGS_PER_GENRE_FOR_STRATIFICATION` | Minimum number of songs to target per stratified genre during sampling.    | `100`                                |
 | `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `75`                                 |
 | `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
 | `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
-| `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                    | `0.7`                                |
+| `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
 | `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
 | `MUTATION_FLOAT_ABS_DELTA`               | Max absolute change for float parameter mutation.                          | `0.05`                               |
 | `MUTATION_KMEANS_COORD_FRACTION`         | Fractional change for KMeans centroid coordinates.                       | `0.05`                               |
-| `SCORE_WEIGHT_DIVERSITY`                 | Weight for inter-playlist mood diversity.                                  | `0.6`                                |
-| **K-Means Ranges**                       |                                                                              |                                      |
-| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `20`                                 |
-| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `60`                                 |
 | **DBSCAN Ranges**                        |                                                                              |                                      |
 | `DBSCAN_EPS_MIN`                         | Min epsilon for DBSCAN.                                                    | `0.1`                                |
-| `DBSCAN_EPS_MAX`                         | Max epsilon for DBSCAN.                                                    | `0.5`                                |
+| `DBSCAN_EPS_MAX`                         | Max epsilon for DBSCAN.                             d                       | `0.5`                                |
 | `DBSCAN_MIN_SAMPLES_MIN`                 | Min `min_samples` for DBSCAN.                                              | `5`                                  |
 | `DBSCAN_MIN_SAMPLES_MAX`                 | Max `min_samples` for DBSCAN.                                              | `20`                                 |
 | **GMM Ranges**                           |                                                                              |                                      |
@@ -167,16 +202,21 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
 | `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `8`                                  |
 | **AI Naming (*)**                        |                                                                              |                                      |
+| `AI_MODEL_PROVIDER`                      | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                | `NONE`                               |
+| `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>11434/api/generate` |
+| `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
+| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
+| **Scoring Weights**                      |                                                                              |                                      |
+| `SCORE_WEIGHT_DIVERSITY`                 | Weight for inter-playlist mood diversity.                                  | `2.0`                                |
 | `SCORE_WEIGHT_PURITY`                    | Weight for playlist purity (intra-playlist mood consistency).                | `1.0`                                |
 | `SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY`   | Weight for inter-playlist 'other feature' diversity.                       | `0.0`                                |
 | `SCORE_WEIGHT_OTHER_FEATURE_PURITY`      | Weight for intra-playlist 'other feature' consistency.                     | `0.0`                                |
 | `SCORE_WEIGHT_SILHOUETTE`                | Weight for Silhouette Score (cluster separation).                          | `0.0`                                |
 | `SCORE_WEIGHT_DAVIES_BOULDIN`            | Weight for Davies-Bouldin Index (cluster separation).                    | `0.0`                                |
 | `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
-| `AI_MODEL_PROVIDER`                      | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                | `NONE`                               |
-| `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>11434/api/generate` |
-| `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
-| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
+| **K-Means Ranges**                       |                                                                              |                                      |
+| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `40`                                 |
+| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `100`                                |
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
 
@@ -453,6 +493,18 @@ This MVP lays the groundwork for further development:
 ## **Contributing**
 
 Contributions, issues, and feature requests are welcome\!  
-This is an **BETA** early release, so expect bugs or functions that are still not implemented.
+This is an ALPHA early release, so expect bugs or functions that are still not implemented.
 
-**GIT LARGE FILE REMOVED** now the model are attached in a specific model release here: https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v1.0.0-model
+If you want to clone this repository remember that **GIT LARGE FILE** is used for the essentia-tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
+
+```
+sudo apt-get install git-lfs
+git clone --branch devel https://github.com/NeptuneHub/AudioMuse-AI.git
+```
+
+The large file was created in this way (in case you need to add more):
+```
+git lfs install
+git lfs track "*.pb"
+git add .gitattributes
+```
