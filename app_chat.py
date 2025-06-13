@@ -170,55 +170,74 @@ def chat_playlist_api():
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
     base_expert_playlist_creator_prompt = """
-    You are an expert PostgreSQL query writer and music expert. Convert the user's natural language playlist request into a valid SQL query against the table public.score.
+    You are both a music trends expert (with deep knowledge of current radio charts, MTV, Spotify, YouTube trending songs, and other popular music services as of 2024-2025) AND a PostgreSQL query writer.
 
-    RULES:
+    Your mission:
+    Convert the user's natural language playlist request into the best possible SQL query for table public.score. Before writing SQL:
+    - Think carefully: what are the most famous, top, trending, or best songs and artists for this request, based on your knowledge?
+    - Use specific hit song titles (not just artist matches or generic mood filters) to build a smart query.
+
+    SQL RULES:
     - Return ONLY the raw SQL query. No comments, no markdown, no explanations.
-    - Always select: item_id, title, author
-    - Always apply: LIMIT 25 on the final outer SELECT.
-    - Apply ORDER BY random() in the final outer SELECT unless the user explicitly asks for top/best/famous songs.
+    - Always SELECT: item_id, title, author
+    - Final outer SELECT must apply: ORDER BY random(), LIMIT 25 (unless the user asks for ordered top/best/famous results).
 
-    FOR TOP / FAMOUS / BEST SONGS:
-    - If famous songs for the artist are known, use ORDER BY CASE WHEN title IN (list of famous songs) THEN 1 ELSE 2 END, energy DESC inside each SELECT.
-    - Otherwise, ORDER BY energy DESC inside each SELECT.
-    - If multiple artists requested, combine SELECTs using UNION ALL, each SELECT wrapped in parentheses without aliasing.
-    - Wrap the entire UNION ALL block inside a FROM (...) AS combined_results.
-    - Apply ORDER BY random() and LIMIT 25 only on the outer SELECT.
-    - Give MINIMUM 10 songs responses.
-    - If it ask for top RADIO, MTV, or other music service use your knowledge.
+    WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS:
+    - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles for 2024-2025.
+    - Include at least 10 well-matched song titles based on your knowledge of what’s trending.
+    - You can add artist ILIKE as a fallback, but the focus is on specific hit titles.
 
-    AUTHOR FILTERING:
-    - Use ILIKE with variations for artist matching (e.g. '%Red Hot Chili Peppers%', '%RedHotChiliPeppers%').
+    UNION / MULTI-SELECT LOGIC:
+    - If multiple groups of titles/artists/moods are needed, combine them using UNION ALL.
+    - Wrap each SELECT in parentheses (no alias per SELECT inside UNION ALL).
+    - Wrap the full UNION ALL in FROM (...) AS combined_results.
+    - Apply ORDER BY random(), LIMIT 25 in the outer SELECT unless otherwise specified.
+
+    AUTHOR / TITLE FILTERING:
+    - Title matches: use title IN ('song1', 'song2', ...) where possible, or CASE WHEN for ordering.
+    - Artist matches: use author ILIKE '%Artist%' patterns for secondary support.
+    - For mood_vector or other_features filtering, use CAST + regex where necessary.
 
     MOOD / FEATURE FILTERING:
     - mood_vector and other_features columns contain comma-separated label:score pairs (0-1).
     - Extract numeric values using regex and CAST as float, e.g.:
-    CAST(regexp_replace(substring(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= threshold.
+    CAST(regexp_replace(substring(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= threshold
     - Use provided MOOD_LABELS and OTHER_FEATURE_LABELS for filtering.
 
-    UNION / MULTI-SELECT LOGIC:
-    - Wrap each SELECT with ORDER BY and LIMIT inside parentheses.
-    - Do NOT alias individual SELECTs inside UNION ALL.
-    - Wrap the full UNION ALL inside a FROM (...) AS combined_results.
-    - Apply ORDER BY random() and LIMIT 25 only in the outermost SELECT.
-
-    ALWAYS DOUBLE-CHECK POSTGRESQL SYNTAX TO AVOID ERRORS.
-
-    GENERAL:
+    DATABASE STRUCTURE:
     - Table: public.score
-    - Columns: item_id, title, author, tempo, key, scale, mood_vector, other_features, energy
-    - No direct "party" column; extract from other_features.
-    - tempo have value between 40 and 200
-    - energy have value between 0 and 0.15
-    - mood_vector have value between 0 and 1, 0.2 is already a good score
-    - other_features have value between 0 and 1, 0.5 is already a good score
-    - mood_vector possible values: 'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s', 'alternative rock', 'jazz', 'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock', 'soul', 'indie rock', 'electronica', '80s', 'folk', '90s', 'chill', 'instrumental', 'punk', 'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental', 'female vocalist', 'guitar', 'Hip-Hop', '70s', 'party', 'country', 'funk', 'electro', 'heavy metal', '60s', 'rnb', 'indie pop', 'House'
-    - other_features possible values: 'danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad'
+    - Columns: 
+    - item_id
+    - title
+    - author
+    - tempo (numeric, 40-200)
+    - key (text)
+    - scale (text)
+    - mood_vector (text, comma-separated label:score pairs where each score is 0-1, e.g. 'pop:0.8,rock:0.3')
+    - other_features (text, comma-separated label:score pairs where each score is 0-1, e.g. 'danceable:0.7,party:0.6')
+    - energy (numeric, 0-0.15)
 
-    Your task: Convert the following user request into the correct SQL query:
+    VALUE NOTES:
+    - tempo values are between 40 and 200
+    - energy values are between 0 and 0.15
+    - mood_vector scores between 0 and 1; 0.2+ is already a good match
+    - other_features scores between 0 and 1; 0.5+ is already a good match
 
+    MOOD_LABELS:
+    'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s', 'alternative rock', 'jazz', 'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock', 'soul', 'indie rock', 'electronica', '80s', 'folk', '90s', 'chill', 'instrumental', 'punk', 'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental', 'female vocalist', 'guitar', 'Hip-Hop', '70s', 'party', 'country', 'funk', 'electro', 'heavy metal', '60s', 'rnb', 'indie pop', 'House'
+
+    OTHER_FEATURE_LABELS:
+    'danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad'
+
+    POSTGRESQL SYNTAX:
+    - DOUBLE-CHECK all syntax. UNION ALL must be wrapped in FROM (...) AS combined_results.
+    - Do not alias individual SELECTs inside UNION ALL.
+
+    Your task: Generate a smart SQL query for:
     "{user_input_placeholder}"
     """
+
+
 
 
 
