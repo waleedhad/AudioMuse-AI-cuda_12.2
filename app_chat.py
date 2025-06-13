@@ -1,20 +1,143 @@
 # app_chat.py
 from flask import Blueprint, render_template, request, jsonify
+import requests # For Jellyfin API call
+from psycopg2.extras import DictCursor # To get results as dictionaries
+import unicodedata # For ASCII normalization
+import sqlglot # Import sqlglot
 import json # For potential future use with more complex AI responses
+import re # For regex-based quote escaping
 
 # Import AI configuration from the main config.py
 # This assumes config.py is in the same directory as app_chat.py or accessible via Python path.
 from config import (
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME,
     GEMINI_MODEL_NAME, # GEMINI_API_KEY will be passed from client for this endpoint
-    AI_MODEL_PROVIDER
+    AI_MODEL_PROVIDER,
+    AI_CHAT_DB_USER_NAME, AI_CHAT_DB_USER_PASSWORD, # Import new config
+    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # For creating playlist
 )
 from ai import get_gemini_playlist_name # Import the function to call Gemini
 
 # Create a Blueprint for chat-related routes
 chat_bp = Blueprint('chat_bp', __name__,
                     template_folder='templates', # Specifies where to look for templates like chat.html
-                    static_folder='static') # For chat-specific static files, if any
+                    static_folder='static')
+
+ai_user_setup_done = False # Module-level flag to run setup once
+
+def _ensure_ai_user_configured(db_conn):
+    """
+    Ensures the AI_USER exists and has SELECT ONLY privileges on public.score.
+    This function should be called with a connection that has privileges to create users/roles and grant permissions.
+    """
+    global ai_user_setup_done
+    if ai_user_setup_done:
+        return
+
+    try:
+        with db_conn.cursor() as cur:
+            # Check if role exists
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (AI_CHAT_DB_USER_NAME,))
+            user_exists = cur.fetchone()
+
+            if not user_exists:
+                print(f"Creating database user: {AI_CHAT_DB_USER_NAME}")
+                cur.execute(f"CREATE USER {AI_CHAT_DB_USER_NAME} WITH PASSWORD %s;", (AI_CHAT_DB_USER_PASSWORD,))
+                print(f"User {AI_CHAT_DB_USER_NAME} created.")
+            else:
+                print(f"User {AI_CHAT_DB_USER_NAME} already exists.")
+
+            # Grant necessary permissions
+            cur.execute("SELECT current_database();")
+            current_db_name = cur.fetchone()[0]
+
+            print(f"Granting CONNECT ON DATABASE {current_db_name} TO {AI_CHAT_DB_USER_NAME}")
+            cur.execute(f"GRANT CONNECT ON DATABASE {current_db_name} TO {AI_CHAT_DB_USER_NAME};")
+
+            print(f"Granting USAGE ON SCHEMA public TO {AI_CHAT_DB_USER_NAME}")
+            cur.execute(f"GRANT USAGE ON SCHEMA public TO {AI_CHAT_DB_USER_NAME};")
+            
+            print(f"Granting SELECT ON public.score TO {AI_CHAT_DB_USER_NAME}")
+            cur.execute(f"GRANT SELECT ON TABLE public.score TO {AI_CHAT_DB_USER_NAME};")
+            
+            # Revoke all other default privileges on public schema if necessary (more secure)
+            # This is an advanced step and might be too restrictive if other public tables are needed by this user.
+            # For now, we rely on explicit grants.
+            # print(f"Revoking ALL ON SCHEMA public FROM {AI_CHAT_DB_USER_NAME} (except USAGE already granted)")
+            # cur.execute(f"REVOKE ALL ON SCHEMA public FROM {AI_CHAT_DB_USER_NAME};") # This revokes USAGE too
+            # cur.execute(f"GRANT USAGE ON SCHEMA public TO {AI_CHAT_DB_USER_NAME};") # Re-grant USAGE
+
+            db_conn.commit()
+            print(f"Permissions configured for user {AI_CHAT_DB_USER_NAME}.")
+            ai_user_setup_done = True
+    except Exception as e:
+        db_conn.rollback()
+        print(f"Error during AI user setup: {e}. AI user might not be correctly configured.")
+        # ai_user_setup_done remains False, so it might try again on next request.
+
+def clean_and_validate_sql(raw_sql):
+    """Cleans and performs basic validation on the SQL query."""
+    if not raw_sql or not isinstance(raw_sql, str):
+        return None, "Received empty or invalid SQL from AI."
+
+    cleaned_sql = raw_sql.strip()
+    if cleaned_sql.startswith("```sql"):
+        cleaned_sql = cleaned_sql[len("```sql"):]
+    if cleaned_sql.endswith("```"):
+        cleaned_sql = cleaned_sql[:-len("```")]
+    
+    # Further cleaning: find the first occurrence of SELECT (case-insensitive)
+    # and take everything from there. This helps if there's leading text.
+    select_pos = cleaned_sql.upper().find("SELECT")
+    if select_pos == -1:
+        return None, "Query does not contain SELECT."
+    cleaned_sql = cleaned_sql[select_pos:] # Start the string from "SELECT"
+    cleaned_sql = cleaned_sql.strip() # Strip again after taking the substring
+
+    if not cleaned_sql.upper().startswith("SELECT"):
+        # This case should ideally not be hit if the above find("SELECT") logic works,
+        # but it's a good fallback.
+        return None, "Cleaned query does not start with SELECT."
+
+    # Attempt to fix unescaped single quotes within potential string literals
+    # This looks for a word character, a single quote, and another word character (e.g., "L'isola")
+    # and replaces the single quote with two single quotes ("L''isola").
+    # This is a heuristic and might need refinement if it causes issues with valid SQL.
+    cleaned_sql = re.sub(r"(\w)'(\w)", r"\1''\2", cleaned_sql)
+
+    # Attempt to normalize to ASCII to remove problematic characters like 'è'
+    # This might change characters like 'è' to 'e'.
+    try:
+        cleaned_sql = unicodedata.normalize('NFKD', cleaned_sql).encode('ascii', 'ignore').decode('utf-8')
+    except Exception as e_norm:
+        print(f"Warning: Could not fully normalize SQL string to ASCII: {e_norm}")
+    try:
+        # Parse the query using sqlglot, specifying PostgreSQL dialect
+        parsed_expressions = sqlglot.parse(cleaned_sql, read='postgres')
+        if not parsed_expressions: # Should not happen if it starts with SELECT but good check
+            return None, "SQLglot could not parse the query."
+        
+        # Get the first (and should be only) expression
+        expression = parsed_expressions[0]
+
+        # Check and enforce LIMIT 25
+        limit_node = expression.args.get("limit")
+        if limit_node:
+            # If limit exists, check its value. sqlglot parses limit value as an expression.
+            # We expect a simple number here.
+            if not (isinstance(limit_node.expression, sqlglot.exp.Literal) and limit_node.expression.this == '25'):
+                print(f"Query had LIMIT {limit_node.expression.sql()}. Changing to LIMIT 25.")
+                expression.args["limit"] = sqlglot.exp.Limit(this=sqlglot.exp.Literal.number(25))
+        else:
+            # If no limit, add LIMIT 25
+            print("Query had no LIMIT clause. Adding LIMIT 25.")
+            expression.args["limit"] = sqlglot.exp.Limit(this=sqlglot.exp.Literal.number(25))
+
+        # Re-generate the SQL from the potentially modified structure.
+        cleaned_sql = expression.sql(dialect='postgres', pretty=False).strip().rstrip(';')
+    except sqlglot.errors.ParseError as e:
+        return None, f"SQLglot parsing error: {str(e)}"
+    return cleaned_sql, None
 
 @chat_bp.route('/')
 def chat_home():
@@ -30,6 +153,7 @@ def chat_playlist_api():
     This is a synchronous endpoint.
     """
     data = request.get_json()
+    from app import get_db # Import get_db here, inside the function
     if not data or 'userInput' not in data:
         return jsonify({"error": "Missing userInput in request"}), 400
 
@@ -40,85 +164,90 @@ def chat_playlist_api():
 
     ai_response_message = f"Received your request: '{user_input}'.\n"
     actual_model_used = None
+    query_results_list = None
+    executed_query_str = None
 
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
     base_expert_playlist_creator_prompt = """
-    You are an expert PostgreSQL query writer. Your sole purpose is to convert a user's natural language request for a music playlist into a valid PostgreSQL query for the table defined below.
-    
-    You MUST adhere to the following rules:
-    1.  ONLY return the raw SQL query.
-    2.  Do NOT add any explanations, comments, or markdown formatting (like ```sql). Your entire response must be ONLY the query itself.
-    3.  The query should select the `title` and `author` columns.
-    4.  Always add `LIMIT 25` to the end of the query to avoid overly long playlists.
-    5.  Use `ILIKE` for case-insensitive matching on text fields when appropriate.
-    ---
-    
-    ### **DATABASE SCHEMA:**
-    
-    ```sql
-    CREATE TABLE IF NOT EXISTS public.score
-    (
-        item_id text NOT NULL,
-        title text,
-        author text,
-        tempo real,
-        key text,
-        scale text,
-        mood_vector text, -- Example: "jazz:0.278,blues:0.117,Hip-Hop:0.108"
-        other_features text, -- Example: "danceable:0.53,party:0.88,relaxed:0.20"
-        energy real,
-        CONSTRAINT score_pkey PRIMARY KEY (item_id)
-    );
-    ```
-    ---
-    
-    ### **QUERYING INSTRUCTIONS:**
-    
-    * **`mood_vector` and `other_features`**: These are TEXT fields containing comma-separated key:value pairs. To check if a mood or feature is present, you MUST use the `ILIKE` operator to find the key. For example, to find rock songs, use `WHERE mood_vector ILIKE '%rock:%'`. To find danceable songs, use `WHERE other_features ILIKE '%danceable:%'`.
-    * **Tempo**: Use the `tempo` (real) column. Interpret user requests like this:
-        * "Slow": `tempo < 100`
-        * "Medium" or "Mid-tempo": `tempo BETWEEN 100 AND 140`
-        * "Fast" or "Uptempo": `tempo > 140`
-        * "Very Fast": `tempo > 160`
-    * **Energy**: Use the `energy` (real) column (values 0.0 to 0.15).
-        * "Low energy" or "Calm": `energy < 0.05`
-        * "Moderate energy": `energy BETWEEN 0.05 AND 0.10`
-        * "High energy": `energy > 0.10`
-    * **Artist/Author**: Use the `author` column with an exact match: `WHERE author = 'Artist Name'`.
-    * **Combining filters**: Your approach to combining filters is crucial.
-        * Use **`AND`** when the user combines **different types of criteria**. For example, a mood AND a tempo (`mood_vector ILIKE '%rock:%' AND tempo > 140`).
-        * Use **`OR`** when the user lists **multiple similar items**, like several moods or genres. For example, for "rock or pop music," you would use `(mood_vector ILIKE '%rock:%' OR mood_vector ILIKE '%pop:%')`.
-        * When you have a mix, **group the `OR` conditions in parentheses**. For example, "fast rock or metal" should be `WHERE tempo > 140 AND (mood_vector ILIKE '%rock:%' OR mood_vector ILIKE '%metal:%')`.
-    * For shuffling, you can add `ORDER BY random()`.
-    * **EXAMPLE OF ROW IN THE TABLE:** `"b97e12654599c24d6dcf45042a439467" "Strictly for the Tardcore (skit)" "Bloodhound Gang" 156.60513 "C" "minor" "jazz:0.278,blues:0.117,Hip-Hop:0.108,rock:0.098,experimental:0.086" "danceable:0.53,aggressive:0.06,happy:0.09,party:0.88,relaxed:0.20,sad:0.41" 0.00963396`
-    
-    ---
-    
-    ### **EXAMPLES:**
-    
-    **User Request:** "I want some fast rock music"
-    **Your Response:**
-    `SELECT title, author FROM public.score WHERE tempo > 140 AND mood_vector ILIKE '%rock:%' ORDER BY random() LIMIT 25;`
-    
-    **User Request:** "A playlist of jazz or blues"
-    **Your Response:**
-    `SELECT title, author FROM public.score WHERE mood_vector ILIKE '%jazz:%' OR mood_vector ILIKE '%blues:%' ORDER BY random() LIMIT 25;`
-    
-    **User Request:** "I need something for a party that is high energy and either electronic or dance"
-    **Your Response:**
-    `SELECT title, author FROM public.score WHERE other_features ILIKE '%party:%' AND energy > 0.7 AND (mood_vector ILIKE '%electronic:%' OR mood_vector ILIKE '%dance:%') ORDER BY random() LIMIT 25;`
-    
-    **User Request:** "Just songs by Daft Punk"
-    **Your Response:**
-    `SELECT title, author FROM public.score WHERE author = 'Daft Punk' LIMIT 25;`
-    
-    ---
-    
-    Now, based on all the above, convert the following user request into a single PostgreSQL query.
-    
-    **User Request:** "{user_input_placeholder}"
+    You are an expert PostgreSQL query writer and music expert. Convert the user's natural language playlist request into a single, smart SQL query against the table public.score.
+
+    RULES:
+    - Return ONLY the raw SQL query. No comments, no markdown.
+    - Always select item_id, title, author.
+    - CRITICAL: ALWAYS use LIMIT 25.
+    - Use ORDER BY random() unless the user asks for "top", "best", or "famous" songs.
+    - For "top", "best", or "famous" songs:
+    1. If famous song titles for the requested artist(s) are known, order those first using CASE in ORDER BY.
+    2. If famous titles are not known, fallback to finding songs by these artists with higher energy, party features, or rock/pop moods, ordered by relevance.
+    - Author matching: flexible case-insensitive matching with ILIKE. Generate patterns for common variations (spaces, slashes, no space).
+    - Combine filters logically:
+    - Use AND between different criteria (e.g. artist AND tempo)
+    - Use OR between similar criteria (e.g. multiple moods or artists) — group OR conditions in parentheses.
+    - If user asks for "similar artists" or combined artists, and no famous titles are known, fallback to combining their typical mood/energy characteristics (e.g. rock mood, high energy).
+
+    DATABASE:
+    Table public.score has columns: item_id, title, author, tempo, key, scale, mood_vector, other_features, energy.
+    - mood_vector and other_features contain text like 'rock:0.278,party:0.88' — values range between 0 and 1.
+    - energy is a real value between 0 and 0.15.
+
+    GUIDANCE:
+    - When matching mood_vector or other_features, use ILIKE to find the key (e.g. mood_vector ILIKE '%rock:%').
+    - Tempo interpretations:
+    - "Slow": tempo < 100
+    - "Medium" or "Mid-tempo": tempo BETWEEN 100 AND 140
+    - "Fast" or "Uptempo": tempo > 140
+    - "Very Fast": tempo > 160
+    - Energy interpretations:
+    - "Low energy" or "Calm": energy < 0.05
+    - "Moderate energy": energy BETWEEN 0.05 AND 0.10
+    - "High energy": energy > 0.10
+
+    EXAMPLES:
+
+    User: "top AC/DC songs"
+    SQL:
+    SELECT item_id, title, author FROM public.score WHERE
+    (author ILIKE '%acdc%' OR author ILIKE '%ac dc%' OR author ILIKE '%ac/dc%')
+    ORDER BY
+    (CASE
+        WHEN title ILIKE '%Back in Black%' OR title ILIKE '%Highway to Hell%' OR title ILIKE '%Thunderstruck%' OR title ILIKE '%You Shook Me All Night Long%' OR title ILIKE '%Hells Bells%'
+        THEN 1 ELSE 2 END),
+    random()
+    LIMIT 25;
+
+    User: "top Red Hot Chili Peppers songs"
+    SQL:
+    SELECT item_id, title, author FROM public.score WHERE
+    (author ILIKE '%red hot chili peppers%' OR author ILIKE '%red hot chili pepper%' OR author ILIKE '%red%hot%chili%peppers%')
+    ORDER BY
+    (CASE
+        WHEN title ILIKE '%Californication%' OR title ILIKE '%Under the Bridge%' OR title ILIKE '%Give it Away%' OR title ILIKE '%Scar Tissue%' OR title ILIKE '%Around the World%'
+        THEN 1 ELSE 2 END),
+    random()
+    LIMIT 25;
+
+    User: "top Libague, Vasco Rossi and similar artists"
+    SQL:
+    SELECT item_id, title, author FROM public.score WHERE
+    (author ILIKE '%libague%' OR author ILIKE '%liba gue%' OR author ILIKE '%vasco rossi%' OR author ILIKE '%vasco%rossi%')
+    AND (mood_vector ILIKE '%rock:%' OR mood_vector ILIKE '%pop:%' OR other_features ILIKE '%party:%' OR energy > 0.10)
+    ORDER BY random()
+    LIMIT 25;
+
+    User: "fast rock songs"
+    SQL:
+    SELECT item_id, title, author FROM public.score WHERE tempo > 140 AND mood_vector ILIKE '%rock:%' ORDER BY random() LIMIT 25;
+
+    Now, based on these rules, convert this user request into a single SQL query:
+
+    "{user_input_placeholder}"
     """
+
+
+
+
+
 
     # --- OLLAMA ---
     if ai_provider == "OLLAMA":
@@ -142,22 +271,112 @@ def chat_playlist_api():
         gemini_api_key_from_request = data.get('gemini_api_key')
 
         if not gemini_api_key_from_request:
-            ai_response_message += "Error: Gemini API key was not provided in the request.\n"
-            return jsonify({"response": {"message": ai_response_message, "original_request": user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used}}), 400
+            error_message = "Error: Gemini API key was not provided in the request.\n"
+            ai_response_message += error_message
+            return jsonify({"response": {"message": ai_response_message, "original_request": user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used, "query_results": None, "executed_query": None}}), 400
 
         ai_response_message += f"Processing with GEMINI model: {actual_model_used} (using API key from request).\n"
 
         # Prepare the full prompt by inserting the user's input
         full_prompt_for_gemini = base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", user_input)
 
-        # Call Gemini (using the function from ai.py)
-        # Use the API key provided in the request
-        gemini_response = get_gemini_playlist_name(gemini_api_key_from_request, actual_model_used, full_prompt_for_gemini)
-        ai_response_message += f"Gemini response: {gemini_response}"
+        gemini_response_raw = get_gemini_playlist_name(gemini_api_key_from_request, actual_model_used, full_prompt_for_gemini)
+
+        if gemini_response_raw.startswith("Error:"):
+            ai_response_message += f"Gemini API Error: {gemini_response_raw}\n"
+        else:
+            ai_response_message += f"Gemini raw response (SQL query attempt):\n{gemini_response_raw}\n"
+
+            sql_query, validation_error = clean_and_validate_sql(gemini_response_raw)
+            executed_query_str = sql_query # Store the cleaned query
+
+            # Ensure AI user is configured using the main app's DB connection
+            # This connection (get_db()) should have privileges to create roles/users and grant.
+            try:
+                main_db_conn_for_setup = get_db()
+                _ensure_ai_user_configured(main_db_conn_for_setup)
+            except Exception as setup_err:
+                ai_response_message += f"Critical Error: Could not ensure AI user setup: {setup_err}\nQuery will not be executed.\n"
+                # Proceed without executing query if setup fails
+
+            if validation_error:
+                ai_response_message += f"SQL Validation Error: {validation_error}\n"
+            elif sql_query and ai_user_setup_done: # Only execute if SQL is valid AND setup was successful
+                try:
+                    with get_db().cursor(cursor_factory=DictCursor) as cur: # Use main connection context
+                        cur.execute(f"SET LOCAL ROLE {AI_CHAT_DB_USER_NAME};") # Execute as AI_USER for this transaction
+                        cur.execute(sql_query)
+                        results = cur.fetchall()
+                        # SET LOCAL ROLE is transaction-scoped, role resets on commit/rollback.
+                        # SELECT doesn't strictly need a commit, but it finalizes the transaction.
+                        get_db().commit()
+                    
+                    query_results_list = []
+                    if results:
+                        for row in results:
+                            query_results_list.append({
+                                "item_id": row.get("item_id"), # Ensure these columns are in your SELECT
+                                "title": row.get("title"),
+                                "artist": row.get("author") # Map author to artist for frontend
+                            })
+                        ai_response_message += f"Successfully executed query. Found {len(query_results_list)} songs.\n"
+                    else:
+                        ai_response_message += "Query executed successfully, but found no matching songs.\n"
+                except Exception as e:
+                    get_db().rollback() # Rollback on error
+                    ai_response_message += f"Database Error executing query: {str(e)}\n"
+                    # query_results_list remains None or empty
+            elif sql_query and not ai_user_setup_done:
+                ai_response_message += "AI User setup was not completed successfully. Query was not executed for security reasons.\n"
 
     elif ai_provider == "NONE":
         ai_response_message += "No AI provider selected. Input acknowledged."
     else:
         ai_response_message += f"AI Provider '{ai_provider}' is not recognized."
 
-    return jsonify({"response": {"message": ai_response_message, "original_request": user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used}}), 200
+    return jsonify({"response": {"message": ai_response_message, "original_request": user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used, "executed_query": executed_query_str, "query_results": query_results_list}}), 200
+
+@chat_bp.route('/api/createJellyfinPlaylist', methods=['POST'])
+def create_jellyfin_playlist_api():
+    """
+    API endpoint to create a playlist on Jellyfin.
+    """
+    data = request.get_json()
+    if not data or 'playlist_name' not in data or 'item_ids' not in data:
+        return jsonify({"message": "Error: Missing playlist_name or item_ids in request"}), 400
+
+    user_playlist_name = data.get('playlist_name')
+    item_ids = data.get('item_ids') # This will be a list of strings
+
+    if not user_playlist_name.strip():
+        return jsonify({"message": "Error: Playlist name cannot be empty."}), 400
+    if not item_ids:
+        return jsonify({"message": "Error: No songs provided to create the playlist."}), 400
+
+    # Append _instant to the playlist name
+    jellyfin_playlist_name = f"{user_playlist_name.strip()}_instant"
+
+    headers = {"X-Emby-Token": JELLYFIN_TOKEN}
+    playlist_creation_url = f"{JELLYFIN_URL}/Playlists"
+    body = {
+        "Name": jellyfin_playlist_name,
+        "Ids": item_ids, # item_ids should be a list of strings
+        "UserId": JELLYFIN_USER_ID
+    }
+
+    try:
+        response = requests.post(playlist_creation_url, headers=headers, json=body, timeout=60)
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        
+        # Jellyfin usually returns the created playlist object on success
+        created_playlist_info = response.json()
+        return jsonify({"message": f"Successfully created playlist '{jellyfin_playlist_name}' on Jellyfin with ID: {created_playlist_info.get('Id')}"}), 200
+
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error creating playlist on Jellyfin: {str(e)}"
+        if hasattr(e, 'response') and e.response is not None: # type: ignore
+            try: error_message += f" - Server Response: {e.response.text}" # type: ignore
+            except: pass
+        return jsonify({"message": error_message}), 500
+    except Exception as e: # Catch any other unexpected errors
+        return jsonify({"message": f"An unexpected error occurred: {str(e)}"}), 500

@@ -33,9 +33,9 @@
         .mb-4 { margin-bottom: 1rem; }
         .mb-6 { margin-bottom: 1.5rem; }
         .mt-2 { margin-top: 0.5rem; }
-        .mt-8 { margin-top: 2rem; }
+        .mt-8 { margin-top: 2rem; } /* This was line 37 */
         .min-h-screen { min-height: 100vh; }
-        .min-h-[100px] { min-height: 100px; }
+        .min-h-100px { min-height: 100px; } /* Changed class name and CSS property */
 
         /* Flexbox & Grid */
         .flex { display: flex; }
@@ -166,8 +166,19 @@
         <!-- Response Section -->
         <section class="mt-8">
             <h2 class="text-2xl font-bold text-gray-900 border-b border-gray-200 pb-3 mb-4">AI Response</h2>
-            <div id="responseArea" class="bg-gray-100 p-4 rounded-lg min-h-[100px] text-gray-700 whitespace-pre-wrap break-words">
+            <div id="responseArea" class="bg-gray-100 p-4 rounded-lg min-h-100px text-gray-700 whitespace-pre-wrap break-words">
                 <p class="text-gray-500 italic">Your generated playlist will appear here...</p>
+            </div>
+            <!-- New section for creating playlist on Jellyfin -->
+            <div id="createPlaylistSection" class="mt-6 hidden">
+                <h3 class="text-lg font-semibold text-gray-800 mb-3">Create Playlist on Jellyfin</h3>
+                <form id="createPlaylistForm">
+                    <input type="hidden" id="playlistItemIds" name="item_ids">
+                    <label for="jellyfinPlaylistName" class="block text-sm font-medium text-gray-700 mb-1">Playlist Name:</label>
+                    <input type="text" id="jellyfinPlaylistName" name="playlist_name" class="form-input w-full p-2 rounded-md shadow-sm mb-3" placeholder="Enter playlist name" required>
+                    <button type="submit" id="submitJellyfinPlaylist" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors">Let's do it</button>
+                </form>
+                <div id="jellyfinResponseArea" class="mt-3 text-sm"></div>
             </div>
         </section>
     </main>
@@ -189,6 +200,9 @@
             const submitButton = document.getElementById('submitChat');
             const responseArea = document.getElementById('responseArea');
             const submitButtonText = submitButton.querySelector('span');
+            const createPlaylistSection = document.getElementById('createPlaylistSection');
+            const createPlaylistForm = document.getElementById('createPlaylistForm');
+            const jellyfinResponseArea = document.getElementById('jellyfinResponseArea');
 
             // --- Core Functions ---
 
@@ -273,7 +287,7 @@
                     }
 
                     const data = await response.json();
-                    renderPlaylist(data.response.message); // Pass the message string to renderPlaylist
+                    renderResponse(data.response); // Pass the whole response object
 
                 } catch (error) {
                     console.error('Error submitting chat:', error);
@@ -300,41 +314,62 @@
 
             /**
              * Renders the AI's playlist response in a formatted way.
-             * @param {string} responseText - The message string from the AI (expected to be plain text or SQL query).
+             * @param {object} responseData - The response object from the API.
+             * Expected structure: { message: "...", query_results: [{title: "...", artist: "..."}, ...] }
              */
-            function renderPlaylist(responseText) {
+            function renderResponse(responseData) {
                 responseArea.innerHTML = '';
                 responseArea.classList.remove('text-red-600', 'font-semibold');
-                try {
-                    // Attempt to parse if the responseText MIGHT be JSON in other contexts,
-                    // but for the current SQL query, this will fail and go to catch.
-                    const playlist = JSON.parse(responseText);
-                    
+                createPlaylistSection.style.display = 'none'; // Hide by default
+                jellyfinResponseArea.textContent = ''; // Clear previous Jellyfin responses
+
+                // Display the textual message from the AI (logs, query, errors, etc.)
+                const messageParagraph = document.createElement('p');
+                messageParagraph.className = 'mb-4'; // Add some margin below the message
+                messageParagraph.textContent = responseData.message || "No message from AI.";
+                responseArea.appendChild(messageParagraph);
+
+                // Display the executed query if available
+                if (responseData.executed_query) {
+                    const queryTitle = document.createElement('h4');
+                    queryTitle.className = 'text-md font-semibold text-gray-800 mt-4 mb-1';
+                    queryTitle.textContent = "Executed SQL Query:";
+                    responseArea.appendChild(queryTitle);
+
+                    const queryCode = document.createElement('code');
+                    queryCode.className = 'block bg-gray-200 p-2 rounded text-sm whitespace-pre-wrap break-words';
+                    queryCode.textContent = responseData.executed_query;
+                    responseArea.appendChild(queryCode);
+                }
+
+                // Display the playlist results if available
+                if (responseData.query_results && responseData.query_results.length > 0) {
                     const title = document.createElement('h3');
-                    title.className = 'text-xl font-bold text-gray-900 mb-2';
-                    title.textContent = playlist.playlist_name || 'Your Playlist';
-                    
-                    const description = document.createElement('p');
-                    description.className = 'text-gray-600 mb-4 italic';
-                    description.textContent = playlist.description || '';
-                    
+                    title.className = 'text-xl font-bold text-gray-900 mt-6 mb-2'; // Added mt-6 for spacing
+                    title.textContent = 'Generated Playlist';
+                    responseArea.appendChild(title);
+
                     const songList = document.createElement('ol');
                     songList.className = 'list-decimal list-inside space-y-2 text-gray-800';
-                    
-                    playlist.songs.forEach(song => {
+
+                    responseData.query_results.forEach(song => {
                         const listItem = document.createElement('li');
-                        listItem.textContent = `${song.title} by ${song.artist}`;
+                        listItem.textContent = `${song.title || 'Unknown Title'} by ${song.artist || 'Unknown Artist'}`;
                         songList.appendChild(listItem);
+                        // Store item_id for playlist creation
+                        const currentItemIds = document.getElementById('playlistItemIds').value;
+                        document.getElementById('playlistItemIds').value = currentItemIds ? `${currentItemIds},${song.item_id}` : song.item_id;
                     });
-                    
-                    responseArea.appendChild(title);
-                    responseArea.appendChild(description);
                     responseArea.appendChild(songList);
-                    
-                } catch (e) {
-                    // If parsing fails (expected for SQL query), show the raw text.
-                    console.error("Could not parse AI response as JSON:", e);
-                    responseArea.textContent = responseText;
+                    createPlaylistSection.style.display = 'block'; // Show the create playlist form
+                } else if (responseData.executed_query && (!responseData.query_results || responseData.query_results.length === 0)) {
+                    // If a query was executed but no results
+                    document.getElementById('playlistItemIds').value = ''; // Clear any previous item IDs
+                    createPlaylistSection.style.display = 'none';
+                    const noResultsMessage = document.createElement('p');
+                    noResultsMessage.className = 'mt-4 text-gray-600 italic';
+                    noResultsMessage.textContent = "The query returned no songs.";
+                    responseArea.appendChild(noResultsMessage);
                 }
             }
             
@@ -348,11 +383,55 @@
                 responseArea.textContent = message;
             }
 
+            /**
+             * Handles the submission of the "Create Playlist on Jellyfin" form.
+             * @param {Event} event - The form submission event.
+             */
+            async function handleCreateJellyfinPlaylist(event) {
+                event.preventDefault();
+                jellyfinResponseArea.textContent = 'Creating playlist on Jellyfin...';
+                jellyfinResponseArea.classList.remove('text-red-600', 'text-green-600');
+
+                const playlistNameInput = document.getElementById('jellyfinPlaylistName');
+                const itemIdsInput = document.getElementById('playlistItemIds');
+
+                if (!playlistNameInput.value.trim()) {
+                    jellyfinResponseArea.textContent = 'Error: Playlist name cannot be empty.';
+                    jellyfinResponseArea.classList.add('text-red-600');
+                    return;
+                }
+                if (!itemIdsInput.value) {
+                    jellyfinResponseArea.textContent = 'Error: No song IDs found to create the playlist.';
+                    jellyfinResponseArea.classList.add('text-red-600');
+                    return;
+                }
+
+                const payload = {
+                    playlist_name: playlistNameInput.value,
+                    item_ids: itemIdsInput.value.split(',') // Send as an array
+                };
+
+                try {
+                    const response = await fetch('/chat/api/createJellyfinPlaylist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json();
+                    jellyfinResponseArea.textContent = data.message;
+                    jellyfinResponseArea.classList.toggle('text-green-600', response.ok);
+                    jellyfinResponseArea.classList.toggle('text-red-600', !response.ok);
+                } catch (error) {
+                    jellyfinResponseArea.textContent = `Error: ${error.message}`;
+                    jellyfinResponseArea.classList.add('text-red-600');
+                }
+            }
+
             // --- Event Listeners ---
             document.addEventListener('DOMContentLoaded', fetchConfig);
             aiProviderSelect.addEventListener('change', updateAIProviderVisibility);
             playlistForm.addEventListener('submit', handleChatSubmit);
-
+            createPlaylistForm.addEventListener('submit', handleCreateJellyfinPlaylist);
         })();
     </script>
 </body>

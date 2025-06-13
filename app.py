@@ -31,9 +31,6 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
 # --- Flask App Setup ---
 app = Flask(__name__)
 
-# --- Import Blueprints ---
-from app_chat import chat_bp # Import the chat blueprint
-
 # --- Swagger Setup ---
 app.config['SWAGGER'] = {
     'title': 'AudioMuse-AI API',
@@ -146,7 +143,10 @@ def init_db():
 with app.app_context():
     init_db()
 
-# --- Register Blueprints ---
+# --- Import and Register Blueprints ---
+# Import here to avoid circular dependencies during initial module loading
+from app_chat import chat_bp
+
 app.register_blueprint(chat_bp, url_prefix='/chat') # All routes in chat_bp will be prefixed with /chat
 
 
@@ -655,7 +655,7 @@ def start_clustering_endpoint():
     max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
     min_songs_per_genre_for_stratification_val = int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION))
     stratified_sampling_target_percentile_val = int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE))
-    
+
     # Retrieve score weights from request, falling back to config defaults
     score_weight_diversity_val = float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY))
     score_weight_silhouette_val = float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE))
@@ -875,7 +875,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
 
     # Define terminal statuses for the query
     terminal_statuses_tuple = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
-                               JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED)
+                               JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED) # JobStatus for completeness if used directly
 
     # Fetch children that are not already in a terminal state
     cur.execute("""

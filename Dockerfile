@@ -38,6 +38,7 @@ RUN pip3 install --no-cache-dir \
     psycopg2-binary \
     ftfy \
     flasgger \
+    sqlglot \
     google-generativeai
 
 RUN pip3 install --no-cache-dir essentia-tensorflow
