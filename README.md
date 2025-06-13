@@ -15,6 +15,7 @@ Addional important information on this project can also be found here:
 
 - [Quick Start Deployment on K3S](#quick-start-deployment-on-k3s)
 - [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
+- [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
 - [Configuration Parameters](#configuration-parameters)
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
@@ -28,6 +29,7 @@ Addional important information on this project can also be found here:
   - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
+- [Instant Chat Deep Dive](#instant-chat-deep-dive)
 - [Screenshots](#screenshots)
   - [Analysis task](#analysis-task)
   - [Clustering task](#clustering-task)
@@ -60,6 +62,7 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
     ```
 4.  **Access:**
     *   **Main UI:** Access at `http://<EXTERNAL-IP>:8000`
+    *   **Instant Playlist UI:** Access at `http://<EXTERNAL-IP>:8000/chat`  **experimental**
     *   **API Docs (Swagger UI):** Explore the API at `http://<EXTERNAL-IP>:8000/apidocs`
 
 ## **Front-End Quick Start: Analysis and Clustering Parameters**
@@ -106,6 +109,40 @@ After deploying with the K3S Quick Start, you'll want to run an **Analysis Task*
 *   Start Analysis: adjust `NUM_RECENT_ALBUMS` if desired, and submit. Wait for it to complete (it can takes a couple of days depending on your library size).
 *   Start Clustering: Adjust the clustering parameters above as desired in the form, and Submit. Wait for it to complete (it can takes between minutes and 1-2 hours depending on your library size and the number of `CLUSTERING_RUNS`).
 
+## **Instant PLaylist (via Chat Interface)**
+
+**IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
+
+For a quick and interactive way to generate playlists without running the full evolutionary clustering task, you can use the "Instant Playlist" chat interface. This feature leverages AI (Ollama or Gemini, if configured) to translate your natural language requests directly into SQL queries that are run against your analyzed music data.
+
+**How to Use:**
+
+1.  **Access the Chat Interface:**
+    *   Navigate to `http://<EXTERNAL-IP>:8000/chat` (or `http://localhost:8000/chat` for local Docker Compose deployments).
+
+2.  **Configure AI (Optional but Recommended):**
+    *   Select your preferred AI Provider (Ollama or Gemini).
+    *   If using Ollama, ensure the "Ollama Server URL" and "Ollama Model" are correctly set (they will default to values from your server configuration).
+    *   If using Gemini, enter your "Gemini API Key" and select the "Gemini Model" (defaults are provided from server config).
+    *   If you select "None" as the AI Provider, the system will not attempt to generate SQL from your text.
+
+3.  **Make Your Request:**
+    *   In the text area "What kind of music are you in the mood for?", type your playlist request in natural language.
+    *   Click "Get Playlist Idea".
+
+4.  **Review and Create:**
+    *   The AI will generate a PostgreSQL query based on your request. This query is then executed against your `score` table.
+    *   The results (a list of songs) will be displayed.
+    *   If songs are found, a new section will appear allowing you to name the playlist and click "Let's do it" to create this playlist directly on your Jellyfin server. The playlist name on Jellyfin will have `_instant` appended to the name you provide.
+
+**Example Queries (Tested with Gemini):**
+*   "Create a playlist that is good for post lunch"
+*   "Create a playlist for the morning POP with a good energy"
+*   "Give me the tops songs of Red Hot Chili peppers"
+*   "Create a mix of Metal and Hard Rock songs like AC DC, Iron Maiden"
+*   "Give me some tranding songs of the radio of 2025"
+
+**Note:** The quality and relevance of the **Instant Playlist** heavily depend on the capabilities of the configured AI model and the detail of your request. The underlying music data must have been previously analyzed using the "Analysis Task" for this feature to find songs.
 
 ## **Kubernetes Deployment (K3S Example)**
 
@@ -428,6 +465,53 @@ AudioMuse-AI leverages Redis Queue (RQ) to manage and execute long-running proce
     *   Throughout their lifecycle, tasks frequently update their progress, status (e.g., `STARTED`, `PROGRESS`, `SUCCESS`, `FAILURE`, `REVOKED`), and detailed logs into the PostgreSQL database. The Flask application reads this information to display real-time updates on the web UI.
     *   RQ's job metadata is also updated, but the primary source of truth for detailed status and logs is the application's database.
 
+## **Instant Chat Deep Dive**
+
+The "Instant Playlist" feature, accessible via `chat.html`, provides a direct way to generate playlists using natural language by leveraging AI models to construct and execute PostgreSQL queries against your analyzed music library.
+
+**Core Workflow:**
+
+1.  **User Interface (`chat.html`):**
+    *   The user selects an AI provider (Ollama or Gemini) and can customize model names, Ollama server URLs, or Gemini API keys. These default to values from the server's `config.py` but can be overridden per session in the UI.
+    *   The user types a natural language request (e.g., "sad songs for a rainy day" or "energetic pop from the 2020s").
+
+2.  **API Call (`app_chat.py` - `/api/chatPlaylist`):**
+    *   The frontend sends the user's input, selected AI provider, and any custom model/API parameters to this backend endpoint.
+
+3.  **Prompt Engineering (`app_chat.py`):**
+    *   A detailed system prompt (`base_expert_playlist_creator_prompt`) is used. This prompt instructs the AI model to act as an expert PostgreSQL query writer specializing in music. It includes:
+        *   Strict rules for the output (SQL only, specific columns, `LIMIT 25`).
+        *   The database schema for the `public.score` table.
+        *   Detailed querying instructions for `mood_vector`, `other_features`, `tempo`, `energy`, and `author`.
+        *   Examples of user requests and the corresponding desired SQL queries.
+        *   A list of `MOOD_LABELS` and `OTHER_FEATURE_LABELS` available in the `mood_vector` and `other_features` columns.
+        *   Specific instructions for handling requests for "top," "famous," or "trending" songs, suggesting the use of `CASE WHEN` in `ORDER BY` to prioritize known hits.
+        *   Guidance on using `UNION ALL` for combining different criteria.
+    *   The user's natural language input is appended to this master prompt.
+
+4.  **AI Model Interaction (`ai.py` via `app_chat.py`):**
+    *   Based on the selected provider, `app_chat.py` calls either `get_ollama_playlist_name` or `get_gemini_playlist_name` from `ai.py`.
+    *   These functions send the complete prompt to the respective AI model (Ollama or Gemini).
+
+5.  **SQL Query Processing (`app_chat.py` - `clean_and_validate_sql`):**
+    *   The raw SQL string returned by the AI is processed:
+        *   Markdown (like ```sql) is stripped.
+        *   The query is normalized to start with `SELECT`.
+        *   Unescaped single quotes within potential string literals (e.g., "L'amour") are escaped to `''` (e.g., "L''amour") using a regex (`re.sub(r"(\w)'(\w)", r"\1''\2", cleaned_sql)`).
+        *   The string is normalized to ASCII using `unicodedata.normalize` to handle special characters.
+        *   `sqlglot.parse` is used to parse the SQL (as PostgreSQL dialect). This helps validate syntax and further sanitize the query.
+        *   The `LIMIT` clause is enforced to be `LIMIT 25`. If a different limit is present, it's changed; if no limit exists, it's added.
+        *   The query is re-serialized by `sqlglot` to ensure a clean, valid SQL string.
+
+6.  **Database Execution (`app_chat.py`):**
+    *   Before execution, the system ensures a dedicated, restricted database user (`AI_CHAT_DB_USER_NAME` from `config.py`) exists. This user is automatically created if it doesn't exist and is granted `SELECT` ONLY permissions on the `public.score` table.
+    *   The validated SQL query is executed against the PostgreSQL database using `SET LOCAL ROLE {AI_CHAT_DB_USER_NAME};`. This ensures the query runs with the restricted permissions of this AI-specific user for that transaction.
+
+7.  **Response to Frontend (`chat.html`):**
+    *   The results (list of songs: `item_id`, `title`, `author`) or any errors are sent back to `chat.html`.
+    *   The frontend displays the AI's textual response (including the generated SQL and any processing messages) and the list of songs.
+    *   If songs are returned, a form appears allowing the user to name the playlist. Submitting this form calls another endpoint (`/api/createJellyfinPlaylist`) in `app_chat.py` which uses the Jellyfin API to create the playlist with the chosen name (appended with `_instant`) and the retrieved song IDs.
+    
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
