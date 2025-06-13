@@ -11,12 +11,12 @@ import re # For regex-based quote escaping
 # This assumes config.py is in the same directory as app_chat.py or accessible via Python path.
 from config import (
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME,
-    GEMINI_MODEL_NAME, # GEMINI_API_KEY will be passed from client for this endpoint
-    AI_MODEL_PROVIDER,
+    GEMINI_MODEL_NAME, GEMINI_API_KEY, # Import GEMINI_API_KEY from config
+    AI_MODEL_PROVIDER, # Default AI provider
     AI_CHAT_DB_USER_NAME, AI_CHAT_DB_USER_PASSWORD, # Import new config
     JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # For creating playlist
 )
-from ai import get_gemini_playlist_name # Import the function to call Gemini
+from ai import get_gemini_playlist_name, get_ollama_playlist_name # Import functions to call AI
 
 # Create a Blueprint for chat-related routes
 chat_bp = Blueprint('chat_bp', __name__,
@@ -146,6 +146,26 @@ def chat_home():
     """
     return render_template('chat.html')
 
+@chat_bp.route('/api/config_defaults', methods=['GET'])
+def chat_config_defaults_api():
+    """
+    API endpoint to provide default configuration values for the chat interface.
+    """
+    # Ensure that the GEMINI_API_KEY from config is only sent if it's not the placeholder.
+    # For security, it's often better not to send API keys to the client at all,
+    # but per your setup, we'll make it available as a default suggestion.
+    config_gemini_api_key = GEMINI_API_KEY
+    if GEMINI_API_KEY == "YOUR-GEMINI-API-KEY-HERE": # Check against the placeholder
+        config_gemini_api_key = "" # Send empty if it's the placeholder
+
+    return jsonify({
+        "default_ai_provider": AI_MODEL_PROVIDER,
+        "default_ollama_model_name": OLLAMA_MODEL_NAME,
+        "ollama_server_url": OLLAMA_SERVER_URL, # Ollama server URL might be useful for display/info
+        "default_gemini_model_name": GEMINI_MODEL_NAME,
+        "default_gemini_api_key": config_gemini_api_key # API key from config.py
+    }), 200
+
 @chat_bp.route('/api/chatPlaylist', methods=['POST'])
 def chat_playlist_api():
     """
@@ -153,6 +173,8 @@ def chat_playlist_api():
     This is a synchronous endpoint.
     """
     data = request.get_json()
+    print(f"DEBUG: chat_playlist_api called. Raw request data: {data}") # Log raw request
+
     from app import get_db # Import get_db here, inside the function
     if not data or 'userInput' not in data:
         return jsonify({"error": "Missing userInput in request"}), 400
@@ -244,18 +266,55 @@ def chat_playlist_api():
     # --- OLLAMA ---
     if ai_provider == "OLLAMA":
         actual_model_used = ai_model_from_request or OLLAMA_MODEL_NAME
-        ai_response_message += f"Processing with OLLAMA model: {actual_model_used} (at {OLLAMA_SERVER_URL}).\n"
-        # TODO: Implement actual Ollama call here using the prompt
-        # full_prompt_for_ollama = base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", user_input)
-        # Example (requires ollama library and running server):
-        # try:
-        #   import ollama
-        #   client = ollama.Client(host=OLLAMA_SERVER_URL)
-        #   response = client.chat(model=actual_model_used, messages=[{'role': 'user', 'content': user_input}])
-        #   ai_response_message += f"Ollama actual response: {response['message']['content']}"
-        # except Exception as e:
-        #   ai_response_message += f"Mock Response: Error connecting/querying Ollama: {str(e)}"
-        ai_response_message += "(This is a mock response. Actual Ollama call not implemented in this version.)"
+        # Use Ollama server URL from request, or fallback to config
+        ollama_url_from_request = data.get('ollama_server_url', OLLAMA_SERVER_URL)
+        ai_response_message += f"Processing with OLLAMA model: {actual_model_used} (at {ollama_url_from_request}).\n"
+
+        full_prompt_for_ollama = base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", user_input)
+        # Pass the determined Ollama URL to the AI call
+        ollama_response_raw = get_ollama_playlist_name(ollama_url_from_request, actual_model_used, full_prompt_for_ollama)
+
+        if ollama_response_raw.startswith("Error:") or ollama_response_raw.startswith("An unexpected error occurred:") :
+            ai_response_message += f"Ollama API Error: {ollama_response_raw}\n"
+        else:
+            ai_response_message += f"Ollama raw response (SQL query attempt):\n{ollama_response_raw}\n"
+
+            sql_query, validation_error = clean_and_validate_sql(ollama_response_raw)
+            executed_query_str = sql_query # Store the cleaned query
+
+            # Ensure AI user is configured using the main app's DB connection
+            try:
+                main_db_conn_for_setup = get_db()
+                _ensure_ai_user_configured(main_db_conn_for_setup)
+            except Exception as setup_err:
+                ai_response_message += f"Critical Error: Could not ensure AI user setup: {setup_err}\nQuery will not be executed.\n"
+
+            if validation_error:
+                ai_response_message += f"SQL Validation Error: {validation_error}\n"
+            elif sql_query and ai_user_setup_done: # Only execute if SQL is valid AND setup was successful
+                try:
+                    with get_db().cursor(cursor_factory=DictCursor) as cur:
+                        cur.execute(f"SET LOCAL ROLE {AI_CHAT_DB_USER_NAME};")
+                        cur.execute(sql_query)
+                        results = cur.fetchall()
+                        get_db().commit()
+                    
+                    query_results_list = []
+                    if results:
+                        for row in results:
+                            query_results_list.append({
+                                "item_id": row.get("item_id"),
+                                "title": row.get("title"),
+                                "artist": row.get("author")
+                            })
+                        ai_response_message += f"Successfully executed query. Found {len(query_results_list)} songs.\n"
+                    else:
+                        ai_response_message += "Query executed successfully, but found no matching songs.\n"
+                except Exception as e:
+                    get_db().rollback()
+                    ai_response_message += f"Database Error executing query: {str(e)}\n"
+            elif sql_query and not ai_user_setup_done:
+                ai_response_message += "AI User setup was not completed successfully. Query was not executed for security reasons.\n"
 
     # --- GEMINI ---
     elif ai_provider == "GEMINI":
