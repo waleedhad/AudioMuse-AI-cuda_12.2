@@ -138,7 +138,11 @@
                     </div>
                     <div id="ollamaConfig" class="hidden">
                         <label for="ollamaModel" class="block text-sm font-medium text-gray-700 mb-1">Ollama Model</label>
-                        <select id="ollamaModel" class="form-input w-full p-2 rounded-md shadow-sm"></select>
+                        <input type="text" id="ollamaModel" class="form-input w-full p-2 rounded-md shadow-sm" placeholder="e.g., mistral:7b">
+                        <div class="mt-4">
+                            <label for="ollamaServerUrl" class="block text-sm font-medium text-gray-700 mb-1">Ollama Server URL</label>
+                            <input type="text" id="ollamaServerUrl" class="form-input w-full p-2 rounded-md shadow-sm" placeholder="e.g., http://localhost:11434/api/generate">
+                        </div>
                     </div>
                     <div id="geminiConfig" class="hidden">
                         <label for="geminiModel" class="block text-sm font-medium text-gray-700 mb-1">Gemini Model</label>
@@ -193,6 +197,7 @@
             const ollamaConfigDiv = document.getElementById('ollamaConfig');
             const geminiConfigDiv = document.getElementById('geminiConfig');
             const ollamaModelSelect = document.getElementById('ollamaModel');
+            const ollamaServerUrlInput = document.getElementById('ollamaServerUrl'); // Added Ollama Server URL input
             const geminiApiKeyInput = document.getElementById('geminiApiKey'); // Added API key input
             const geminiModelSelect = document.getElementById('geminiModel');
             const playlistForm = document.getElementById('playlistForm');
@@ -211,13 +216,13 @@
              */
             async function fetchConfig() {
                 try {
-                    const response = await fetch('/api/config'); // This endpoint is in app.py
+                    const response = await fetch('/chat/api/config_defaults'); // Changed to new chat-specific config endpoint
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
                     globalConfig = await response.json();
                     populateAIConfigSelectors();
-                    updateAIProviderVisibility();
+                    updateAIProviderVisibility(); // Call this after populating
                 } catch (error) {
                     console.error("Failed to fetch config:", error);
                     showError('Error: Could not load AI configuration.');
@@ -228,15 +233,18 @@
              * Populates the model dropdowns based on the fetched configuration.
              */
             function populateAIConfigSelectors() {
-                if (globalConfig.ai_model_provider) {
-                    aiProviderSelect.value = globalConfig.ai_model_provider.toUpperCase();
+                if (globalConfig.default_ai_provider) {
+                    aiProviderSelect.value = globalConfig.default_ai_provider.toUpperCase();
                 }
 
-                ollamaModelSelect.innerHTML = ''; 
-                ollamaModelSelect.add(new Option(globalConfig.ollama_model_name || "No model configured", globalConfig.ollama_model_name || ""));
+                // ollamaModelSelect.innerHTML = ''; // Not needed for input field
+                ollamaModelSelect.value = globalConfig.default_ollama_model_name || ""; // Set default value for input
+                ollamaServerUrlInput.value = globalConfig.ollama_server_url || "http://localhost:11434/api/generate"; // Pre-fill Ollama Server URL
                 
-                geminiModelSelect.innerHTML = '';
-                geminiModelSelect.value = globalConfig.gemini_model_name || "gemini-1.5-flash-latest"; // Set default value for input
+                geminiModelSelect.value = globalConfig.default_gemini_model_name || "gemini-1.5-flash-latest";
+                // Pre-fill Gemini API key from config if available and not the placeholder
+                // User can still override this in the form.
+                geminiApiKeyInput.value = globalConfig.default_gemini_api_key || "";
             }
 
             /**
@@ -270,6 +278,7 @@
 
                 if (payload.ai_provider === 'OLLAMA') {
                     payload.ai_model = ollamaModelSelect.value;
+                    payload.ollama_server_url = ollamaServerUrlInput.value; // Include Ollama Server URL
                 } else if (payload.ai_provider === 'GEMINI') {
                     payload.ai_model = geminiModelSelect.value;
                     payload.gemini_api_key = geminiApiKeyInput.value; // Include API key for Gemini
