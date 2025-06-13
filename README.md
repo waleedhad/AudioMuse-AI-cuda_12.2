@@ -524,6 +524,10 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/clustering_task.png "Audio clustering and task status.")
 
+### Instant Playlist
+
+![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/Instant_playlist.png "Instant Playlist interface")
+
 ## **Key Technologies**
 
 AudioMuse AI is built upon a robust stack of open-source technologies:
