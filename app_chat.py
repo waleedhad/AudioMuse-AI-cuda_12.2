@@ -175,74 +175,69 @@ def chat_playlist_api():
     RULES:
     - Return ONLY the raw SQL query. No comments, no markdown.
     - Always select item_id, title, author.
-    - CRITICAL: ALWAYS use LIMIT 25.
-    - Use ORDER BY random() unless the user asks for "top", "best", or "famous" songs.
+    - ALWAYS use LIMIT 25 on the final result (applied after combining all parts).
+    - Use ORDER BY random() unless the user requests "top", "best", or "famous" songs.
     - For "top", "best", or "famous" songs:
     1. If famous song titles for the requested artist(s) are known, order those first using CASE in ORDER BY.
-    2. If famous titles are not known, fallback to finding songs by these artists with higher energy, party features, or rock/pop moods, ordered by relevance.
-    - Author matching: flexible case-insensitive matching with ILIKE. Generate patterns for common variations (spaces, slashes, no space).
-    - Combine filters logically:
-    - Use AND between different criteria (e.g. artist AND tempo)
-    - Use OR between similar criteria (e.g. multiple moods or artists) — group OR conditions in parentheses.
-    - If user asks for "similar artists" or combined artists, and no famous titles are known, fallback to combining their typical mood/energy characteristics (e.g. rock mood, high energy).
+    2. If famous titles are not known, fallback to ordering by higher energy, party features, or relevant moods.
+
+    AUTHOR FILTERING:
+    - Apply author filters ONLY if the user explicitly requests specific artists or bands.
+    - Use flexible case-insensitive matching with ILIKE and variations (spaces, slashes, no space).
+    - Example: (author ILIKE '%AC/DC%' OR author ILIKE '%ACDC%')
+
+    - When multiple artists are specified:
+    1. Generate a separate SELECT query for each requested artist, each wrapped in parentheses with its own ORDER BY random() and LIMIT (e.g., 6-8 per artist depending on number of artists).
+    2. Optionally include a separate SELECT for mood/genre-based matches for similar artists or songs, also wrapped in parentheses with its own ORDER BY random() and LIMIT.
+    3. Combine these queries using UNION ALL. 
+    4. Wrap the UNION ALL in an outer SELECT with ORDER BY random() and LIMIT 25 to finalize the result.
+
+    GENRE / MOOD FILTERING:
+    - Treat genre or mood terms as filters on mood_vector, not as author names.
+    - mood_vector contains comma-separated key:probability pairs (0-1). Extract probabilities with:
+    CAST(regexp_replace(substring(mood_vector FROM 'label:([0-9]*\\.?[0-9]+)'), 'label:', '') AS float) >= threshold
+    - Choose threshold dynamically (generally 0.1–0.4) based on the request.
+    - Combine multiple mood filters with OR, grouped in parentheses.
+
+    OTHER FEATURES:
+    - other_features contains attributes like danceable, aggressive, happy, party, relaxed, sad.
+    - Filter these the same way as mood_vector if relevant.
+
+    LOGIC:
+    - Use AND between different types of filters (e.g., artist AND mood).
+    - Use OR (grouped) between similar filters (e.g., multiple moods or artists).
+
+    TITLE FILTERING:
+    - Only filter on title if the user explicitly asks for certain songs.
 
     DATABASE:
-    Table public.score has columns: item_id, title, author, tempo, key, scale, mood_vector, other_features, energy.
-    - mood_vector and other_features contain text like 'rock:0.278,party:0.88' — values range between 0 and 1.
-    - energy is a real value between 0 and 0.15.
+    - Table: public.score
+    - Columns: item_id, title, author, tempo, key, scale, mood_vector, other_features, energy
+    - energy: numeric 0-0.15
+    - tempo: numeric, usually 40-200
 
-    GUIDANCE:
-    - When matching mood_vector or other_features, use ILIKE to find the key (e.g. mood_vector ILIKE '%rock:%').
-    - Tempo interpretations:
-    - "Slow": tempo < 100
-    - "Medium" or "Mid-tempo": tempo BETWEEN 100 AND 140
-    - "Fast" or "Uptempo": tempo > 140
-    - "Very Fast": tempo > 160
-    - Energy interpretations:
-    - "Low energy" or "Calm": energy < 0.05
-    - "Moderate energy": energy BETWEEN 0.05 AND 0.10
-    - "High energy": energy > 0.10
+    MOOD_LABELS = [
+    'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s',
+    'alternative rock', 'jazz', 'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock',
+    'soul', 'indie rock', 'electronica', '80s', 'folk', '90s', 'chill', 'instrumental', 'punk',
+    'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental', 'female vocalist', 'guitar',
+    'Hip-Hop', '70s', 'party', 'country', 'funk', 'electro', 'heavy metal', '60s', 'rnb', 'indie pop', 'House'
+    ]
 
-    EXAMPLES:
+    OTHER_FEATURE_LABELS = ['danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad']
 
-    User: "top AC/DC songs"
-    SQL:
-    SELECT item_id, title, author FROM public.score WHERE
-    (author ILIKE '%acdc%' OR author ILIKE '%ac dc%' OR author ILIKE '%ac/dc%')
-    ORDER BY
-    (CASE
-        WHEN title ILIKE '%Back in Black%' OR title ILIKE '%Highway to Hell%' OR title ILIKE '%Thunderstruck%' OR title ILIKE '%You Shook Me All Night Long%' OR title ILIKE '%Hells Bells%'
-        THEN 1 ELSE 2 END),
-    random()
-    LIMIT 25;
+    IMPORTANT:
+    - Ensure fair distribution across requested artists and similar songs using separate SELECTs per artist or mood, each wrapped in parentheses with ORDER BY random() and LIMIT.
+    - Combine with UNION ALL.
+    - Always wrap the combined UNION ALL in an outer SELECT that applies final ORDER BY random() and LIMIT 25.
+    - This structure prevents SQL syntax errors and ensures valid execution.
+    - Do not provide full SQL examples — generate the query based on the rules and user input.
 
-    User: "top Red Hot Chili Peppers songs"
-    SQL:
-    SELECT item_id, title, author FROM public.score WHERE
-    (author ILIKE '%red hot chili peppers%' OR author ILIKE '%red hot chili pepper%' OR author ILIKE '%red%hot%chili%peppers%')
-    ORDER BY
-    (CASE
-        WHEN title ILIKE '%Californication%' OR title ILIKE '%Under the Bridge%' OR title ILIKE '%Give it Away%' OR title ILIKE '%Scar Tissue%' OR title ILIKE '%Around the World%'
-        THEN 1 ELSE 2 END),
-    random()
-    LIMIT 25;
-
-    User: "top Libague, Vasco Rossi and similar artists"
-    SQL:
-    SELECT item_id, title, author FROM public.score WHERE
-    (author ILIKE '%libague%' OR author ILIKE '%liba gue%' OR author ILIKE '%vasco rossi%' OR author ILIKE '%vasco%rossi%')
-    AND (mood_vector ILIKE '%rock:%' OR mood_vector ILIKE '%pop:%' OR other_features ILIKE '%party:%' OR energy > 0.10)
-    ORDER BY random()
-    LIMIT 25;
-
-    User: "fast rock songs"
-    SQL:
-    SELECT item_id, title, author FROM public.score WHERE tempo > 140 AND mood_vector ILIKE '%rock:%' ORDER BY random() LIMIT 25;
-
-    Now, based on these rules, convert this user request into a single SQL query:
+    Now convert this user request into the SQL query:
 
     "{user_input_placeholder}"
     """
+
 
 
 
