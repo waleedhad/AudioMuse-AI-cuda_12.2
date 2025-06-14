@@ -31,12 +31,11 @@ Addional important information on this project can also be found here:
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Instant Chat Deep Dive](#instant-chat-deep-dive)
 - [Screenshots](#screenshots)
-  - [Analysis task](#analysis-task)
-  - [Clustering task](#clustering-task)
 - [Key Technologies](#key-technologies)
 - [Additional Documentation](#additional-documentation)
 - [Future Possibilities](#future-possibilities)
-- [Contributing](#contributing)
+- [How To Contribute](#how-to-contribute)
+- [Contributors](#contributors)
 
 ## **Quick Start Deployment on K3S**
 
@@ -578,10 +577,14 @@ This MVP lays the groundwork for further development:
 * 🖥️ **Jellyfin Plugin:** Integration as a Jellyfin plugin to have only one and easy-to-use front-end.  
 * 🔁 **Cross-Platform Sync** Export playlists to .m3u or sync to external platforms.
 
-## **Contributing**
+## **How To Contribute**
 
 Contributions, issues, and feature requests are welcome\!  
-This is an ALPHA early release, so expect bugs or functions that are still not implemented.
+This is a BETA early release, so expect bugs or functions that are still not implemented.
+
+
+**Important:** From v.0.3.1-beta **GIT LARGE FILE** is **not** used anymore. Model was moved as an attachment of the specific release:
+* https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v1.0.0-model
 
 If you want to clone this repository remember that **GIT LARGE FILE** is used for the essentia-tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
 
@@ -596,3 +599,7 @@ git lfs install
 git lfs track "*.pb"
 git add .gitattributes
 ```
+## Contributors
+Really thanks to all the contributors of this project, for developing, testing and giving suggestions on new feature:
+
+- [@NovaCyntax](https://github.com/NovaCyntax) — Testing and new feature suggestions
