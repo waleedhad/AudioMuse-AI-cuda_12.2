@@ -25,7 +25,7 @@ from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
 # Import necessary components from the main app.py file (ensure these are available)
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
-                track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus,
+                track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus, # Removed save_track_embedding from top
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
                 TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
 
@@ -189,8 +189,8 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
         "energy": float(average_energy_per_sample), # Store average energy per sample
         **other_predictions  # Include danceable, aggressive, etc. directly
     }
-
-    return all_predictions
+    # Return the predictions dictionary and the embeddings numpy array as a tuple
+    return all_predictions, musicnn_embeddings
 
 # --- RQ Task Definitions ---
 
@@ -201,10 +201,12 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
+        from app import save_track_embedding # Import here
         initial_details = {"album_name": album_name, "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Album analysis task started."]}
         save_task_status(current_task_id, "album_analysis", TASK_STATUS_STARTED, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=0, details=initial_details)
         headers = {"X-Emby-Token": jellyfin_token}
         tracks_analyzed_count = 0
+        tracks_skipped_count = 0
         current_progress_val = 0
         # Accumulate logs here for the current task
         current_task_logs = initial_details["log"]
@@ -292,8 +294,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     current_track_analysis_details=None)
 
                 if track_exists(item['Id']):
-                    log_and_update_album_task(f"Skipping '{track_name_full}' (already analyzed)", current_progress_val, current_track_name=track_name_full)
-                    tracks_analyzed_count +=1
+                    log_and_update_album_task(f"Skipping '{track_name_full}' (already fully analyzed with embedding)", current_progress_val, current_track_name=track_name_full)
+                    tracks_skipped_count +=1
                     continue
 
                 path = download_track(jellyfin_url, headers, TEMP_DIR, item)
@@ -303,7 +305,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     continue
 
                 try:
-                    analysis_results = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
+                    # analyze_track now returns two values: results dict and the embedding
+                    analysis_results, track_embedding = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
                     tempo = analysis_results.get("tempo", 0.0)
                     key = analysis_results.get("key", "")
                     scale = analysis_results.get("scale", "")
@@ -332,6 +335,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     }
                     # Save only the top_n_moods
                     save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_moods_to_save_dict, energy=energy, other_features=other_features_str)
+                    # Save the embedding
+                    save_track_embedding(item['Id'], track_embedding)
                     tracks_analyzed_count += 1
 
                     # For logging, we already have the top_moods_to_save_dict
@@ -359,12 +364,13 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
 
             success_summary = {
                 "tracks_analyzed": tracks_analyzed_count,
+                "tracks_skipped": tracks_skipped_count,
                 "total_tracks_in_album": total_tracks_in_album,
                 "message": f"Album '{album_name}' analysis complete."
             }
-            log_and_update_album_task(f"Album '{album_name}' analysis complete. Analyzed {tracks_analyzed_count}/{total_tracks_in_album} tracks.",
+            log_and_update_album_task(f"Album '{album_name}' analysis complete. Analyzed {tracks_analyzed_count}, Skipped {tracks_skipped_count} (out of {total_tracks_in_album} total).",
                                       100, task_state=TASK_STATUS_SUCCESS, final_summary_details=success_summary)
-            return {"status": "SUCCESS", "message": f"Album '{album_name}' analysis complete.", "tracks_analyzed": tracks_analyzed_count, "total_tracks": total_tracks_in_album}
+            return {"status": "SUCCESS", "message": f"Album '{album_name}' analysis complete.", "tracks_analyzed": tracks_analyzed_count, "tracks_skipped": tracks_skipped_count, "total_tracks": total_tracks_in_album}
         except Exception as e:
             error_tb = traceback.format_exc()
             failure_details = {"error": str(e), "traceback": error_tb, "album_name": album_name}
@@ -606,6 +612,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             final_summary_for_db = {
                 "successful_albums": successful_albums,
                 "failed_albums": failed_albums,
+            # total_tracks_analyzed_all_albums will now reflect only newly/re-analyzed tracks
                 "total_tracks_analyzed": total_tracks_analyzed_all_albums
             }
             final_message = f"Main analysis complete. Successful albums: {successful_albums}, Failed albums: {failed_albums}. Total tracks analyzed: {total_tracks_analyzed_all_albums}."

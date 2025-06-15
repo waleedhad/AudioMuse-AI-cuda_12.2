@@ -4,6 +4,7 @@ from psycopg2.extras import DictCursor
 from flask import Flask, jsonify, request, render_template, g
 from contextlib import closing
 import json
+import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
 
 # RQ imports
@@ -137,6 +138,14 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS embedding (
+            item_id TEXT PRIMARY KEY,
+            embedding_vector JSONB,
+            FOREIGN KEY (item_id) REFERENCES score (item_id) ON DELETE CASCADE
+        )
+    """)
+    app.logger.info("Database tables checked/created successfully.")
     db.commit()
     cur.close()
 
@@ -255,14 +264,24 @@ def get_task_info_from_db(task_id):
 def track_exists(item_id):
     """
     Checks if a track exists in the database AND has been analyzed for key features.
-    Returns True if the track exists and 'other_features' (not NULL, not empty),
-    'energy' (not NULL), 'mood_vector' (not NULL, not empty), and 'tempo' (not NULL)
-    are all populated. Returns False otherwise.
+    in both the 'score' and 'embedding' tables.
+    Returns True if:
+    1. The track exists in 'score' table and 'other_features', 'energy', 'mood_vector', and 'tempo' are populated.
+    2. The track exists in the 'embedding' table.
+    Returns False otherwise, indicating a re-analysis is needed.
     """
     conn = get_db()
     cur = conn.cursor()
-    # Check if the track exists and if key analysis fields are populated
-    cur.execute("SELECT item_id FROM score WHERE item_id = %s AND other_features IS NOT NULL AND other_features != '' AND energy IS NOT NULL AND mood_vector IS NOT NULL AND mood_vector != '' AND tempo IS NOT NULL", (item_id,))
+    cur.execute("""
+        SELECT s.item_id
+        FROM score s
+        JOIN embedding e ON s.item_id = e.item_id
+        WHERE s.item_id = %s
+          AND s.other_features IS NOT NULL AND s.other_features != ''
+          AND s.energy IS NOT NULL
+          AND s.mood_vector IS NOT NULL AND s.mood_vector != ''
+          AND s.tempo IS NOT NULL
+    """, (item_id,))
     row = cur.fetchone()
     cur.close()
     return row is not None
@@ -290,6 +309,29 @@ def save_track_analysis(item_id, title, author, tempo, key, scale, moods, energy
     except Exception as e:
         conn.rollback()
         print(f"Error saving track analysis for {item_id}: {e}")
+    finally:
+        cur.close()
+
+def save_track_embedding(item_id, embedding_vector):
+    """Saves or updates the embedding vector for a track."""
+    if embedding_vector is None: # Should not happen if analysis is successful
+        print(f"Warning: Embedding vector for {item_id} is None. Skipping save.")
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        # Convert numpy array to list for JSON serialization
+        embedding_list = embedding_vector.tolist() if isinstance(embedding_vector, np.ndarray) else embedding_vector
+        embedding_json = json.dumps(embedding_list)
+        cur.execute("""
+            INSERT INTO embedding (item_id, embedding_vector) VALUES (%s, %s)
+            ON CONFLICT (item_id) DO UPDATE SET embedding_vector = EXCLUDED.embedding_vector
+        """, (item_id, embedding_json))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Error saving track embedding for {item_id}: {e}")
     finally:
         cur.close()
 
