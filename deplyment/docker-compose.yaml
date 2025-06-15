@@ -28,7 +28,7 @@ services:
 
   # AudioMuse-AI Flask application service
   audiomuse-ai-flask:
-    image: ghcr.io/neptunehub/audiomuse-ai:0.3.2-beta # Reflects deployment.yaml
+    image: ghcr.io/neptunehub/audiomuse-ai:0.3.3-beta # Reflects deployment.yaml
     container_name: audiomuse-ai-flask-app
     ports:
       - "8000:8000" # Map host port 8000 to container port 8000
@@ -55,7 +55,7 @@ services:
 
   # AudioMuse-AI RQ Worker service
   audiomuse-ai-worker:
-    image: ghcr.io/neptunehub/audiomuse-ai:0.3.2-beta # Reflects deployment.yaml
+    image: ghcr.io/neptunehub/audiomuse-ai:0.3.3-beta # Reflects deployment.yaml
     container_name: audiomuse-ai-worker-instance
     environment:
       SERVICE_TYPE: "worker" # Tells the container to run the RQ worker
