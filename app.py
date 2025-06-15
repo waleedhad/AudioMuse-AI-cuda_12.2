@@ -47,7 +47,7 @@ redis_conn = Redis.from_url(
     socket_connect_timeout=15,  # seconds to wait for connection
     socket_timeout=15           # seconds for read/write operations
 )
-rq_queue = Qsueue(connection=redis_conn)  # Default queue
+rq_queue = Queue(connection=redis_conn)  # Default queue
 
 # --- Database Setup (PostgreSQL) ---
 # DATABASE_URL is now imported from config.py
