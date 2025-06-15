@@ -204,20 +204,15 @@ def chat_playlist_api():
     - Always SELECT: item_id, title, author
     - Final outer SELECT must apply: ORDER BY random(), LIMIT 25 (unless the user asks for ordered top/best/famous results).
 
-    WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS:
-    - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles for 2024-2025.
-    - Include at least 10 well-matched song titles based on your knowledge of what’s trending.
-    - You can add artist ILIKE as a fallback, but the focus is on specific hit titles.
-
-    UNION / MULTI-SELECT LOGIC:
-    - If multiple groups of titles/artists/moods are needed, combine them using UNION ALL.
-    - Wrap each SELECT in parentheses (no alias per SELECT inside UNION ALL).
-    - Wrap the full UNION ALL in FROM (...) AS combined_results.
-    - Apply ORDER BY random(), LIMIT 25 in the outer SELECT unless otherwise specified.
+    WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS / FILM SONGS:
+    - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles.
+    - Include 100 well-matched song titles and author based on your knowledge.
+    - You need to add both title and artist ILIKE.
 
     AUTHOR / TITLE FILTERING:
     - Title matches: use title IN ('song1', 'song2', ...) where possible, or CASE WHEN for ordering.
     - Artist matches: use author ILIKE '%Artist%' patterns for secondary support.
+    - Title and Artis matches: when both title and artist are avaiable, ALWAYS using an AND clause WHERE (title = 'Song Title' AND author ILIKE '%Artist Name%')
     - For mood_vector or other_features filtering, use CAST + regex where necessary.
 
     MOOD / FEATURE FILTERING:

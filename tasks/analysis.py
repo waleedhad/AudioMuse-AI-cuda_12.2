@@ -39,7 +39,8 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,  # type: ignore
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, # type: ignore
+    MAX_QUEUED_ANALYSIS_JOBS, # New config for limiting queued analysis jobs
     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
     LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
     STRATIFIED_SAMPLING_TARGET_PERCENTILE, # Import new config
@@ -429,28 +430,19 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             log_and_update_main_analysis(f"Found {total_albums} albums to process.", 5, {"albums_found": total_albums, "album_tasks_ids": []})
             album_jobs = []
             album_job_ids = []
+            active_album_jobs_map = {}
             from app import rq_queue as main_rq_queue
+            
+            albums_to_process_queue = list(albums) # Create a queue of albums to process
+            print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Initial albums_to_process_queue size: {len(albums_to_process_queue)}")
+            albums_launched_count = 0
+            albums_completed_count = 0
 
-            for album_idx, album in enumerate(albums):
-                sub_task_id = str(uuid.uuid4())
-                save_task_status(sub_task_id, "album_analysis", "PENDING", parent_task_id=current_task_id, sub_type_identifier=album['Id'], details={"album_name": album['Name']})
-                job = main_rq_queue.enqueue(
-                    analyze_album_task,
-                    args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
-                    job_id=sub_task_id,
-                    description=f"Analyzing album: {album['Name']}",
-                    job_timeout=-1, # Set timeout for album analysis
-                    meta={'parent_task_id': current_task_id}
-                )
-                album_jobs.append(job)
-                album_job_ids.append(job.id)
-
-            log_and_update_main_analysis(f"Launched {total_albums} album analysis tasks.", 10, {"album_task_ids": album_job_ids})
-
-            while True:
+            while albums_completed_count < total_albums:
                 # === Cooperative Cancellation Check for Main Analysis Task ===
                 if current_job: # Check if running as an RQ job
                     with app.app_context(): # Ensure DB access
+                        # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Checking for cooperative cancellation.")
                     # Check self status first
                         main_task_db_info = get_task_info_from_db(current_task_id)
                         if main_task_db_info and main_task_db_info.get('status') == TASK_STATUS_REVOKED:
@@ -471,19 +463,20 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                             clean_temp(TEMP_DIR)
                             return {"status": "REVOKED", "message": "Main analysis task was revoked."}
                 # === End Cooperative Cancellation Check ===
-                completed_count = 0
 
-                all_done = True
-
-                for job_instance in album_jobs:
+                # Check status of active jobs and remove completed ones
+                completed_in_this_cycle_ids = []
+                # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Checking {len(active_album_jobs_map)} active jobs.")
+                for job_id_active, job_instance_active in list(active_album_jobs_map.items()): # Iterate over a copy
                     try:
                         is_child_completed = False
 
                         try:
-                            job_instance.refresh() # Get latest status from Redis
-                            child_status_rq = job_instance.get_status()
+                            job_instance_active.refresh() # Get latest status from Redis
+                            child_status_rq = job_instance_active.get_status()
+                            # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Job {job_id_active} RQ status: {child_status_rq}")
 
-                            if job_instance.is_finished or job_instance.is_failed or child_status_rq == JobStatus.CANCELED:
+                            if job_instance_active.is_finished or job_instance_active.is_failed or child_status_rq == JobStatus.CANCELED:
                                 is_child_completed = True
                             else: # Still active in RQ
                                 pass # Child is active, all_done will be set to False later
@@ -491,40 +484,68 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                         except NoSuchJobError:
                             #print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} not found in Redis. Checking DB.")
                             with app.app_context(): # Ensure DB context
-                                db_task_info = get_task_info_from_db(job_instance.id)
+                                db_task_info = get_task_info_from_db(job_id_active)
 
+                            # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Job {job_id_active} not in RQ. DB info: {db_task_info}")
                             if db_task_info:
                                 db_status = db_task_info.get('status')
                                 if db_status in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FINISHED, JobStatus.FAILED]:
                                     is_child_completed = True
                                     if db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
-                                        print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_instance.id} (from DB) has status: {db_status}.")
+                                        print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_id_active} (from DB) has status: {db_status}.")
                                     # If SUCCESS/FINISHED, it's completed, no special print needed here.
                                 else:
-                                    print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_instance.id} (from DB) has non-terminal status '{db_status}' but missing from RQ. Treating as completed.")
+                                    print(f"[MainAnalysisTask-{current_task_id}] Warning: Child job {job_id_active} (from DB) has non-terminal status '{db_status}' but missing from RQ. Treating as completed.")
                                     is_child_completed = True
                             else:
-                                print(f"[MainAnalysisTask-{current_task_id}] CRITICAL: Child job {job_instance.id} not found in Redis or DB. Treating as completed.")
+                                print(f"[MainAnalysisTask-{current_task_id}] CRITICAL: Child job {job_id_active} not found in Redis or DB. Treating as completed.")
                                 is_child_completed = True
 
                         if is_child_completed:
-                            completed_count += 1
-                        else:
-                            all_done = False
+                            completed_in_this_cycle_ids.append(job_id_active)
+                            albums_completed_count += 1
                     except Exception as e_monitor_child:
-                        job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
-                        print(f"[MainAnalysisTask-{current_task_id}] ERROR monitoring child job {job_id_for_error}: {e_monitor_child}. Treating as completed to avoid hanging.")
+                        print(f"[MainAnalysisTask-{current_task_id}] ERROR monitoring child job {job_id_active}: {e_monitor_child}. Treating as completed to avoid hanging.")
                         traceback.print_exc()
-                        completed_count += 1 # Ensure progress
-                        # This job will likely be counted as 'failed' in the final tally or be missing its results.
+                        completed_in_this_cycle_ids.append(job_id_active) # Remove from active map
+                        albums_completed_count += 1 # Ensure progress
+                
+                for j_id in completed_in_this_cycle_ids:
+                    if j_id in active_album_jobs_map:
+                        # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Removing completed job {j_id} from active map.")
+                        del active_album_jobs_map[j_id]
 
-                status_message_for_log = f"Processing albums: {completed_count}/{total_albums} completed."
-                progress_while_waiting = 10 + int(80 * (completed_count / float(total_albums))) if total_albums > 0 else 10
+                # Enqueue new jobs if slots are available and albums are pending
+                # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Checking to enqueue new jobs. Active: {len(active_album_jobs_map)}, Max Queued: {MAX_QUEUED_ANALYSIS_JOBS}, Albums in queue: {len(albums_to_process_queue)}")
+                while len(active_album_jobs_map) < MAX_QUEUED_ANALYSIS_JOBS and albums_to_process_queue:
+                    album = albums_to_process_queue.pop(0) # Get next album
+                    # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Enqueuing job for album: {album.get('Name')}")
+                    sub_task_id = str(uuid.uuid4())
+                    save_task_status(sub_task_id, "album_analysis", "PENDING", parent_task_id=current_task_id, sub_type_identifier=album['Id'], details={"album_name": album['Name']})
+                    job = main_rq_queue.enqueue(
+                        analyze_album_task,
+                        args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
+                        job_id=sub_task_id,
+                        description=f"Analyzing album: {album['Name']}",
+                        job_timeout=-1, 
+                        meta={'parent_task_id': current_task_id}
+                    )
+                    album_jobs.append(job) # Keep original list for final summary
+                    album_job_ids.append(job.id) # Keep original list for final summary
+                    active_album_jobs_map[job.id] = job
+                    albums_launched_count += 1
+
+                status_message_for_log = f"Albums launched: {albums_launched_count}/{total_albums}. Completed: {albums_completed_count}/{total_albums}. Active/Queued: {len(active_album_jobs_map)}."
+                progress_while_waiting = 10 + int(80 * (albums_completed_count / float(total_albums))) if total_albums > 0 else 10
                 log_and_update_main_analysis(
                     status_message_for_log,
                     progress_while_waiting,
-                    {"albums_completed": completed_count, "total_albums": total_albums})
-                if all_done: break
+                    {"albums_completed": albums_completed_count, "albums_launched": albums_launched_count, "total_albums": total_albums})
+                
+                # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: End of main while loop iteration. albums_completed_count: {albums_completed_count}, total_albums: {total_albums}, len(active_album_jobs_map): {len(active_album_jobs_map)}")
+                if albums_completed_count >= total_albums and not active_album_jobs_map: # All completed and active map empty
+                    print(f"[MainAnalysisTask-{current_task_id}] DEBUG: All albums processed and active map empty. Breaking main loop.")
+                    break
                 time.sleep(5)
             successful_albums = 0
             failed_albums = 0
