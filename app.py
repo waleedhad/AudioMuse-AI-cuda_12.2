@@ -25,7 +25,7 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, \
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
-    DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
+    DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
     AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
 
@@ -47,7 +47,7 @@ redis_conn = Redis.from_url(
     socket_connect_timeout=15,  # seconds to wait for connection
     socket_timeout=15           # seconds for read/write operations
 )
-rq_queue = Queue(connection=redis_conn)  # Default queue
+rq_queue = Qsueue(connection=redis_conn)  # Default queue
 
 # --- Database Setup (PostgreSQL) ---
 # DATABASE_URL is now imported from config.py
@@ -338,7 +338,12 @@ def save_track_embedding(item_id, embedding_vector):
 def get_all_tracks(): # Removed db_path
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT item_id, title, author, tempo, key, scale, mood_vector, energy, other_features FROM score") # Added energy and other_features
+    # Join with embedding table to get embedding_vector
+    cur.execute("""
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding_vector
+        FROM score s
+        LEFT JOIN embedding e ON s.item_id = e.item_id
+    """)
     rows = cur.fetchall() # Returns list of DictRow
     cur.close()
     return rows
@@ -629,6 +634,10 @@ def start_clustering_endpoint():
                 type: integer
                 description: Number of top moods to consider for clustering feature vectors (uses the first N from global MOOD_LABELS).
                 default: "Configured TOP_N_MOODS"
+              enable_clustering_embeddings:
+                type: boolean
+                description: Whether to use embeddings for clustering (True) or score_vector (False).
+                default: "Configured ENABLE_CLUSTERING_EMBEDDINGS"
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -718,6 +727,7 @@ def start_clustering_endpoint():
     gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
     gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
     top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS)) # New parameter for clustering
+    enable_clustering_embeddings_param = data.get('enable_clustering_embeddings', ENABLE_CLUSTERING_EMBEDDINGS) # Get new flag
     job_id = str(uuid.uuid4())
 
     # Clean up details of previously successful tasks before starting a new one
@@ -740,7 +750,8 @@ def start_clustering_endpoint():
             score_weight_other_feature_purity_val,
             # Pass AI params and new top_n_moods for clustering
             ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param,
-            top_n_moods_for_clustering # Pass to the task
+            top_n_moods_for_clustering, # Pass to the task
+            enable_clustering_embeddings_param # Pass new flag
         ),
         job_id=job_id,
         description="Main Music Clustering",
@@ -1270,7 +1281,7 @@ def get_config_endpoint():
         "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
         "gemini_api_key": GEMINI_API_KEY, "gemini_model_name": GEMINI_MODEL_NAME,
         "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, "clustering_runs": CLUSTERING_RUNS,
-        # Scoring weights
+        "enable_clustering_embeddings": ENABLE_CLUSTERING_EMBEDDINGS, # Expose new flag
         "score_weight_diversity": SCORE_WEIGHT_DIVERSITY,
         "score_weight_silhouette": SCORE_WEIGHT_SILHOUETTE,
         "score_weight_davies_bouldin": SCORE_WEIGHT_DAVIES_BOULDIN,

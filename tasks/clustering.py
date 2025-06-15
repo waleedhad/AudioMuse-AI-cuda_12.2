@@ -39,7 +39,7 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS,  # type: ignore
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, ENABLE_CLUSTERING_EMBEDDINGS,  # type: ignore
     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
     LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
     STRATIFIED_SAMPLING_TARGET_PERCENTILE, # Import new config
@@ -295,6 +295,7 @@ def _perform_single_clustering_iteration(
     score_weight_purity_override=None,
     score_weight_other_feature_diversity_override=None, # Added missing parameter
     score_weight_other_feature_purity_override=None): # Added missing parameter
+    # enable_clustering_embeddings_param will be added here by the caller (run_clustering_batch_task)
     """
     Internal helper to perform a single clustering iteration. Not an RQ task.
     Receives a subset of track data (rows) for clustering.
@@ -314,6 +315,10 @@ def _perform_single_clustering_iteration(
     `exploitation_probability`: Chance to use an elite solution for parameter generation.
     `mutation_config`: Dict with mutation strengths, e.g., {"int_abs_delta": 2, "float_abs_delta": 0.05}.
     """
+    # This function will now be called with an additional `enable_clustering_embeddings_param`
+    # For clarity, let's assume it's passed as the last argument or via kwargs.
+    # We'll access it from the function's local scope where it's passed.
+    # The signature will be updated in run_clustering_batch_task's call.
     try:
         elite_solutions_params_list = elite_solutions_params_list or []
         mutation_config = mutation_config or {"int_abs_delta": MUTATION_INT_ABS_DELTA, "float_abs_delta": MUTATION_FLOAT_ABS_DELTA, "coord_mutation_fraction": MUTATION_KMEANS_COORD_FRACTION}
@@ -330,18 +335,66 @@ def _perform_single_clustering_iteration(
         current_score_weight_other_feature_purity = score_weight_other_feature_purity_override if score_weight_other_feature_purity_override is not None else SCORE_WEIGHT_OTHER_FEATURE_PURITY # Now uses defined param
 
         # --- Data Preparation ---
-        # X_original is now derived from the passed data_subset_for_clustering
-        X_original = np.array([score_vector(row, active_mood_labels, OTHER_FEATURE_LABELS) for row in data_subset_for_clustering])
-        if X_original.shape[0] == 0:
+        # data_subset_for_clustering contains full track data, including 'embedding_vector'
+
+        # 1. Prepare original feature vectors (X_feat_orig) - ALWAYS needed for naming, purity, diversity
+        X_feat_orig_list = []
+        # If ENABLE_CLUSTERING_EMBEDDINGS is True, also prepare embedding vectors
+        X_embed_raw_list = []
+        valid_tracks_for_processing = [] # Store the actual track row if both are valid
+
+        for row_idx, track_row_data in enumerate(data_subset_for_clustering):
+            try:
+                feature_vec = score_vector(track_row_data, active_mood_labels, OTHER_FEATURE_LABELS)
+
+                if ENABLE_CLUSTERING_EMBEDDINGS: # Passed as a global from config, or as a param
+                    # Ensure embedding_vector is a string and valid JSON before parsing
+                    if isinstance(track_row_data.get('embedding_vector'), str) and track_row_data['embedding_vector'].strip():
+                        embedding_vec = np.array(json.loads(track_row_data['embedding_vector']))
+                        X_embed_raw_list.append(embedding_vec)
+                        # If using embeddings, this track is valid for processing if it has both
+                        X_feat_orig_list.append(feature_vec) # Add feature_vec only if embedding is also valid and used
+                        valid_tracks_for_processing.append(track_row_data)
+                    # else: skip track if embedding is missing/invalid AND we need it
+                else: # Not using embeddings for clustering, only feature_vec is needed
+                    X_feat_orig_list.append(feature_vec)
+                    valid_tracks_for_processing.append(track_row_data) # Track is valid with just features
+
+            except (json.JSONDecodeError, TypeError) as e:
+                print(f"{log_prefix} Iteration {run_idx}: Skipping track due to data parsing error: {e} for track data: {track_row_data.get('item_id', 'Unknown ID')}")
+                continue
+
+        if not valid_tracks_for_processing:
             print(f"{log_prefix} Iteration {run_idx}: No data in subset to cluster.")
-            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}} # Add scaler_details
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
 
-        # Standardize the data
-        scaler = StandardScaler()
-        X_standardized = scaler.fit_transform(X_original)
-        scaler_details = {"mean": scaler.mean_.tolist(), "scale": scaler.scale_.tolist()}
+        X_feat_orig = np.array(X_feat_orig_list)
 
-        data_for_clustering_current = X_standardized # Default if PCA is off or fails
+        # scaler_details_for_run will now depend on what data is being scaled
+        scaler_details_for_run = None
+        X_to_cluster_standardized = None
+
+        if ENABLE_CLUSTERING_EMBEDDINGS:
+            if not X_embed_raw_list: # Should be caught by valid_tracks_for_processing check earlier
+                print(f"{log_prefix} Iteration {run_idx}: No embedding data available for clustering (and embeddings are enabled).")
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
+            X_embed_raw = np.array(X_embed_raw_list)
+            scaler_embed = StandardScaler()
+            X_to_cluster_standardized = scaler_embed.fit_transform(X_embed_raw)
+            scaler_details_for_run = {"mean": scaler_embed.mean_.tolist(), "scale": scaler_embed.scale_.tolist(), "type": "embedding"}
+        else: # Use original features for clustering
+            if X_feat_orig.shape[0] == 0:
+                print(f"{log_prefix} Iteration {run_idx}: No feature data available for clustering (and embeddings are disabled).")
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
+            scaler_feat = StandardScaler()
+            X_to_cluster_standardized = scaler_feat.fit_transform(X_feat_orig) # Scale the original features
+            scaler_details_for_run = {"mean": scaler_feat.mean_.tolist(), "scale": scaler_feat.scale_.tolist(), "type": "feature"}
+
+        if X_to_cluster_standardized is None or X_to_cluster_standardized.shape[0] == 0:
+            print(f"{log_prefix} Iteration {run_idx}: Data for clustering is empty after preparation.")
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {}}
+
+        data_for_clustering_current = X_to_cluster_standardized # Default if PCA is off or fails
         pca_model_for_this_iteration = None
         # --- End Data Preparation ---
 
@@ -376,24 +429,24 @@ def _perform_single_clustering_iteration(
                         mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA)
                     )
                     # Max PCA components also limited by number of features in X_standardized and number of samples
-                    max_pca_by_features = X_standardized.shape[1]
-                    max_pca_by_samples = (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1
+                    max_pca_by_features = X_to_cluster_standardized.shape[1]
+                    max_pca_by_samples = (X_to_cluster_standardized.shape[0] - 1) if X_to_cluster_standardized.shape[0] > 1 else 1
 
                     max_allowable_pca_mutated = min(mutated_pca_comps, max_pca_by_features, max_pca_by_samples)
                     max_allowable_pca_mutated = max(0, max_allowable_pca_mutated) # Ensure not negative
                     temp_pca_config = {"enabled": max_allowable_pca_mutated > 0, "components": max_allowable_pca_mutated}
 
                     # 2. Apply this new PCA config to get data for this iteration
-                    if temp_pca_config["enabled"]:
+                    if temp_pca_config["enabled"] and temp_pca_config["components"] > 0:
                         if temp_pca_config["components"] > 0:
                             pca_model_for_this_iteration = PCA(n_components=temp_pca_config["components"])
-                            data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
+                            data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_to_cluster_standardized)
                             temp_pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual components used
                         else: # Components somehow became 0
                             temp_pca_config["enabled"] = False
-                            data_for_clustering_current = X_standardized # Fallback
+                            data_for_clustering_current = X_to_cluster_standardized # Fallback
                     else:
-                        data_for_clustering_current = X_standardized # PCA not enabled
+                        data_for_clustering_current = X_to_cluster_standardized # PCA not enabled or components became 0
 
                     # 3. Mutate clustering method parameters (e.g., n_clusters)
                     #    This must happen AFTER PCA, as n_clusters can depend on data_for_clustering_current.shape[0]
@@ -458,23 +511,23 @@ def _perform_single_clustering_iteration(
             # print(f"{log_prefix} Iteration {run_idx}: Using random parameters.")
             # Original random parameter generation # pragma: no cover
             sampled_pca_components_rand = random.randint(pca_params_ranges["components_min"], pca_params_ranges["components_max"])
-            # Max PCA components also limited by number of features in X_standardized and number of samples
-            max_allowable_pca_rand = min(sampled_pca_components_rand, X_standardized.shape[1], (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1)
+            # Max PCA components also limited by number of features in X_to_cluster_standardized and number of samples
+            max_allowable_pca_rand = min(sampled_pca_components_rand, X_to_cluster_standardized.shape[1], (X_to_cluster_standardized.shape[0] - 1) if X_to_cluster_standardized.shape[0] > 1 else 1)
             max_allowable_pca_rand = max(0, max_allowable_pca_rand) # Ensure not negative
             pca_config = {"enabled": max_allowable_pca_rand > 0, "components": max_allowable_pca_rand}
 
             # Apply PCA for random generation path to get data_for_clustering_current
-            if pca_config["enabled"]:
-                n_comps_rand = min(pca_config["components"], X_standardized.shape[1], (X_standardized.shape[0] - 1) if X_standardized.shape[0] > 1 else 1)
+            if pca_config["enabled"] and pca_config["components"] > 0:
+                n_comps_rand = min(pca_config["components"], X_to_cluster_standardized.shape[1], (X_to_cluster_standardized.shape[0] - 1) if X_to_cluster_standardized.shape[0] > 1 else 1)
                 if n_comps_rand > 0:
                     pca_model_for_this_iteration = PCA(n_components=n_comps_rand)
-                    data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
+                    data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_to_cluster_standardized)
                     pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
                 else:
                     pca_config["enabled"] = False
-                    data_for_clustering_current = X_standardized
+                    data_for_clustering_current = X_to_cluster_standardized
             else:
-                data_for_clustering_current = X_standardized
+                data_for_clustering_current = X_to_cluster_standardized
 
             max_clusters_or_components_rand = data_for_clustering_current.shape[0]
             if max_clusters_or_components_rand == 0: # No data points after PCA
@@ -505,7 +558,7 @@ def _perform_single_clustering_iteration(
             # Re-create PCA model and transform data if it wasn't done in the mutation path
             try:
                 pca_model_for_this_iteration = PCA(n_components=pca_config["components"])
-                data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_standardized)
+                data_for_clustering_current = pca_model_for_this_iteration.fit_transform(X_to_cluster_standardized)
                 pca_config["components"] = pca_model_for_this_iteration.n_components_ # Update with actual
             except Exception as e_refit_pca:
                  print(f"{log_prefix} Iteration {run_idx}: Error re-fitting PCA: {e_refit_pca}. Disabling PCA for this run.") # pragma: no cover
@@ -513,7 +566,7 @@ def _perform_single_clustering_iteration(
                  pca_config["enabled"] = False
                  pca_config["components"] = 0
                  pca_model_for_this_iteration = None
-                 data_for_clustering_current = X_standardized # Fallback to standardized data
+                 data_for_clustering_current = X_to_cluster_standardized # Fallback to standardized data (either features or embeddings)
 
 
         if not method_params_config or pca_config is None:
@@ -621,12 +674,14 @@ def _perform_single_clustering_iteration(
 
         if labels is None or len(set(labels) - {-1}) == 0:
             # print(f"{log_prefix} Iteration {run_idx}: No valid clusters found.")
-            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}} # Add scaler_details
+            return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
         max_dist = raw_distances.max()
         normalized_distances = raw_distances / max_dist if max_dist > 0 else raw_distances
-        # track_info_list now uses data_subset_for_clustering
-        track_info_list = [{"row": data_subset_for_clustering[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(data_subset_for_clustering))]
+
+        # track_info_list now uses valid_tracks_for_processing (which have embeddings and features)
+        # and maps to the labels obtained from clustering on embeddings.
+        track_info_list = [{"row": valid_tracks_for_processing[i], "label": labels[i], "distance": normalized_distances[i]} for i in range(len(valid_tracks_for_processing))]
 
         filtered_clusters = defaultdict(list)
         for cid in set(labels):
@@ -656,11 +711,31 @@ def _perform_single_clustering_iteration(
         unique_predominant_other_feature_scores = {} # New: For other feature diversity
 
         for label_val, songs_list in filtered_clusters.items():
-            if songs_list:
-                center_val = cluster_centers_map.get(label_val)
-                if center_val is None or len(center_val) == 0: continue # Ensure centroid exists and is not empty
-                # Pass scaler_details to name_cluster
-                name, top_scores = name_cluster(center_val, pca_model_for_this_iteration, pca_config["enabled"], active_mood_labels, scaler_details)
+            if songs_list: # songs_list is list of (item_id, title, author)
+                if ENABLE_CLUSTERING_EMBEDDINGS:
+                    # Calculate the mean *original feature vector* for songs in this cluster
+                    item_id_to_feat_orig_idx_map = {track_data['item_id']: i for i, track_data in enumerate(valid_tracks_for_processing)}
+                    song_feat_vectors_in_cluster = []
+                    for item_id_in_song, _, _ in songs_list:
+                        feat_orig_idx = item_id_to_feat_orig_idx_map.get(item_id_in_song)
+                        if feat_orig_idx is not None:
+                            song_feat_vectors_in_cluster.append(X_feat_orig[feat_orig_idx])
+
+                    if not song_feat_vectors_in_cluster:
+                        continue
+                    mean_original_feature_vector = np.mean(song_feat_vectors_in_cluster, axis=0)
+                    # Call name_cluster with the mean_original_feature_vector. No PCA/scaler details needed for this call.
+                    name, top_scores = name_cluster(mean_original_feature_vector, None, False, active_mood_labels, None)
+                else: # Clustering was done on original features
+                    # centroid_val is from cluster_centers_map, which contains centroids in the
+                    # (potentially PCA'd and scaled) original feature space.
+                    centroid_val = cluster_centers_map.get(label_val)
+                    if centroid_val is None or len(centroid_val) == 0:
+                        continue
+                    # Pass the actual pca_model_for_this_iteration and scaler_details_for_run (which are for features)
+                    name, top_scores = name_cluster(centroid_val, pca_model_for_this_iteration, pca_config["enabled"], active_mood_labels, scaler_details_for_run)
+
+
                 if top_scores and any(mood in active_mood_labels for mood in top_scores.keys()):
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
                     if predominant_mood_key:
@@ -729,8 +804,8 @@ def _perform_single_clustering_iteration(
         # Mood Purity Score (raw_playlist_purity_component -> playlist_purity_component after LN and scaling)
         raw_playlist_purity_component = 0.0
         all_individual_playlist_purities = []
-        # item_id_to_song_index_map must now refer to the current data_subset_for_clustering
-        item_id_to_song_index_map = {row['item_id']: i for i, row in enumerate(data_subset_for_clustering)}
+        # item_id_to_song_index_map maps item_id to its index in X_feat_orig (and valid_tracks_for_processing)
+        item_id_to_song_index_map = {track_data['item_id']: i for i, track_data in enumerate(valid_tracks_for_processing)}
 
         if current_named_playlists:
             for playlist_name_key, songs_in_playlist_info_list in current_named_playlists.items():
@@ -930,8 +1005,8 @@ def _perform_single_clustering_iteration(
             "diversity_score": float(final_enhanced_score), # Use the new enhanced score
             "named_playlists": dict(current_named_playlists),
             "playlist_centroids": current_playlist_centroids,
-            "pca_model_details": pca_model_details,
-            "scaler_details": scaler_details, # Store scaler details here
+            "pca_model_details": pca_model_details, # PCA details for the space used for clustering
+            "scaler_details": scaler_details_for_run, # Scaler details for the space used for clustering
             "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}
         }
         return result
@@ -1075,7 +1150,8 @@ def run_clustering_batch_task(
     elite_solutions_params_list_json, # No default, will be passed positionally
     exploitation_probability,         # No default, will be passed positionally
     mutation_config_json,             # No default, will be passed positionally
-    initial_subset_track_ids_json     # No default, will be passed positionally
+    initial_subset_track_ids_json,    # No default, will be passed positionally
+    enable_clustering_embeddings_param # New flag
     ):
     """RQ task to run a batch of clustering iterations with stratified sampling."""
     current_job = get_current_job(redis_conn)
@@ -1218,7 +1294,8 @@ def run_clustering_batch_task(
                     score_weight_purity_override=score_weight_purity_param,
                     score_weight_other_feature_diversity_override=score_weight_other_feature_diversity_param, # Pass down Other Feature Diversity weight
                     score_weight_other_feature_purity_override=score_weight_other_feature_purity_param # Pass down Other Feature Purity weight
-                )
+                ) # The _perform_single_clustering_iteration will use the global ENABLE_CLUSTERING_EMBEDDINGS
+                  # or we need to pass enable_clustering_embeddings_param to it. Let's assume it uses the global for now.
                 iterations_actually_completed += 1 # Count even if result is None, as an attempt was made
 
                 if iteration_result and iteration_result.get("diversity_score", -1.0) > best_score_in_this_batch:
@@ -1256,7 +1333,8 @@ def run_clustering_task(
     score_weight_other_feature_diversity_param, # Added missing parameter
     score_weight_other_feature_purity_param,    # Added missing parameter
     score_weight_purity_param, # New score weight for Purity
-    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params
+    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, # AI params,
+    enable_clustering_embeddings_param, # New flag from API
     gemini_api_key_param, gemini_model_name_param, top_n_moods_for_clustering_param):
     """Main RQ task for clustering and playlist generation, including AI naming options."""
     current_job = get_current_job(redis_conn)
@@ -1286,6 +1364,7 @@ def run_clustering_task(
             "ai_model_provider_for_run": ai_model_provider_param,
             "ollama_model_name_for_run": ollama_model_name_param,
             "gemini_model_name_for_run": gemini_model_name_param,
+            "embeddings_enabled_for_clustering": enable_clustering_embeddings_param # Log the flag's value
         }
         save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
 
@@ -1329,20 +1408,35 @@ def run_clustering_task(
             # --- Assign AI Config from Parameters for this run ---
             ai_model_provider_for_run = ai_model_provider_param
             ollama_server_url_for_run = ollama_server_url_param
-            ollama_model_name_for_run = ollama_model_name_param
+            ollama_model_name_for_run = ollama_model_name_param # type: ignore
             gemini_api_key_for_run = gemini_api_key_param
             gemini_model_name_for_run = gemini_model_name_param
-
 
             log_and_update_main_clustering("📊 Starting main clustering process...", 0)
             rows = get_all_tracks()
 
             min_tracks_for_kmeans = num_clusters_min if clustering_method == "kmeans" else 2
             min_tracks_for_gmm = gmm_n_components_min if clustering_method == "gmm" else 2
-            min_req_overall = max(2, min_tracks_for_kmeans, min_tracks_for_gmm, (pca_components_min + 1) if pca_components_min > 0 else 2)
+            min_req_pca = (pca_components_min + 1) if pca_components_min > 0 else 2
+            min_req_overall = max(2, min_tracks_for_kmeans, min_tracks_for_gmm, min_req_pca)
 
-            if len(rows) < min_req_overall:
-                err_msg = f"Not enough analyzed tracks ({len(rows)}) for clustering. Minimum required: {min_req_overall}."
+            # If embeddings are enabled for clustering, we need tracks with embeddings.
+            # If not, we can proceed with tracks that have score data, even if embeddings are missing (though analysis.py tries to ensure they exist).
+            if enable_clustering_embeddings_param:
+                rows_with_embeddings = [row for row in rows if row.get('embedding_vector') and isinstance(row.get('embedding_vector'), str) and row.get('embedding_vector').strip()]
+                data_source_for_clustering_log = "embeddings"
+            else:
+                # If not using embeddings for clustering, all rows from get_all_tracks are potentially usable if they have score_vector components.
+                rows_with_embeddings = rows # Use all rows, _perform_single_clustering_iteration will use score_vector
+                data_source_for_clustering_log = "score vectors"
+
+            if not rows_with_embeddings:
+                err_msg = "No tracks with embeddings found. Cannot proceed with clustering."
+                log_and_update_main_clustering(err_msg, 100, details_to_add_or_update={"error": "No embeddings"}, task_state=TASK_STATUS_FAILURE)
+                return {"status": "FAILURE", "message": err_msg}
+
+            if len(rows_with_embeddings) < min_req_overall:
+                err_msg = f"Not enough tracks with embeddings ({len(rows_with_embeddings)}) for clustering. Minimum required: {min_req_overall}."
                 log_and_update_main_clustering(err_msg, 100, details_to_add_or_update={"error": "Insufficient data"}, task_state=TASK_STATUS_FAILURE)
                 return {"status": "FAILURE", "message": err_msg}
 
@@ -1358,7 +1452,7 @@ def run_clustering_task(
 
             # --- Stratified Sampling Preparation ---
             genre_to_full_track_data_map = defaultdict(list)
-            for row in rows:
+            for row in rows_with_embeddings: # Use only tracks that have embeddings
                 if 'mood_vector' in row and row['mood_vector']:
                     mood_scores = {}
                     for pair in row['mood_vector'].split(','):
@@ -1406,11 +1500,11 @@ def run_clustering_task(
             # If no stratified genres have enough songs, or total available is low, adjust target
             # Ensure target_songs_per_genre is not zero if there are any songs at all
             if target_songs_per_genre == 0 and len(rows) > 0:
-                target_songs_per_genre = 1 # At least one song per genre if possible
+                target_songs_per_genre = 1 # At least one song per genre if possible (using len(rows) as a proxy for any data existing)
             log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)
 
-            # Store the raw track data in a serializable format for passing to batch jobs
-            all_tracks_data_json = json.dumps([dict(row) for row in rows]) # This should be the original full data
+            # Store the filtered track data (with embeddings) for batch jobs
+            all_tracks_data_json = json.dumps([dict(row) for row in rows_with_embeddings])
             # Convert DictRow to dict for JSON serialization to prevent type errors in child tasks
             genre_to_full_track_data_map_serializable = defaultdict(list)
             for genre_key, track_list_val in genre_to_full_track_data_map.items():
@@ -1441,7 +1535,7 @@ def run_clustering_task(
             # Store the last subset IDs from the previous batch. This will be updated by batch tasks.
             last_subset_track_ids_for_batch_chaining = None
 
-            log_and_update_main_clustering(f"Fetched {len(rows)} tracks. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 5)
+            log_and_update_main_clustering(f"Processing {len(rows_with_embeddings)} tracks with embeddings. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 5)
 
             while batches_completed_count < num_total_batch_jobs:
                 if current_job:
@@ -1567,7 +1661,8 @@ def run_clustering_task(
                                 score_weight_purity_param, # Pass Purity weight
                                 current_elite_params_for_batch_json,
                                 exploitation_prob_for_this_batch, # AI params are not passed to batch, but to main task
-                                mutation_config_json,
+                                mutation_config_json, # Mutation config for params
+                                enable_clustering_embeddings_param, # Pass the flag
                                 initial_subset_for_this_batch_json # Pass the subset from the end of the previous batch
                             ),
                             job_id=batch_job_task_id,
@@ -1591,7 +1686,7 @@ def run_clustering_task(
                 current_progress_val = 5 + current_launch_progress + current_execution_progress
 
                 log_and_update_main_clustering(
-                    f"Batch Jobs Launched: {next_batch_job_idx_to_launch}/{num_total_batch_jobs}. Active Batch Jobs: {len(active_jobs_map)}. Iterations Completed: {total_iterations_completed_count}/{num_clustering_runs}. Best Score: {best_diversity_score:.2f}",
+                    f"Clustering with {data_source_for_clustering_log}. Batch Jobs Launched: {next_batch_job_idx_to_launch}/{num_total_batch_jobs}. Active: {len(active_jobs_map)}. Iterations: {total_iterations_completed_count}/{num_clustering_runs}. Best Score: {best_diversity_score:.2f}",
                     current_progress_val,
                     details_to_add_or_update={
                         "runs_completed": total_iterations_completed_count,
