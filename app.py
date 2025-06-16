@@ -348,6 +348,48 @@ def get_all_tracks(): # Removed db_path
     cur.close()
     return rows
 
+def get_tracks_by_ids(item_ids_list):
+    """Fetches full track data (including embeddings) for a specific list of item_ids."""
+    if not item_ids_list:
+        return []
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    # Using a placeholder for a list of IDs
+    # psycopg2 can convert a list to a tuple for the IN operator
+    query = """
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding_vector
+        FROM score s
+        LEFT JOIN embedding e ON s.item_id = e.item_id
+        WHERE s.item_id IN %s
+    """
+    cur.execute(query, (tuple(item_ids_list),)) # Pass list as a tuple for IN clause
+    rows = cur.fetchall()
+    cur.close()
+    # app.logger.debug(f"Fetched {len(rows)} tracks for {len(item_ids_list)} IDs.")
+    return rows
+
+def get_score_data_by_ids(item_ids_list):
+    """Fetches only score-related data (excluding embeddings) for a specific list of item_ids."""
+    if not item_ids_list:
+        return []
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    query = """
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features
+        FROM score s
+        WHERE s.item_id IN %s
+    """
+    try:
+        cur.execute(query, (tuple(item_ids_list),))
+        rows = cur.fetchall()
+    except Exception as e:
+        app.logger.error(f"Error fetching score data by IDs: {e}")
+        rows = [] # Return empty list on error
+    finally:
+        cur.close()
+    return rows
+
+
 def update_playlist_table(playlists): # Removed db_path
     conn = get_db()
     cur = conn.cursor()
