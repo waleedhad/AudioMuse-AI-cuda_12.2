@@ -162,11 +162,29 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     musicnn_embedding_model = TensorflowPredictMusiCNN(
         graphFilename=embedding_model_path, output="model/dense/BiasAdd" # Main embedding model
     )
-    musicnn_embeddings = musicnn_embedding_model(audio)
+    raw_musicnn_embeddings = musicnn_embedding_model(audio) # Raw output, potentially 2D
+
+    processed_musicnn_embeddings = np.array([]) # Initialize as empty 1D array
+
+    if isinstance(raw_musicnn_embeddings, np.ndarray):
+        if raw_musicnn_embeddings.ndim == 1:
+            processed_musicnn_embeddings = raw_musicnn_embeddings
+        elif raw_musicnn_embeddings.ndim == 2:
+            if raw_musicnn_embeddings.shape[0] > 0: # If there are rows (segments or batch_size=1)
+                # Average across the first dimension
+                processed_musicnn_embeddings = np.mean(raw_musicnn_embeddings, axis=0)
+            else: # Shape is (0, D) - no rows
+                print(f"Warning: Raw MusicNN embeddings are 2D with no rows (shape: {raw_musicnn_embeddings.shape}). Resulting in empty 1D embedding.")
+                # processed_musicnn_embeddings remains np.array([])
+        else: # ndim > 2 or ndim == 0 (scalar, unlikely)
+            print(f"Warning: Raw MusicNN embeddings have unexpected ndim: {raw_musicnn_embeddings.ndim} (shape: {raw_musicnn_embeddings.shape}). Resulting in empty 1D embedding.")
+            # processed_musicnn_embeddings remains np.array([])
+    else:
+        print(f"Warning: Raw MusicNN output is not a NumPy array. Type: {type(raw_musicnn_embeddings)}. Resulting in empty 1D embedding.")
+        # processed_musicnn_embeddings remains np.array([])
 
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS) # Pass embeddings and correct model path
 
     # Calculate raw total energy
     raw_total_energy = Energy()(audio)
@@ -178,7 +196,24 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     else:
         average_energy_per_sample = 0.0 # Should not happen for valid audio
 
-    other_predictions = predict_other_models(musicnn_embeddings) # Pass the same MusiCNN embeddings
+    # Initialize moods and other_predictions with defaults
+    moods = {label: 0.0 for label in mood_labels_list}
+    other_predictions = {
+        "danceable": 0.0, "aggressive": 0.0, "happy": 0.0,
+        "party": 0.0, "relaxed": 0.0, "sad": 0.0
+    }
+
+    if processed_musicnn_embeddings.size > 0 and np.all(np.isfinite(processed_musicnn_embeddings)):
+        try:
+            moods = predict_moods(processed_musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS)
+        except Exception as e_mood:
+            print(f"Error during predict_moods: {e_mood}. Using default moods.")
+        try:
+            other_predictions = predict_other_models(processed_musicnn_embeddings)
+        except Exception as e_other:
+            print(f"Error during predict_other_models: {e_other}. Using default other_predictions.")
+    else:
+        print(f"Warning: Processed MusicNN embeddings are empty or invalid. Skipping mood/other predictions. Shape: {processed_musicnn_embeddings.shape if isinstance(processed_musicnn_embeddings, np.ndarray) else 'N/A'}")
 
     # Combine all predictions into a single dictionary
     all_predictions = {
@@ -189,8 +224,8 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
         "energy": float(average_energy_per_sample), # Store average energy per sample
         **other_predictions  # Include danceable, aggressive, etc. directly
     }
-    # Return the predictions dictionary and the embeddings numpy array as a tuple
-    return all_predictions, musicnn_embeddings
+    # Return the predictions dictionary and the PROCESSED (1D) embeddings numpy array
+    return all_predictions, processed_musicnn_embeddings
 
 # --- RQ Task Definitions ---
 

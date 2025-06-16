@@ -388,14 +388,8 @@ def _perform_single_clustering_iteration(
                     
                     if parsed_list_for_numpy_non_mbk is not None:
                         try:
-                            emb_vec = np.array(parsed_list_for_numpy_non_mbk)
-                            if emb_vec.ndim == 2: # Check if it's a 2D array (matrix)
-                                if emb_vec.shape[0] > 0 and emb_vec.shape[1] > 0: # Ensure it's not empty
-                                    # print(f"{log_prefix} Iteration {run_idx}: Non-MBK - Averaging 2D embedding for {track_row_data.get('item_id')} from shape {emb_vec.shape} to 1D.")
-                                    emb_vec = np.mean(emb_vec, axis=0)
-                                else: # Empty 2D array
-                                    emb_vec = np.array([]) # Will fail subsequent size check
-
+                            # Embedding is expected to be 1D from the DB now
+                            emb_vec = np.array(parsed_list_for_numpy_non_mbk) 
                             if isinstance(emb_vec, np.ndarray) and emb_vec.ndim == 1 and np.issubdtype(emb_vec.dtype, np.number) and emb_vec.size > 0:
                                 X_embed_raw_list_for_non_mbk.append(emb_vec)
                         except Exception as e_np_non_mbk: # Catch numpy conversion errors
@@ -437,13 +431,8 @@ def _perform_single_clustering_iteration(
                             except: pass # Ignore parsing errors here, will lead to mismatch if critical
                     if parsed_list_align is not None:
                         try:
-                            emb_vec_align = np.array(parsed_list_align)
-                            if emb_vec_align.ndim == 2: # Average if 2D
-                                if emb_vec_align.shape[0] > 0 and emb_vec_align.shape[1] > 0:
-                                    emb_vec_align = np.mean(emb_vec_align, axis=0)
-                                else:
-                                    emb_vec_align = np.array([])
-
+                            # Embedding is expected to be 1D
+                            emb_vec_align = np.array(parsed_list_align) 
                             if isinstance(emb_vec_align, np.ndarray) and emb_vec_align.ndim == 1 and np.issubdtype(emb_vec_align.dtype, np.number) and emb_vec_align.size > 0:
                                 temp_aligned_X_embed_raw_list_for_non_mbk.append(emb_vec_align)
                         except Exception: pass # Ignore numpy errors here during alignment
@@ -719,13 +708,8 @@ def _perform_single_clustering_iteration(
                             
                             if parsed_list_for_numpy is not None:
                                 try:
-                                    emb_vec = np.array(parsed_list_for_numpy)
-                                    if emb_vec.ndim == 2: # Check if it's a 2D array (matrix)
-                                        if emb_vec.shape[0] > 0 and emb_vec.shape[1] > 0: # Ensure it's not empty
-                                            # print(f"{log_prefix} Iteration {run_idx}: MBK - Averaging 2D embedding for {track_id_for_chunk} from shape {emb_vec.shape} to 1D.")
-                                            emb_vec = np.mean(emb_vec, axis=0)
-                                        else: # Empty 2D array
-                                            emb_vec = np.array([]) # Will fail subsequent size check
+                                    # Embedding is expected to be 1D
+                                    emb_vec = np.array(parsed_list_for_numpy) 
                                     if isinstance(emb_vec, np.ndarray) and emb_vec.ndim == 1 and np.issubdtype(emb_vec.dtype, np.number) and emb_vec.size > 0:
                                         chunk_embeddings_list.append(emb_vec)
                                         chunk_original_indices_map.append(original_idx_in_subset_loop)
