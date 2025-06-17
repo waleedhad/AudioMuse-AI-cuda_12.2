@@ -579,8 +579,9 @@ def run_clustering_task(
                 current_progress = ai_naming_start_progress
                 log_and_update_main_clustering(f"Preparing for AI Naming...", current_progress, print_console=True)
                 try:
-                    ai_renamed_playlists_final = defaultdict(list)
-                    ai_renamed_centroids_final = {}
+                    ai_renamed_playlists_final = {} # Changed from defaultdict(list)
+                    ai_renamed_centroids_final = {} # Changed from regular dict
+                    ai_base_name_generation_count = defaultdict(int) # To track AI base name generations
                     total_playlists_to_name = len(final_named_playlists)
                     playlists_named_count = 0
                     for original_name, songs_in_playlist in final_named_playlists.items():
@@ -590,41 +591,59 @@ def run_clustering_task(
                                 ai_renamed_centroids_final[original_name] = final_playlist_centroids[original_name]
                             continue
                         song_list_for_ai = [{'title': s_title, 'author': s_author} for _, s_title, s_author in songs_in_playlist]
-                        name_parts = original_name.split('_')
-                        feature1 = "Unknown"
-                        feature2 = "General"
-                        feature3 = "Music" 
-                        if len(name_parts) >= 1: feature1 = name_parts[0]
-                        if len(name_parts) >= 2: feature2 = name_parts[1]
-                        if len(name_parts) >= 3 and name_parts[2].lower() not in ["slow", "medium", "fast"]:
-                            feature3 = name_parts[2]
-                        elif len(name_parts) >= 2 and name_parts[1].lower() not in ["slow", "medium", "fast"]:
-                            feature3 = name_parts[1]
-                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using provider '{ai_model_provider_for_run}'. F1: '{feature1}', F2: '{feature2}', F3: '{feature3}'.")
+                        
+                        feature1_for_ai, feature2_for_ai, feature3_for_ai = "Unknown", "General", "Music"
+                        
+                        if enable_clustering_embeddings_param:
+                            # If embeddings were used for clustering, use generic tags for the AI prompt
+                            feature1_for_ai = "Vibe"
+                            feature2_for_ai = "Focused"
+                            feature3_for_ai = "Collection"
+                            print(f"{log_prefix_main_task_ai} Embeddings used for clustering. Using generic tags for AI: '{feature1_for_ai}', '{feature2_for_ai}', '{feature3_for_ai}'.")
+                        else:
+                            # If not using embeddings, derive tags from the rule-based original_name
+                            name_parts = original_name.split('_')
+                            if len(name_parts) >= 1: feature1_for_ai = name_parts[0]
+                            if len(name_parts) >= 2: feature2_for_ai = name_parts[1]
+                            if len(name_parts) >= 3 and name_parts[2].lower() not in ["slow", "medium", "fast"]:
+                                feature3_for_ai = name_parts[2]
+                            elif len(name_parts) >= 2 and name_parts[1].lower() not in ["slow", "medium", "fast"]: # Check second part if third is tempo
+                                feature3_for_ai = name_parts[1]
+                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using provider '{ai_model_provider_for_run}'. Tags for AI: F1: '{feature1_for_ai}', F2: '{feature2_for_ai}', F3: '{feature3_for_ai}'.")
                         centroid_features_for_ai = final_playlist_centroids.get(original_name, {})
                         ai_generated_name_str = get_ai_playlist_name(
                             ai_model_provider_for_run,
                             ollama_server_url_for_run, ollama_model_name_for_run,
                             gemini_api_key_for_run, gemini_model_name_for_run, 
                             creative_prompt_template,
-                            feature1, feature2, feature3,
+                            feature1_for_ai, feature2_for_ai, feature3_for_ai, # Pass the potentially generic tags
                             song_list_for_ai,
                             centroid_features_for_ai)
                         print(f"{log_prefix_main_task_ai} Raw AI output for '{original_name}': '{ai_generated_name_str}'")
                         current_playlist_final_name = original_name
+                        ai_generated_base_name = original_name # This will be the name before disambiguation
+
                         if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("AI Naming Skipped"):
                              clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
                              if clean_ai_name:
                                  if clean_ai_name.lower() != original_name.lower().strip().replace("_", " "):
                                       print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{clean_ai_name}'")
-                                      current_playlist_final_name = clean_ai_name
+                                      ai_generated_base_name = clean_ai_name # This is the name AI produced
                                  else:
-                                      current_playlist_final_name = original_name
+                                      ai_generated_base_name = original_name # No change, effectively
                              else:
                                  print(f"{log_prefix_main_task_ai} AI for '{original_name}' returned empty after cleaning. Raw: '{ai_generated_name_str}'. Using original.")
+                                 ai_generated_base_name = original_name
                         else:
                             print(f"{log_prefix_main_task_ai} AI naming for '{original_name}' failed or returned error/skip message: '{ai_generated_name_str}'. Using original.")
-                        ai_renamed_playlists_final[current_playlist_final_name].extend(songs_in_playlist)
+                            ai_generated_base_name = original_name
+                        
+                        ai_base_name_generation_count[ai_generated_base_name] += 1
+                        current_playlist_final_name = ai_generated_base_name # Start with the AI name
+                        if ai_base_name_generation_count[ai_generated_base_name] > 1: # Collision on AI name
+                            current_playlist_final_name = f"{ai_generated_base_name} (from {original_name})" # Disambiguate
+
+                        ai_renamed_playlists_final[current_playlist_final_name] = songs_in_playlist # Assign directly
                         if original_name in final_playlist_centroids:
                             ai_renamed_centroids_final[current_playlist_final_name] = final_playlist_centroids[original_name]
                         playlists_named_count += 1
@@ -635,6 +654,11 @@ def run_clustering_task(
                                 int(current_ai_progress),
                                 print_console=False
                             )
+                    # Log if any AI-generated base names were generated for multiple input playlists
+                    for ai_name, contribution_count in ai_base_name_generation_count.items():
+                        if contribution_count > 1:
+                            print(f"{log_prefix_main_task_ai} AI-generated base name '{ai_name}' was generated for {contribution_count} input playlists. They are stored as distinct playlists (e.g., '{ai_name} (from OriginalName)').")
+
                     if ai_renamed_playlists_final:
                         final_named_playlists = ai_renamed_playlists_final
                         final_playlist_centroids = ai_renamed_centroids_final
