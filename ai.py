@@ -12,16 +12,14 @@ import os # Import os to potentially read GEMINI_API_CALL_DELAY_SECONDS
 # creative_prompt_template is imported in tasks.py, so it should be defined here
 creative_prompt_template = (
     "You are a highly creative music curator. Your SOLE task is to generate 1 concise (15-35 chars) playlist name.\n"
-    "The name MUST be evocative, representative of the provided songs/features, and use real English words with ONLY standard ASCII (a-z, A-Z, 0-9, spaces, and - & ' ! . , ? ( ) [ ]). "
-    "No special fonts or emojis.\n"
+    "The name MUST be evocative, representative of the provided songs, and use real English words with ONLY standard ASCII (a-z, A-Z, 0-9, spaces, and - & ' ! . , ? ( ) [ ]). "
+    "No special fonts or emojis.\n\n"
+    "CRITICAL: use also the title and the text of the song to create the perfect title"
     "PRIMARY FOCUS: Analyze the provided song list for its core vibe and the 'Additional Mood/Energy Features' to determine the playlist's essence.\n"
     "SECONDARY GUIDANCE (if specific and not generic like 'Vibe Focused Collection'): The descriptive tags '{feature1}', '{feature2}', '{feature3}' can offer hints. If these tags are generic, rely primarily on the song list and other features.\n"
-    "Additional Mood/Energy Features to consider: {additional_features_description}, use this mainly to say if something is relax, or for party or similar.\n"
-    "Input Energy to consider: {energy_description} use this to say if the music has slow energy or high energy (0 min, 1 max).\n"
+    "Tempo Description: {tempo_description_for_ai}. (40 low, 200 high)\n"
+    "Input Energy to consider: {energy_description} use this to say if the music has slow energy or high energy (0 min, 0.15 max).\n"
     "The playlist name should suggest an activity, mood, or context, similar to these:\n\n"
-    "* GOOD EXAMPLES: 'Sunshine Pop Vibrations' (Concept: cheerful, energetic pop for sunny days)\n"
-    "* GOOD EXAMPLES: 'Workout Power Hour Mix' (Concept: energetic rock/dance for intense workouts)\n"
-    "* GOOD EXAMPLES: 'Relaxing Evening Melodies' (Concept: calming songs for a peaceful evening)\n\n"
     "* BAD EXAMPLES: For features 'rock', 'energetic', '80s' -> 'Midnight Pop Fever' (Inconsistent with features)\n"
     "* BAD EXAMPLES: 'Ambient Electronic Space - Electric Soundscapes - Emotional Waves' (Too long/descriptive)\n"
     "* BAD EXAMPLES: 'Blues Rock Fast Tracks' (Too direct/literal, not evocative enough)\n"
@@ -160,11 +158,10 @@ def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key
     MIN_LENGTH = 15
     MAX_LENGTH = 40
 
-    # --- Prepare the prompt ---
-    # Add information about the new features to the prompt.
-    # This is a conceptual example; you'll need to refine the prompt engineering.
-    new_features_description = ""
+    # --- Prepare feature descriptions for the prompt ---
+    tempo_description_for_ai = "Tempo is moderate." # Default
     energy_description = "" # Initialize energy description
+
     if other_feature_scores_dict:
         # Extract energy score first, as it's handled separately
         # Check for 'energy_normalized' first, then fall back to 'energy'
@@ -177,27 +174,29 @@ def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key
             energy_description = " It has high energy."
         # No description if medium energy (between 0.3 and 0.7)
 
-        # Sort other features by score descending to highlight the most prominent ones.
-        # Explicitly exclude both 'energy' and 'energy_normalized' from this list,
-        # as energy is handled separately by 'energy_description'.
-        sorted_other_features = sorted([
-            (name, score) for name, score in other_feature_scores_dict.items()
-            if name not in ['energy', 'energy_normalized'] # Exclude both potential energy keys
-        ], key=lambda item: item[1], reverse=True)
-        # Example threshold: include features with score > 0.6 (adjust as needed)
-        prominent_features = [f"{name}" for name, score in sorted_other_features if score > 0.6] # Example threshold
-        if prominent_features:
-            new_features_description = " It is also notably " + ", ".join(prominent_features) + "."
+        # Create tempo description
+        tempo_normalized_score = other_feature_scores_dict.get('tempo_normalized', 0.5) # Default to moderate if not found
+        if tempo_normalized_score < 0.33:
+            tempo_description_for_ai = "The tempo is generally slow."
+        elif tempo_normalized_score < 0.66:
+            tempo_description_for_ai = "The tempo is generally medium."
+        else:
+            tempo_description_for_ai = "The tempo is generally fast."
 
-    # Format the song list sample for the prompt
-    formatted_song_list = "\n".join([f"- {song.get('title', 'Unknown Title')} by {song.get('author', 'Unknown Artist')}" for song in song_list[:5]]) # Limit sample size to 5
+        # Note: The logic for 'new_features_description' (which was for 'additional_features_description')
+        # has been removed as per the request. If you want to include other features
+        # (like danceable, aggressive, etc.) in the prompt, you'd add logic here to create
+        # a description for them and a corresponding placeholder in the prompt_template.
+
+    # Format the full song list for the prompt
+    formatted_song_list = "\n".join([f"- {song.get('title', 'Unknown Title')} by {song.get('author', 'Unknown Artist')}" for song in song_list]) # Send all songs
 
     # Construct the full prompt using the template and all features
     full_prompt = prompt_template.format(
         feature1=feature1,
         feature2=feature2,
         feature3=feature3,
-        additional_features_description=new_features_description, # Insert the new features description
+        tempo_description_for_ai=tempo_description_for_ai, # Insert the tempo description
         energy_description=energy_description, # Insert the energy description
         song_list_sample=formatted_song_list
     )

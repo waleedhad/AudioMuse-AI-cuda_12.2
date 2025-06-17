@@ -28,7 +28,7 @@ from config import (MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
                     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
                     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
                     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
-                    LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
+                    LN_MOOD_PURITY_EMBEDING_STATS, LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
                     OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY,
                     USE_MINIBATCH_KMEANS, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, DB_FETCH_CHUNK_SIZE) # Added DB_FETCH_CHUNK_SIZE
 
@@ -1019,12 +1019,19 @@ def _perform_single_clustering_iteration(
                 if current_playlist_song_purity_scores: all_individual_playlist_purities.append(sum(current_playlist_song_purity_scores))
         if all_individual_playlist_purities: raw_playlist_purity_component = sum(all_individual_playlist_purities)
         ln_mood_purity = np.log1p(raw_playlist_purity_component)
-        config_mean_ln_purity = LN_MOOD_PURITY_STATS.get("mean"); config_sd_ln_purity = LN_MOOD_PURITY_STATS.get("sd")
+        
+        # Select purity stats based on whether embeddings are used for clustering
+        if use_embeddings_for_this_iteration:
+            purity_stats_to_use = LN_MOOD_PURITY_EMBEDING_STATS
+            # print(f"{log_prefix} Iteration {run_idx}: Using EMBEDDING mood purity stats.")
+        else:
+            purity_stats_to_use = LN_MOOD_PURITY_STATS
+            # print(f"{log_prefix} Iteration {run_idx}: Using REGULAR mood purity stats.")
+        config_mean_ln_purity = purity_stats_to_use.get("mean"); config_sd_ln_purity = purity_stats_to_use.get("sd")
         playlist_purity_component = 0.0
         if config_mean_ln_purity is None or config_sd_ln_purity is None: print(f"{log_prefix} Iteration {run_idx}: LN_MOOD_PURITY_STATS missing mean/sd.")
         elif abs(config_sd_ln_purity) < 1e-9: playlist_purity_component = 0.0
         else: playlist_purity_component = (ln_mood_purity - config_mean_ln_purity) / config_sd_ln_purity
-
         raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values()) 
         ln_other_features_diversity = np.log1p(raw_other_features_diversity_score)
         config_mean_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("mean"); config_sd_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("sd")
