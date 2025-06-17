@@ -231,8 +231,10 @@ def run_clustering_batch_task(
 def run_clustering_task(
     clustering_method, num_clusters_min, num_clusters_max,
     dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, 
-    pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster,
+    pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, # type: ignore
     gmm_n_components_min, gmm_n_components_max, 
+    min_songs_per_genre_for_stratification_param, # Added
+    stratified_sampling_target_percentile_param,  # Added
     score_weight_diversity_param, score_weight_silhouette_param, 
     score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, 
     score_weight_purity_param, 
@@ -368,18 +370,18 @@ def run_clustering_task(
             songs_counts_for_stratified_genres = []
             for genre in STRATIFIED_GENRES:
                 if genre in genre_to_lightweight_track_data_map:
-                    songs_counts_for_stratified_genres.append(len(genre_to_lightweight_track_data_map[genre]))
+                    songs_counts_for_stratified_genres.append(len(genre_to_lightweight_track_data_map[genre])) # type: ignore
             calculated_target_based_on_percentile = 0
             if songs_counts_for_stratified_genres:
-                percentile_to_use = np.clip(STRATIFIED_SAMPLING_TARGET_PERCENTILE, 0, 100)
+                percentile_to_use = np.clip(stratified_sampling_target_percentile_param, 0, 100) # Use passed param
                 calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use) 
                 log_and_update_main_clustering(
                     f"{percentile_to_use}th percentile of songs per stratified genre: {calculated_target_based_on_percentile:.2f}",
                     current_progress, print_console=False
                 )
             else:
-                log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
-            target_songs_per_genre = max(MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, int(np.floor(calculated_target_based_on_percentile))) 
+                log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False) # type: ignore
+            target_songs_per_genre = max(min_songs_per_genre_for_stratification_param, int(np.floor(calculated_target_based_on_percentile))) # Use passed param
             if target_songs_per_genre == 0 and len(lightweight_rows) > 0:
                 target_songs_per_genre = 1 
             log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)

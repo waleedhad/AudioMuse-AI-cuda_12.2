@@ -784,6 +784,8 @@ def start_clustering_endpoint():
             pca_components_min_val, pca_components_max_val,
             num_clustering_runs_val,
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
+            min_songs_per_genre_for_stratification_val, # Added
+            stratified_sampling_target_percentile_val,  # Added
             score_weight_diversity_val, score_weight_silhouette_val,
             score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val,
             score_weight_purity_val,
