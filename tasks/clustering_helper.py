@@ -883,11 +883,12 @@ def _perform_single_clustering_iteration(
                     try:
                         s_score = silhouette_score(data_for_clustering_current, labels_for_metrics, metric='euclidean')
                         s_score_raw_val_for_log = s_score; silhouette_metric_value = (s_score + 1) / 2.0
-                    except ValueError as e_sil: print(f"{log_prefix} Iteration {run_idx}: Silhouette error: {e_sil}"); silhouette_metric_value = 0.0 
-                if current_score_weight_davies_bouldin > 0: 
+                    except ValueError as e_sil: print(f"{log_prefix} Iteration {run_idx}: Silhouette error: {e_sil}"); silhouette_metric_value = 0.0
+                if current_score_weight_davies_bouldin != 0: # Check if weight is non-zero (positive weight is expected now)
                     try:
                         db_score_raw = davies_bouldin_score(data_for_clustering_current, labels_for_metrics)
-                        db_score_raw_val_for_log = db_score_raw; davies_bouldin_metric_value = 1.0 / (1.0 + db_score_raw)
+                        db_score_raw_val_for_log = db_score_raw
+                        davies_bouldin_metric_value = 1.0 / (1.0 + db_score_raw) # Higher is better, maps to (0, 1]
                     except ValueError as e_db: print(f"{log_prefix} Iteration {run_idx}: Davies-Bouldin error: {e_db}"); davies_bouldin_metric_value = 0.0 
                 if current_score_weight_calinski_harabasz > 0: 
                     try:

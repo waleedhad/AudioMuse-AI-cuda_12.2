@@ -16,7 +16,7 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
-NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "3000")) # Convert to int
+NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
@@ -47,16 +47,16 @@ GMM_COVARIANCE_TYPE = os.environ.get("GMM_COVARIANCE_TYPE", "full") # 'full', 't
 
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
-PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "100")) # 0 to disable PCA
-PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "199")) # Max components for PCA 8 for score vectore, 199 for embeding
+PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA
+PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "0")) # Max components for PCA 8 for score vectore, 199 for embeding
 
 # --- Clustering Runs for Diversity (New Constant) ---
-CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "5000")) # Default to 100 runs for evolutionary search
+CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 MAX_QUEUED_ANALYSIS_JOBS = int(os.environ.get("MAX_QUEUED_ANALYSIS_JOBS", "100")) # Max album analysis jobs to keep in RQ queue
 
 # --- Batching Constants for Clustering Runs ---
 ITERATIONS_PER_BATCH_JOB = int(os.environ.get("ITERATIONS_PER_BATCH_JOB", "20")) # Number of clustering iterations per RQ batch job
-MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "6")) # Max number of batch jobs to run concurrently
+MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "10")) # Max number of batch jobs to run concurrently
 DB_FETCH_CHUNK_SIZE = int(os.environ.get("DB_FETCH_CHUNK_SIZE", "1000")) # Chunk size for fetching full track data from DB in batch jobs
 
 # --- Guided Evolutionary Clustering Constants ---
@@ -73,8 +73,8 @@ SCORE_WEIGHT_PURITY = float(os.environ.get("SCORE_WEIGHT_PURITY", "0.0"))    # W
 SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY", "0.0")) # New: Weight for inter-playlist other feature diversity
 SCORE_WEIGHT_OTHER_FEATURE_PURITY = float(os.environ.get("SCORE_WEIGHT_OTHER_FEATURE_PURITY", "0.0"))       # New: Weight for intra-playlist other feature consistency
 # --- Weights for Internal Validation Metrics ---
-SCORE_WEIGHT_SILHOUETTE = float(os.environ.get("SCORE_WEIGHT_SILHOUETTE", "1.0")) # ex 0.6 - Weight for Silhouette Score - This metric measures how similar an object is to its own cluster compared to other clusters.
-SCORE_WEIGHT_DAVIES_BOULDIN = float(os.environ.get("SCORE_WEIGHT_DAVIES_BOULDIN", "0.0")) # Set to 0 to effectively disable - This index quantifies the average similarity between each cluster and its most similar one
+SCORE_WEIGHT_SILHOUETTE = float(os.environ.get("SCORE_WEIGHT_SILHOUETTE", "0.0")) # ex 0.6 - Weight for Silhouette Score - This metric measures how similar an object is to its own cluster compared to other clusters.
+SCORE_WEIGHT_DAVIES_BOULDIN = float(os.environ.get("SCORE_WEIGHT_DAVIES_BOULDIN", "1.0")) # Set to 0 to effectively disable - This index quantifies the average similarity between each cluster and its most similar one
 SCORE_WEIGHT_CALINSKI_HARABASZ = float(os.environ.get("SCORE_WEIGHT_CALINSKI_HARABASZ", "0.0")) # Set to 0 to effectively disable - This metric focuses on the ratio of between-cluster dispersion to within-cluster dispersion
 TOP_K_MOODS_FOR_PURITY_CALCULATION = int(os.environ.get("TOP_K_MOODS_FOR_PURITY_CALCULATION", "3")) # Number of centroid's top moods to consider for purity
 
