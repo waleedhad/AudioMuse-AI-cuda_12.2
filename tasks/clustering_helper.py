@@ -933,14 +933,14 @@ def _perform_single_clustering_iteration(
 
         for label_val, songs_list in filtered_clusters.items():
             if songs_list: 
-                name = ""; top_scores = {}
+                base_name = ""; top_scores = {} # Initialize base_name
                 if use_embeddings_for_this_iteration:
                     song_feat_indices_in_cluster = [item_id_to_song_index_map[item_id_in_song] for item_id_in_song, _, _ in songs_list if item_id_in_song in item_id_to_song_index_map]
                     if not song_feat_indices_in_cluster: continue
                     song_feat_vectors_in_cluster = X_feat_orig[song_feat_indices_in_cluster]
                     if song_feat_vectors_in_cluster.shape[0] == 0: continue
                     mean_original_feature_vector = np.mean(song_feat_vectors_in_cluster, axis=0)
-                    name, top_scores = name_cluster(mean_original_feature_vector, None, False, active_mood_labels, None)
+                    base_name, top_scores = name_cluster(mean_original_feature_vector, None, False, active_mood_labels, None)
                 else: 
                     centroid_val = cluster_centers_map.get(label_val)
                     if centroid_val is None or len(centroid_val) == 0: continue
