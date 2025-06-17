@@ -89,6 +89,14 @@ LN_MOOD_DIVERSITY_STATS = {
     "sd": float(os.environ.get("LN_MOOD_DIVERSITY_SD", "0.3541"))
 }
 
+# Constants for Log-Transformed and Standardized Mood Diversity WHEN EMBEDDINGS ARE USED
+LN_MOOD_DIVERSITY_EMBEDING_STATS = { # Corrected spelling to "EMBEDING"
+    "min": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_MIN", "-0.174")),
+    "max": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_MAX", "0.570")),
+    "mean": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_MEAN", "-0.101")),
+    "sd": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_SD", "0.245")) # Kept env var name consistent for now
+}
+
 # Constants for Log-Transformed and Standardized Mood Purity
 LN_MOOD_PURITY_STATS = {
     "min": float(os.environ.get("LN_MOOD_PURITY_MIN", "0.6981")),

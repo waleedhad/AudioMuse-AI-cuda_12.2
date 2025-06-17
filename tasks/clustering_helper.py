@@ -28,7 +28,7 @@ from config import (MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
                     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
                     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
                     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
-                    LN_MOOD_PURITY_EMBEDING_STATS, LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
+                    LN_MOOD_DIVERSITY_EMBEDING_STATS, LN_MOOD_PURITY_EMBEDING_STATS, LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
                     OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY,
                     USE_MINIBATCH_KMEANS, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, DB_FETCH_CHUNK_SIZE) # Added DB_FETCH_CHUNK_SIZE
 
@@ -984,10 +984,17 @@ def _perform_single_clustering_iteration(
         # print(f"{log_prefix} Iteration {run_idx}: Raw Mood Diversity Score: {raw_mood_diversity_score}, Unique Moods: {len(unique_predominant_mood_scores)}")
         base_diversity_score = 0.0  
         if len(active_mood_labels) > 0: 
-            ln_mood_diversity = np.log1p(raw_mood_diversity_score) 
-            config_mean_ln_diversity = LN_MOOD_DIVERSITY_STATS.get("mean"); config_sd_ln_diversity = LN_MOOD_DIVERSITY_STATS.get("sd")
+            ln_mood_diversity = np.log1p(raw_mood_diversity_score)
+            # Select mood diversity stats based on whether embeddings are used for clustering
+            if use_embeddings_for_this_iteration:
+                diversity_stats_to_use = LN_MOOD_DIVERSITY_EMBEDING_STATS
+                # print(f"{log_prefix} Iteration {run_idx}: Using EMBEDDING mood diversity stats.")
+            else:
+                diversity_stats_to_use = LN_MOOD_DIVERSITY_STATS
+                # print(f"{log_prefix} Iteration {run_idx}: Using REGULAR mood diversity stats.")
+            config_mean_ln_diversity = diversity_stats_to_use.get("mean"); config_sd_ln_diversity = diversity_stats_to_use.get("sd")
             if config_mean_ln_diversity is None or config_sd_ln_diversity is None: print(f"{log_prefix} Iteration {run_idx}: LN_MOOD_DIVERSITY_STATS missing mean/sd.")
-            elif abs(config_sd_ln_diversity) < 1e-9: base_diversity_score = 0.0
+            elif abs(config_sd_ln_diversity) < 1e-9: base_diversity_score = 0.0 # Avoid division by zero or very small SD
             else: base_diversity_score = (ln_mood_diversity - config_mean_ln_diversity) / config_sd_ln_diversity
         
         raw_playlist_purity_component = 0.0; all_individual_playlist_purities = []

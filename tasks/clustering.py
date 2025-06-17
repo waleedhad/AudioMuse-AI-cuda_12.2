@@ -64,11 +64,11 @@ def run_clustering_batch_task(
     parent_task_id,
     score_weight_diversity_param,
     score_weight_silhouette_param,
-    score_weight_davies_bouldin_param, 
-    score_weight_calinski_harabasz_param, 
-    score_weight_other_feature_diversity_param, 
-    score_weight_other_feature_purity_param, 
-    score_weight_purity_param, 
+    score_weight_davies_bouldin_param,
+    score_weight_calinski_harabasz_param,
+    score_weight_purity_param,                  # Corrected order
+    score_weight_other_feature_diversity_param, # Corrected order
+    score_weight_other_feature_purity_param,    # Corrected order
     elite_solutions_params_list_json, 
     exploitation_probability,         
     mutation_config_json,             
