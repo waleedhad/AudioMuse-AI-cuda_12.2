@@ -203,6 +203,7 @@ def chat_playlist_api():
     - Return ONLY the raw SQL query. No comments, no markdown, no explanations.
     - Always SELECT: item_id, title, author
     - Final outer SELECT must apply: ORDER BY random(), LIMIT 25 (unless the user asks for ordered top/best/famous results).
+    - CRITICAL FOR AUTHOR AND TITLE STRINGS: To include a single quote (') within a SQL string literal, you MUST use two single quotes (''), e.g., 'Player''s Choice'. Do NOT use backslash escapes like \' in the final SQL.
 
     WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS / FILM SONGS:
     - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles.
