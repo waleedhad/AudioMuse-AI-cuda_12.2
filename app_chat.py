@@ -131,19 +131,6 @@ def clean_and_validate_sql(raw_sql):
         # Get the first (and should be only) expression
         expression = parsed_expressions[0]
 
-        # Check and enforce LIMIT 25
-        limit_node = expression.args.get("limit")
-        if limit_node:
-            # If limit exists, check its value. sqlglot parses limit value as an expression.
-            # We expect a simple number here.
-            if not (isinstance(limit_node.expression, sqlglot.exp.Literal) and limit_node.expression.this == '25'):
-                print(f"Query had LIMIT {limit_node.expression.sql()}. Changing to LIMIT 25.")
-                expression.args["limit"] = sqlglot.exp.Limit(this=sqlglot.exp.Literal.number(25))
-        else:
-            # If no limit, add LIMIT 25
-            print("Query had no LIMIT clause. Adding LIMIT 25.")
-            expression.args["limit"] = sqlglot.exp.Limit(this=sqlglot.exp.Literal.number(25))
-
         # Re-generate the SQL from the potentially modified structure.
         cleaned_sql = expression.sql(dialect='postgres', pretty=False).strip().rstrip(';')
     except sqlglot.errors.ParseError as e:
@@ -221,6 +208,13 @@ def chat_playlist_api():
     - Always SELECT: item_id, title, author
     - Final outer SELECT must apply: ORDER BY random(), LIMIT 25 (unless the user asks for ordered top/best/famous results).
     - CRITICAL FOR AUTHOR AND TITLE STRINGS: To include a single quote (') within a SQL string literal, you MUST use two single quotes (''), e.g., 'Player''s Choice'. Do NOT use backslash escapes like \' in the final SQL.
+
+    WHEN USER ASKS TO LIMIT SONGS PER ARTIST (e.g., "not more than 2 per artist"):
+    - Do NOT use GROUP BY with HAVING COUNT(*). This is incorrect for limiting rows per group.
+    - Instead, use a window function: ROW_NUMBER() OVER (PARTITION BY author ORDER BY ...)
+    - Wrap your main query (including the CASE WHEN for ordering) in a subquery.
+    - In an outer query, SELECT from this subquery and filter using WHERE row_number <= N.
+    - Example structure for limiting to 2 per artist: SELECT item_id, title, author FROM (SELECT item_id, title, author, ..., ROW_NUMBER() OVER (PARTITION BY author ORDER BY ...) as rn FROM (... original query ...) AS sub) AS ranked_results WHERE rn <= 2 ORDER BY ... LIMIT ...
 
     WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS / FILM SONGS:
     - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles AND authors.
