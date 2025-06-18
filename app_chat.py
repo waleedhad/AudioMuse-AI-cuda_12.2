@@ -5,6 +5,7 @@ from psycopg2.extras import DictCursor # To get results as dictionaries
 import unicodedata # For ASCII normalization
 import sqlglot # Import sqlglot
 import json # For potential future use with more complex AI responses
+import html # For unescaping HTML entities
 import re # For regex-based quote escaping
 
 # Import AI configuration from the main config.py
@@ -86,12 +87,16 @@ def clean_and_validate_sql(raw_sql):
     if cleaned_sql.endswith("```"):
         cleaned_sql = cleaned_sql[:-len("```")]
     
+    # Unescape HTML entities early (e.g., &gt; becomes >)
+    cleaned_sql = html.unescape(cleaned_sql)
+
     # Further cleaning: find the first occurrence of SELECT (case-insensitive)
     # and take everything from there. This helps if there's leading text.
     select_pos = cleaned_sql.upper().find("SELECT")
     if select_pos == -1:
         return None, "Query does not contain SELECT."
     cleaned_sql = cleaned_sql[select_pos:] # Start the string from "SELECT"
+
     cleaned_sql = cleaned_sql.strip() # Strip again after taking the substring
 
     if not cleaned_sql.upper().startswith("SELECT"):
@@ -99,18 +104,24 @@ def clean_and_validate_sql(raw_sql):
         # but it's a good fallback.
         return None, "Cleaned query does not start with SELECT."
 
-    # Attempt to fix unescaped single quotes within potential string literals
-    # This looks for a word character, a single quote, and another word character (e.g., "L'isola")
-    # and replaces the single quote with two single quotes ("L''isola").
-    # This is a heuristic and might need refinement if it causes issues with valid SQL.
-    cleaned_sql = re.sub(r"(\w)'(\w)", r"\1''\2", cleaned_sql)
-
-    # Attempt to normalize to ASCII to remove problematic characters like 'è'
-    # This might change characters like 'è' to 'e'.
+    # 1. Normalize Unicode characters (e.g., ’ -> ', è -> e) to standard ASCII representations.
+    #    This helps standardize different types of quote characters to a simple apostrophe.
     try:
         cleaned_sql = unicodedata.normalize('NFKD', cleaned_sql).encode('ascii', 'ignore').decode('utf-8')
     except Exception as e_norm:
         print(f"Warning: Could not fully normalize SQL string to ASCII: {e_norm}")
+
+    # 2. Convert C-style escaped single quotes (e.g., \') to SQL standard double single quotes ('').
+    #    This should be done after normalization, in case normalization affects the backslash,
+    #    and before the regex, to correctly handle cases like "Player\'s".
+    cleaned_sql = cleaned_sql.replace("\\'", "''")
+
+    # 3. Fix unescaped single quotes *within* words that might remain after normalization
+    #    and the \'-to-'' conversion.
+    #    Example: "Player's" (from "Player’s" or direct output) becomes "Player''s".
+    #    This regex looks for a word character, a single quote, and another word character.
+    cleaned_sql = re.sub(r"(\w)'(\w)", r"\1''\2", cleaned_sql)
+
     try:
         # Parse the query using sqlglot, specifying PostgreSQL dialect
         parsed_expressions = sqlglot.parse(cleaned_sql, read='postgres')
@@ -179,15 +190,21 @@ def chat_playlist_api():
     if not data or 'userInput' not in data:
         return jsonify({"error": "Missing userInput in request"}), 400
 
-    user_input = data.get('userInput')
+    original_user_input = data.get('userInput')
     # Use AI provider from request, or fallback to global config, then to "NONE"
     ai_provider = data.get('ai_provider', AI_MODEL_PROVIDER).upper() # Use the imported constant
     ai_model_from_request = data.get('ai_model') # Model selected by user on chat page
 
-    ai_response_message = f"Received your request: '{user_input}'.\n"
+    ai_response_message = f"Received your request: '{original_user_input}'.\n"
     actual_model_used = None
-    query_results_list = None
-    executed_query_str = None
+
+    # Variables to hold the final state after potential retries
+    final_query_results_list = None
+    final_executed_query_str = None # The SQL string that was last attempted or successfully executed
+    
+    # Variables for retry logic
+    last_raw_sql_from_ai = None
+    last_error_for_retry = None
 
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
@@ -255,133 +272,162 @@ def chat_playlist_api():
     "{user_input_placeholder}"
     """
 
+    max_retries = 2 # Max 2 retries, so 3 attempts total
+    for attempt_num in range(max_retries + 1):
+        ai_response_message += f"\n--- Attempt {attempt_num + 1} of {max_retries + 1} ---\n"
+        
+        current_prompt_for_ai = ""
+        retry_reason_for_prompt = last_error_for_retry # Capture before it's potentially overwritten
 
+        if attempt_num > 0: # This is a retry
+            ai_response_message += f"Retrying due to previous issue: {retry_reason_for_prompt}\n"
+            if "no results" in str(retry_reason_for_prompt).lower():
+                retry_prompt_text = f"""The user's original request was: '{original_user_input}'
+Your previous SQL query attempt was:
+```sql
+{last_raw_sql_from_ai}
+```
+This query was valid but returned no songs.
+Please make the query less stringent to find some matching songs. For example, you could broaden search terms, adjust thresholds, or simplify conditions.
+Regenerate a SQL query based on the original instructions and user request, but aim for wider results.
+Ensure all SQL rules are followed.
+Return ONLY the new SQL query.
+---
+Original full prompt context (for reference):
+{base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", original_user_input)}
+"""
+            else: # SQL or DB Error
+                retry_prompt_text = f"""The user's original request was: '{original_user_input}'
+Your previous SQL query attempt was:
+```sql
+{last_raw_sql_from_ai}
+```
+This query resulted in the following error: '{retry_reason_for_prompt}'
+Please carefully review the error and your previous SQL.
+Then, regenerate a corrected SQL query based on the original instructions and user request.
+Ensure all SQL rules are followed, especially for string escaping (e.g., 'Player''s Choice') and query structure.
+Return ONLY the corrected SQL query.
+---
+Original full prompt context (for reference):
+{base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", original_user_input)}
+"""
+            current_prompt_for_ai = retry_prompt_text
+        else: # First attempt
+            current_prompt_for_ai = base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", original_user_input)
 
+        raw_sql_from_ai_this_attempt = None
+        # --- Call AI (Ollama/Gemini) ---
+        if ai_provider == "OLLAMA":
+            actual_model_used = ai_model_from_request or OLLAMA_MODEL_NAME
+            ollama_url_from_request = data.get('ollama_server_url', OLLAMA_SERVER_URL)
+            ai_response_message += f"Processing with OLLAMA model: {actual_model_used} (at {ollama_url_from_request}).\n"
+            raw_sql_from_ai_this_attempt = get_ollama_playlist_name(ollama_url_from_request, actual_model_used, current_prompt_for_ai)
+            if raw_sql_from_ai_this_attempt.startswith("Error:") or raw_sql_from_ai_this_attempt.startswith("An unexpected error occurred:"):
+                ai_response_message += f"Ollama API Error: {raw_sql_from_ai_this_attempt}\n"
+                last_error_for_retry = raw_sql_from_ai_this_attempt # Store error
+                raw_sql_from_ai_this_attempt = None # Mark as failed AI call
 
+        elif ai_provider == "GEMINI":
+            actual_model_used = ai_model_from_request or GEMINI_MODEL_NAME
+            gemini_api_key_from_request = data.get('gemini_api_key')
+            if not gemini_api_key_from_request:
+                error_msg = "Error: Gemini API key was not provided in the request."
+                ai_response_message += error_msg + "\n"
+                if attempt_num == 0: # Fatal for first attempt
+                    return jsonify({"response": {"message": ai_response_message, "original_request": original_user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used, "executed_query": None, "query_results": None}}), 400
+                last_error_for_retry = error_msg
+                break # Break retry loop, API key issue is not solvable by retrying AI
+            ai_response_message += f"Processing with GEMINI model: {actual_model_used} (using API key from request).\n"
+            raw_sql_from_ai_this_attempt = get_gemini_playlist_name(gemini_api_key_from_request, actual_model_used, current_prompt_for_ai)
+            if raw_sql_from_ai_this_attempt.startswith("Error:"):
+                ai_response_message += f"Gemini API Error: {raw_sql_from_ai_this_attempt}\n"
+                last_error_for_retry = raw_sql_from_ai_this_attempt
+                raw_sql_from_ai_this_attempt = None
 
-    # --- OLLAMA ---
-    if ai_provider == "OLLAMA":
-        actual_model_used = ai_model_from_request or OLLAMA_MODEL_NAME
-        # Use Ollama server URL from request, or fallback to config
-        ollama_url_from_request = data.get('ollama_server_url', OLLAMA_SERVER_URL)
-        ai_response_message += f"Processing with OLLAMA model: {actual_model_used} (at {ollama_url_from_request}).\n"
-
-        full_prompt_for_ollama = base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", user_input)
-        # Pass the determined Ollama URL to the AI call
-        ollama_response_raw = get_ollama_playlist_name(ollama_url_from_request, actual_model_used, full_prompt_for_ollama)
-
-        if ollama_response_raw.startswith("Error:") or ollama_response_raw.startswith("An unexpected error occurred:") :
-            ai_response_message += f"Ollama API Error: {ollama_response_raw}\n"
+        elif ai_provider == "NONE":
+            ai_response_message += "No AI provider selected. Input acknowledged."
+            break 
         else:
-            ai_response_message += f"Ollama raw response (SQL query attempt):\n{ollama_response_raw}\n"
+            ai_response_message += f"AI Provider '{ai_provider}' is not recognized."
+            break 
 
-            sql_query, validation_error = clean_and_validate_sql(ollama_response_raw)
-            executed_query_str = sql_query # Store the cleaned query
+        last_raw_sql_from_ai = raw_sql_from_ai_this_attempt # Store for potential next retry
 
-            # Ensure AI user is configured using the main app's DB connection
+        if not raw_sql_from_ai_this_attempt: # If AI call failed
+            if attempt_num >= max_retries: break 
+            continue # Try next attempt if AI call itself failed and retries are left
+
+        ai_response_message += f"AI raw response (SQL query attempt):\n{raw_sql_from_ai_this_attempt}\n"
+        
+        cleaned_sql_this_attempt, validation_err_msg = clean_and_validate_sql(raw_sql_from_ai_this_attempt)
+        final_executed_query_str = cleaned_sql_this_attempt # Store the latest cleaned query for display
+
+        if validation_err_msg:
+            last_error_for_retry = validation_err_msg
+            ai_response_message += f"SQL Validation Error: {validation_err_msg}\n"
+            if attempt_num >= max_retries: break 
+            continue 
+        
+        ai_response_message += "SQL query validated successfully. Attempting execution...\n"
+
+        # Ensure AI user is configured (only if an AI provider was used)
+        if ai_provider != "NONE":
             try:
-                main_db_conn_for_setup = get_db()
-                _ensure_ai_user_configured(main_db_conn_for_setup)
+                _ensure_ai_user_configured(get_db())
+                if not ai_user_setup_done: 
+                    raise Exception("AI user setup flag not set after configuration attempt.")
             except Exception as setup_err:
                 ai_response_message += f"Critical Error: Could not ensure AI user setup: {setup_err}\nQuery will not be executed.\n"
+                last_error_for_retry = f"AI User setup failed: {setup_err}"
+                break 
 
-            if validation_error:
-                ai_response_message += f"SQL Validation Error: {validation_error}\n"
-            elif sql_query and ai_user_setup_done: # Only execute if SQL is valid AND setup was successful
-                try:
-                    with get_db().cursor(cursor_factory=DictCursor) as cur:
-                        cur.execute(f"SET LOCAL ROLE {AI_CHAT_DB_USER_NAME};")
-                        cur.execute(sql_query)
-                        results = cur.fetchall()
-                        get_db().commit()
-                    
-                    query_results_list = []
-                    if results:
-                        for row in results:
-                            query_results_list.append({
-                                "item_id": row.get("item_id"),
-                                "title": row.get("title"),
-                                "artist": row.get("author")
-                            })
-                        ai_response_message += f"Successfully executed query. Found {len(query_results_list)} songs.\n"
-                    else:
-                        ai_response_message += "Query executed successfully, but found no matching songs.\n"
-                except Exception as e:
-                    get_db().rollback()
-                    ai_response_message += f"Database Error executing query: {str(e)}\n"
-            elif sql_query and not ai_user_setup_done:
-                ai_response_message += "AI User setup was not completed successfully. Query was not executed for security reasons.\n"
-
-    # --- GEMINI ---
-    elif ai_provider == "GEMINI":
-        actual_model_used = ai_model_from_request or GEMINI_MODEL_NAME
-        gemini_api_key_from_request = data.get('gemini_api_key')
-
-        if not gemini_api_key_from_request:
-            error_message = "Error: Gemini API key was not provided in the request.\n"
-            ai_response_message += error_message
-            return jsonify({"response": {"message": ai_response_message, "original_request": user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used, "query_results": None, "executed_query": None}}), 400
-
-        ai_response_message += f"Processing with GEMINI model: {actual_model_used} (using API key from request).\n"
-
-        # Prepare the full prompt by inserting the user's input
-        full_prompt_for_gemini = base_expert_playlist_creator_prompt.replace("{user_input_placeholder}", user_input)
-
-        gemini_response_raw = get_gemini_playlist_name(gemini_api_key_from_request, actual_model_used, full_prompt_for_gemini)
-
-        if gemini_response_raw.startswith("Error:"):
-            ai_response_message += f"Gemini API Error: {gemini_response_raw}\n"
-        else:
-            ai_response_message += f"Gemini raw response (SQL query attempt):\n{gemini_response_raw}\n"
-
-            sql_query, validation_error = clean_and_validate_sql(gemini_response_raw)
-            executed_query_str = sql_query # Store the cleaned query
-
-            # Ensure AI user is configured using the main app's DB connection
-            # This connection (get_db()) should have privileges to create roles/users and grant.
+        # --- Execute Query ---
+        if cleaned_sql_this_attempt and ai_user_setup_done :
             try:
-                main_db_conn_for_setup = get_db()
-                _ensure_ai_user_configured(main_db_conn_for_setup)
-            except Exception as setup_err:
-                ai_response_message += f"Critical Error: Could not ensure AI user setup: {setup_err}\nQuery will not be executed.\n"
-                # Proceed without executing query if setup fails
+                with get_db().cursor(cursor_factory=DictCursor) as cur:
+                    cur.execute(f"SET LOCAL ROLE {AI_CHAT_DB_USER_NAME};")
+                    cur.execute(cleaned_sql_this_attempt)
+                    results = cur.fetchall()
+                    get_db().commit()
+                
+                if results:
+                    final_query_results_list = [] 
+                    for row in results:
+                        final_query_results_list.append({
+                            "item_id": row.get("item_id"), "title": row.get("title"), "artist": row.get("author")
+                        })
+                    ai_response_message += f"Successfully executed query. Found {len(final_query_results_list)} songs.\n"
+                    final_executed_query_str = cleaned_sql_this_attempt # Store successful query
+                    break # Success, exit retry loop
+                else:
+                    ai_response_message += "Query executed successfully, but found no matching songs.\n"
+                    last_error_for_retry = "Query returned no results."
+                    # final_executed_query_str is already set to cleaned_sql_this_attempt
+                    if attempt_num >= max_retries: break
+                    continue # Go to next retry for "no results"
 
-            if validation_error:
-                ai_response_message += f"SQL Validation Error: {validation_error}\n"
-            elif sql_query and ai_user_setup_done: # Only execute if SQL is valid AND setup was successful
-                try:
-                    with get_db().cursor(cursor_factory=DictCursor) as cur: # Use main connection context
-                        cur.execute(f"SET LOCAL ROLE {AI_CHAT_DB_USER_NAME};") # Execute as AI_USER for this transaction
-                        cur.execute(sql_query)
-                        results = cur.fetchall()
-                        # SET LOCAL ROLE is transaction-scoped, role resets on commit/rollback.
-                        # SELECT doesn't strictly need a commit, but it finalizes the transaction.
-                        get_db().commit()
-                    
-                    query_results_list = []
-                    if results:
-                        for row in results:
-                            query_results_list.append({
-                                "item_id": row.get("item_id"), # Ensure these columns are in your SELECT
-                                "title": row.get("title"),
-                                "artist": row.get("author") # Map author to artist for frontend
-                            })
-                        ai_response_message += f"Successfully executed query. Found {len(query_results_list)} songs.\n"
-                    else:
-                        ai_response_message += "Query executed successfully, but found no matching songs.\n"
-                except Exception as e:
-                    get_db().rollback() # Rollback on error
-                    ai_response_message += f"Database Error executing query: {str(e)}\n"
-                    # query_results_list remains None or empty
-            elif sql_query and not ai_user_setup_done:
-                ai_response_message += "AI User setup was not completed successfully. Query was not executed for security reasons.\n"
+            except Exception as db_exec_error:
+                get_db().rollback()
+                db_error_str = f"Database Error executing query: {str(db_exec_error)}"
+                ai_response_message += f"{db_error_str}\n"
+                last_error_for_retry = db_error_str
+                if attempt_num >= max_retries: break
+                continue
+        elif cleaned_sql_this_attempt and not ai_user_setup_done:
+             ai_response_message += "AI User setup was not completed successfully. Query was not executed for security reasons.\n"
+             last_error_for_retry = "AI User setup failed prior to query execution."
+             break # Cannot execute without user setup
 
-    elif ai_provider == "NONE":
-        ai_response_message += "No AI provider selected. Input acknowledged."
-    else:
-        ai_response_message += f"AI Provider '{ai_provider}' is not recognized."
+    # --- After retry loop ---
+    if not final_query_results_list and last_error_for_retry:
+        ai_response_message += f"\nFailed to generate and execute a valid query that returns results after {attempt_num + 1} attempt(s). Last issue: {last_error_for_retry}\n"
 
-    return jsonify({"response": {"message": ai_response_message, "original_request": user_input, "ai_provider_used": ai_provider, "ai_model_selected": actual_model_used, "executed_query": executed_query_str, "query_results": query_results_list}}), 200
+    return jsonify({"response": {"message": ai_response_message, 
+                                 "original_request": original_user_input, 
+                                 "ai_provider_used": ai_provider, 
+                                 "ai_model_selected": actual_model_used, 
+                                 "executed_query": final_executed_query_str, # Show last attempted/successful query
+                                 "query_results": final_query_results_list}}), 200
 
 @chat_bp.route('/api/createJellyfinPlaylist', methods=['POST'])
 def create_jellyfin_playlist_api():
