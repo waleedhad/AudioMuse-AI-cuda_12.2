@@ -223,7 +223,7 @@ def chat_playlist_api():
     - CRITICAL FOR AUTHOR AND TITLE STRINGS: To include a single quote (') within a SQL string literal, you MUST use two single quotes (''), e.g., 'Player''s Choice'. Do NOT use backslash escapes like \' in the final SQL.
 
     WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS / FILM SONGS:
-    - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles.
+    - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles AND authors.
     - Include 100 well-matched song titles and author based on your knowledge.
     - You need to add both title and artist ILIKE.
 
