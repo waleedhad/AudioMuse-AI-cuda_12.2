@@ -195,8 +195,37 @@ def chat_playlist_api():
 
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
+    """
+    API endpoint to handle chat input and (mock) AI interaction.
+    This is a synchronous endpoint.
+    """
+    data = request.get_json()
+    print(f"DEBUG: chat_playlist_api called. Raw request data: {data}") # Log raw request
+
+    from app import get_db # Import get_db here, inside the function
+    if not data or 'userInput' not in data:
+        return jsonify({"error": "Missing userInput in request"}), 400
+
+    original_user_input = data.get('userInput')
+    # Use AI provider from request, or fallback to global config, then to "NONE"
+    ai_provider = data.get('ai_provider', AI_MODEL_PROVIDER).upper() # Use the imported constant
+    ai_model_from_request = data.get('ai_model') # Model selected by user on chat page
+
+    ai_response_message = f"Received your request: '{original_user_input}'.\n"
+    actual_model_used = None
+
+    # Variables to hold the final state after potential retries
+    final_query_results_list = None
+    final_executed_query_str = None # The SQL string that was last attempted or successfully executed
+    
+    # Variables for retry logic
+    last_raw_sql_from_ai = None
+    last_error_for_retry = None
+
+    # Define the prompt structure once, to be used by any provider that needs it.
+    # The [USER INPUT] placeholder will be replaced dynamically.
     base_expert_playlist_creator_prompt = """
-    You are both a music trends expert (with deep knowledge of current radio charts, MTV, Spotify, YouTube trending songs, and other popular music services as of 2024-2025) AND a PostgreSQL query writer.
+    You are both a music trends expert (with deep knowledge of current radio charts, MTV, Spotify, YouTube trending songs, and other popular music services) AND a PostgreSQL query writer.
 
     Your mission:
     Convert the user's natural language playlist request into the best possible SQL query for table public.score. Before writing SQL:
@@ -206,26 +235,15 @@ def chat_playlist_api():
     SQL RULES:
     - Return ONLY the raw SQL query. No comments, no markdown, no explanations.
     - Always SELECT: item_id, title, author
-    - Final outer SELECT must apply: ORDER BY random(), LIMIT 25 (unless the user asks for ordered top/best/famous results).
+    - Final outer SELECT must apply: ORDER BY random(), LIMIT 100 (unless the user asks for ordered top/best/famous results).
     - CRITICAL FOR AUTHOR AND TITLE STRINGS: To include a single quote (') within a SQL string literal, you MUST use two single quotes (''), e.g., 'Player''s Choice'. Do NOT use backslash escapes like \' in the final SQL.
+	- CRITICAL: ALWAYS suggest both Title and Artist using an AND clause WHERE (title = 'Song Title' AND author ILIKE '%Artist Name%')
 
-    WHEN USER ASKS TO LIMIT SONGS PER ARTIST (e.g., "not more than 2 per artist"):
-    - Do NOT use GROUP BY with HAVING COUNT(*). This is incorrect for limiting rows per group.
-    - Instead, use a window function: ROW_NUMBER() OVER (PARTITION BY author ORDER BY ...)
-    - Wrap your main query (including the CASE WHEN for ordering) in a subquery.
-    - In an outer query, SELECT from this subquery and filter using WHERE row_number <= N.
-    - Example structure for limiting to 2 per artist: SELECT item_id, title, author FROM (SELECT item_id, title, author, ..., ROW_NUMBER() OVER (PARTITION BY author ORDER BY ...) as rn FROM (... original query ...) AS sub) AS ranked_results WHERE rn <= 2 ORDER BY ... LIMIT ...
 
     WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS / FILM SONGS:
     - Build a CASE WHEN in ORDER BY that prioritizes exact known hit titles AND authors.
     - Include 100 well-matched song titles and author based on your knowledge.
     - You need to add both title and artist ILIKE.
-
-    AUTHOR / TITLE FILTERING:
-    - Title matches: use title IN ('song1', 'song2', ...) where possible, or CASE WHEN for ordering.
-    - Artist matches: use author ILIKE '%Artist%' patterns for secondary support.
-    - Title and Artis matches: when both title and artist are avaiable, ALWAYS using an AND clause WHERE (title = 'Song Title' AND author ILIKE '%Artist Name%')
-    - For mood_vector or other_features filtering, use CAST + regex where necessary.
 
     MOOD / FEATURE FILTERING:
     - mood_vector and other_features columns contain comma-separated label:score pairs (0-1).

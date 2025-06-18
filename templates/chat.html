@@ -333,11 +333,23 @@
                 createPlaylistSection.style.display = 'none'; // Hide by default
                 jellyfinResponseArea.textContent = ''; // Clear previous Jellyfin responses
 
-                // Display the textual message from the AI (logs, query, errors, etc.)
+                // --- 1. AI Interaction Log (Collapsible) ---
+                const detailsElement = document.createElement('details');
+                detailsElement.className = 'mb-4 border border-gray-200 rounded-lg shadow-sm'; // Added shadow-sm
+
+                const summaryElement = document.createElement('summary');
+                summaryElement.className = 'p-3 cursor-pointer font-medium text-gray-700 hover:bg-gray-100 rounded-t-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
+                summaryElement.textContent = 'Show/Hide AI Interaction Log';
+                detailsElement.appendChild(summaryElement);
+
+                const logContentDiv = document.createElement('div');
+                // Apply styling for pre-wrap and break-words directly to the log content
+                logContentDiv.className = 'p-3 border-t border-gray-200 bg-gray-50 text-sm text-gray-700 whitespace-pre-wrap break-words rounded-b-lg';
+                
+                // The main message from AI (logs, attempts, etc.)
                 const messageParagraph = document.createElement('p');
-                messageParagraph.className = 'mb-4'; // Add some margin below the message
                 messageParagraph.textContent = responseData.message || "No message from AI.";
-                responseArea.appendChild(messageParagraph);
+                logContentDiv.appendChild(messageParagraph);
 
                 // Add visual cues for retries or final errors based on message content
                 if (responseData.message) {
@@ -345,29 +357,42 @@
                         const errorNotice = document.createElement('p');
                         errorNotice.className = 'text-red-600 font-semibold mt-2 italic';
                         errorNotice.textContent = 'AI failed to generate a valid query that returns results, even after retries.';
-                        responseArea.insertBefore(errorNotice, messageParagraph.nextSibling); // Insert after the main message
+                        logContentDiv.appendChild(errorNotice); // Append to log content
                     } else if (responseData.message.includes("--- Attempt ") && responseData.message.indexOf("--- Attempt 1") !== responseData.message.lastIndexOf("--- Attempt ")) {
                         const retryNotice = document.createElement('p');
                         retryNotice.className = 'text-yellow-600 italic mt-2';
                         retryNotice.textContent = 'AI performed one or more retries to correct the query or find results.';
-                        responseArea.insertBefore(retryNotice, messageParagraph.nextSibling); // Insert after the main message
+                        logContentDiv.appendChild(retryNotice); // Append to log content
                     }
                 }
+                detailsElement.appendChild(logContentDiv);
+                responseArea.appendChild(detailsElement);
 
-                // Display the executed query if available
+                // --- 2. Executed Query (Visible by default, if exists) ---
+                // Now make this collapsible as well
                 if (responseData.executed_query) {
-                    const queryTitle = document.createElement('h4');
-                    queryTitle.className = 'text-md font-semibold text-gray-800 mt-4 mb-1';
-                    queryTitle.textContent = "Executed SQL Query:";
-                    responseArea.appendChild(queryTitle);
+                    const queryDetailsElement = document.createElement('details');
+                    queryDetailsElement.className = 'mb-4 border border-gray-200 rounded-lg shadow-sm';
+                    // queryDetailsElement.open = true; // Optionally open by default
 
-                    const queryCode = document.createElement('code');
-                    queryCode.className = 'block bg-gray-200 p-2 rounded text-sm whitespace-pre-wrap break-words';
-                    queryCode.textContent = responseData.executed_query;
-                    responseArea.appendChild(queryCode);
+                    const querySummaryElement = document.createElement('summary');
+                    querySummaryElement.className = 'p-3 cursor-pointer font-medium text-gray-700 hover:bg-gray-100 rounded-t-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
+                    querySummaryElement.textContent = 'Show/Hide Executed SQL Query';
+                    queryDetailsElement.appendChild(querySummaryElement);
+
+                    const queryContentDiv = document.createElement('div');
+                    queryContentDiv.className = 'p-3 border-t border-gray-200 bg-gray-50 text-sm text-gray-700 whitespace-pre-wrap break-words rounded-b-lg';
+                    
+                    // The actual query code
+                    const queryCodeElement = document.createElement('code');
+                    queryCodeElement.textContent = responseData.executed_query;
+                    queryContentDiv.appendChild(queryCodeElement);
+
+                    queryDetailsElement.appendChild(queryContentDiv);
+                    responseArea.appendChild(queryDetailsElement);
                 }
 
-                // Display the playlist results if available
+                // --- 3. Playlist Results / No Results Message (Visible by default) ---
                 if (responseData.query_results && responseData.query_results.length > 0) {
                     const title = document.createElement('h3');
                     title.className = 'text-xl font-bold text-gray-900 mt-6 mb-2'; // Added mt-6 for spacing
@@ -376,6 +401,8 @@
 
                     const songList = document.createElement('ol');
                     songList.className = 'list-decimal list-inside space-y-2 text-gray-800';
+                    
+                    document.getElementById('playlistItemIds').value = ''; // Clear previous item IDs before populating
 
                     responseData.query_results.forEach(song => {
                         const listItem = document.createElement('li');
@@ -391,10 +418,21 @@
                     // If a query was executed but no results
                     document.getElementById('playlistItemIds').value = ''; // Clear any previous item IDs
                     createPlaylistSection.style.display = 'none';
+                    
                     const noResultsMessage = document.createElement('p');
                     noResultsMessage.className = 'mt-4 text-gray-600 italic';
                     noResultsMessage.textContent = "The query returned no songs.";
                     responseArea.appendChild(noResultsMessage);
+                } else if (!responseData.executed_query && 
+                           responseArea.childNodes.length === 1 && 
+                           responseArea.firstChild.tagName === 'DETAILS' && 
+                           responseArea.firstChild.querySelector('summary').textContent.includes('AI Interaction Log')) {
+                    // This case handles when only the log is present (e.g., AI provider NONE, or an error before query execution)
+                    // and no query was attempted/executed.
+                    const placeholder = document.createElement('p');
+                    placeholder.className = 'text-gray-500 italic mt-4';
+                    placeholder.textContent = 'No playlist generated yet. Try making a request!';
+                    responseArea.appendChild(placeholder);
                 }
             }
             
