@@ -67,6 +67,7 @@
         .text-gray-700 { color: #374151; }
         .text-gray-500 { color: #6B7280; }
         .text-red-600 { color: #DC2626; }
+        .text-yellow-600 { color: #CA8A04; } /* For retry notice */
         .bg-blue-600 { background-color: #2563EB; }
         .hover\:bg-blue-700:hover { background-color: #1D4ED8; }
         .text-white { color: #FFFFFF; }
@@ -337,6 +338,21 @@
                 messageParagraph.className = 'mb-4'; // Add some margin below the message
                 messageParagraph.textContent = responseData.message || "No message from AI.";
                 responseArea.appendChild(messageParagraph);
+
+                // Add visual cues for retries or final errors based on message content
+                if (responseData.message) {
+                    if (responseData.message.includes("Failed to generate and execute a valid query after") || responseData.message.includes("Last issue:")) {
+                        const errorNotice = document.createElement('p');
+                        errorNotice.className = 'text-red-600 font-semibold mt-2 italic';
+                        errorNotice.textContent = 'AI failed to generate a valid query that returns results, even after retries.';
+                        responseArea.insertBefore(errorNotice, messageParagraph.nextSibling); // Insert after the main message
+                    } else if (responseData.message.includes("--- Attempt ") && responseData.message.indexOf("--- Attempt 1") !== responseData.message.lastIndexOf("--- Attempt ")) {
+                        const retryNotice = document.createElement('p');
+                        retryNotice.className = 'text-yellow-600 italic mt-2';
+                        retryNotice.textContent = 'AI performed one or more retries to correct the query or find results.';
+                        responseArea.insertBefore(retryNotice, messageParagraph.nextSibling); // Insert after the main message
+                    }
+                }
 
                 // Display the executed query if available
                 if (responseData.executed_query) {
