@@ -4,6 +4,7 @@ from psycopg2.extras import DictCursor
 from flask import Flask, jsonify, request, render_template, g
 from contextlib import closing
 import json
+import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
 
 # RQ imports
@@ -24,7 +25,7 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, \
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
-    DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
+    DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
     AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
 
@@ -137,6 +138,14 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS embedding (
+            item_id TEXT PRIMARY KEY,
+            embedding_vector JSONB,
+            FOREIGN KEY (item_id) REFERENCES score (item_id) ON DELETE CASCADE
+        )
+    """)
+    app.logger.info("Database tables checked/created successfully.")
     db.commit()
     cur.close()
 
@@ -255,14 +264,24 @@ def get_task_info_from_db(task_id):
 def track_exists(item_id):
     """
     Checks if a track exists in the database AND has been analyzed for key features.
-    Returns True if the track exists and 'other_features' (not NULL, not empty),
-    'energy' (not NULL), 'mood_vector' (not NULL, not empty), and 'tempo' (not NULL)
-    are all populated. Returns False otherwise.
+    in both the 'score' and 'embedding' tables.
+    Returns True if:
+    1. The track exists in 'score' table and 'other_features', 'energy', 'mood_vector', and 'tempo' are populated.
+    2. The track exists in the 'embedding' table.
+    Returns False otherwise, indicating a re-analysis is needed.
     """
     conn = get_db()
     cur = conn.cursor()
-    # Check if the track exists and if key analysis fields are populated
-    cur.execute("SELECT item_id FROM score WHERE item_id = %s AND other_features IS NOT NULL AND other_features != '' AND energy IS NOT NULL AND mood_vector IS NOT NULL AND mood_vector != '' AND tempo IS NOT NULL", (item_id,))
+    cur.execute("""
+        SELECT s.item_id
+        FROM score s
+        JOIN embedding e ON s.item_id = e.item_id
+        WHERE s.item_id = %s
+          AND s.other_features IS NOT NULL AND s.other_features != ''
+          AND s.energy IS NOT NULL
+          AND s.mood_vector IS NOT NULL AND s.mood_vector != ''
+          AND s.tempo IS NOT NULL
+    """, (item_id,))
     row = cur.fetchone()
     cur.close()
     return row is not None
@@ -293,13 +312,83 @@ def save_track_analysis(item_id, title, author, tempo, key, scale, moods, energy
     finally:
         cur.close()
 
+def save_track_embedding(item_id, embedding_vector):
+    """Saves or updates the embedding vector for a track."""
+    if embedding_vector is None: # Should not happen if analysis is successful
+        print(f"Warning: Embedding vector for {item_id} is None. Skipping save.")
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        # Convert numpy array to list for JSON serialization
+        embedding_list = embedding_vector.tolist() if isinstance(embedding_vector, np.ndarray) else embedding_vector
+        embedding_json = json.dumps(embedding_list)
+        cur.execute("""
+            INSERT INTO embedding (item_id, embedding_vector) VALUES (%s, %s)
+            ON CONFLICT (item_id) DO UPDATE SET embedding_vector = EXCLUDED.embedding_vector
+        """, (item_id, embedding_json))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Error saving track embedding for {item_id}: {e}")
+    finally:
+        cur.close()
+
 def get_all_tracks(): # Removed db_path
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT item_id, title, author, tempo, key, scale, mood_vector, energy, other_features FROM score") # Added energy and other_features
+    # Join with embedding table to get embedding_vector
+    cur.execute("""
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding_vector
+        FROM score s
+        LEFT JOIN embedding e ON s.item_id = e.item_id
+    """)
     rows = cur.fetchall() # Returns list of DictRow
     cur.close()
     return rows
+
+def get_tracks_by_ids(item_ids_list):
+    """Fetches full track data (including embeddings) for a specific list of item_ids."""
+    if not item_ids_list:
+        return []
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    # Using a placeholder for a list of IDs
+    # psycopg2 can convert a list to a tuple for the IN operator
+    query = """
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding_vector
+        FROM score s
+        LEFT JOIN embedding e ON s.item_id = e.item_id
+        WHERE s.item_id IN %s
+    """
+    cur.execute(query, (tuple(item_ids_list),)) # Pass list as a tuple for IN clause
+    rows = cur.fetchall()
+    cur.close()
+    # app.logger.debug(f"Fetched {len(rows)} tracks for {len(item_ids_list)} IDs.")
+    return rows
+
+def get_score_data_by_ids(item_ids_list):
+    """Fetches only score-related data (excluding embeddings) for a specific list of item_ids."""
+    if not item_ids_list:
+        return []
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    query = """
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features
+        FROM score s
+        WHERE s.item_id IN %s
+    """
+    try:
+        cur.execute(query, (tuple(item_ids_list),))
+        rows = cur.fetchall()
+    except Exception as e:
+        app.logger.error(f"Error fetching score data by IDs: {e}")
+        rows = [] # Return empty list on error
+    finally:
+        cur.close()
+    return rows
+
 
 def update_playlist_table(playlists): # Removed db_path
     conn = get_db()
@@ -587,6 +676,10 @@ def start_clustering_endpoint():
                 type: integer
                 description: Number of top moods to consider for clustering feature vectors (uses the first N from global MOOD_LABELS).
                 default: "Configured TOP_N_MOODS"
+              enable_clustering_embeddings:
+                type: boolean
+                description: Whether to use embeddings for clustering (True) or score_vector (False).
+                default: false
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -675,7 +768,8 @@ def start_clustering_endpoint():
     ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
     gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
     gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
-    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS)) # New parameter for clustering
+    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS))
+    enable_clustering_embeddings_param = data.get('enable_clustering_embeddings', ENABLE_CLUSTERING_EMBEDDINGS) # Get new flag
     job_id = str(uuid.uuid4())
 
     # Clean up details of previously successful tasks before starting a new one
@@ -690,6 +784,8 @@ def start_clustering_endpoint():
             pca_components_min_val, pca_components_max_val,
             num_clustering_runs_val,
             max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
+            min_songs_per_genre_for_stratification_val, # Added
+            stratified_sampling_target_percentile_val,  # Added
             score_weight_diversity_val, score_weight_silhouette_val,
             score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val,
             score_weight_purity_val,
@@ -698,7 +794,8 @@ def start_clustering_endpoint():
             score_weight_other_feature_purity_val,
             # Pass AI params and new top_n_moods for clustering
             ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param,
-            top_n_moods_for_clustering # Pass to the task
+            top_n_moods_for_clustering, # Pass to the task
+            enable_clustering_embeddings_param # Pass new flag
         ),
         job_id=job_id,
         description="Main Music Clustering",
@@ -1212,6 +1309,12 @@ def get_config_endpoint():
                 score_weight_other_feature_purity:
                   type: number
                   format: float
+                gmm_covariance_type:
+                  type: string
+                  description: Default GMM covariance type.
+                enable_clustering_embeddings:
+                  type: boolean
+                  description: Default state for using embeddings in clustering.
     """
     return jsonify({
         "jellyfin_url": JELLYFIN_URL, "jellyfin_user_id": JELLYFIN_USER_ID, "jellyfin_token": JELLYFIN_TOKEN,
@@ -1228,7 +1331,7 @@ def get_config_endpoint():
         "ollama_server_url": OLLAMA_SERVER_URL, "ollama_model_name": OLLAMA_MODEL_NAME,
         "gemini_api_key": GEMINI_API_KEY, "gemini_model_name": GEMINI_MODEL_NAME,
         "top_n_moods": TOP_N_MOODS, "mood_labels": MOOD_LABELS, "clustering_runs": CLUSTERING_RUNS,
-        # Scoring weights
+        "enable_clustering_embeddings": ENABLE_CLUSTERING_EMBEDDINGS, # Expose new flag
         "score_weight_diversity": SCORE_WEIGHT_DIVERSITY,
         "score_weight_silhouette": SCORE_WEIGHT_SILHOUETTE,
         "score_weight_davies_bouldin": SCORE_WEIGHT_DAVIES_BOULDIN,
@@ -1285,4 +1388,4 @@ def get_playlists_endpoint():
 if __name__ == '__main__':
     os.makedirs(TEMP_DIR, exist_ok=True)
     # The app context for init_db is handled at the top level of the script.
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    app.run(debug=False, host='0.0.0.0', port=8000)

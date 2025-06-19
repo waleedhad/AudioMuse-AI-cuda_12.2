@@ -25,7 +25,7 @@ from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
 # Import necessary components from the main app.py file (ensure these are available)
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
-                track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus,
+                track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus, # Removed save_track_embedding from top
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
                 TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
 
@@ -162,11 +162,29 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     musicnn_embedding_model = TensorflowPredictMusiCNN(
         graphFilename=embedding_model_path, output="model/dense/BiasAdd" # Main embedding model
     )
-    musicnn_embeddings = musicnn_embedding_model(audio)
+    raw_musicnn_embeddings = musicnn_embedding_model(audio) # Raw output, potentially 2D
+
+    processed_musicnn_embeddings = np.array([]) # Initialize as empty 1D array
+
+    if isinstance(raw_musicnn_embeddings, np.ndarray):
+        if raw_musicnn_embeddings.ndim == 1:
+            processed_musicnn_embeddings = raw_musicnn_embeddings
+        elif raw_musicnn_embeddings.ndim == 2:
+            if raw_musicnn_embeddings.shape[0] > 0: # If there are rows (segments or batch_size=1)
+                # Average across the first dimension
+                processed_musicnn_embeddings = np.mean(raw_musicnn_embeddings, axis=0)
+            else: # Shape is (0, D) - no rows
+                print(f"Warning: Raw MusicNN embeddings are 2D with no rows (shape: {raw_musicnn_embeddings.shape}). Resulting in empty 1D embedding.")
+                # processed_musicnn_embeddings remains np.array([])
+        else: # ndim > 2 or ndim == 0 (scalar, unlikely)
+            print(f"Warning: Raw MusicNN embeddings have unexpected ndim: {raw_musicnn_embeddings.ndim} (shape: {raw_musicnn_embeddings.shape}). Resulting in empty 1D embedding.")
+            # processed_musicnn_embeddings remains np.array([])
+    else:
+        print(f"Warning: Raw MusicNN output is not a NumPy array. Type: {type(raw_musicnn_embeddings)}. Resulting in empty 1D embedding.")
+        # processed_musicnn_embeddings remains np.array([])
 
     tempo, _, _, _, _ = RhythmExtractor2013()(audio)
     key, scale, _ = KeyExtractor()(audio)
-    moods = predict_moods(musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS) # Pass embeddings and correct model path
 
     # Calculate raw total energy
     raw_total_energy = Energy()(audio)
@@ -178,7 +196,24 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     else:
         average_energy_per_sample = 0.0 # Should not happen for valid audio
 
-    other_predictions = predict_other_models(musicnn_embeddings) # Pass the same MusiCNN embeddings
+    # Initialize moods and other_predictions with defaults
+    moods = {label: 0.0 for label in mood_labels_list}
+    other_predictions = {
+        "danceable": 0.0, "aggressive": 0.0, "happy": 0.0,
+        "party": 0.0, "relaxed": 0.0, "sad": 0.0
+    }
+
+    if processed_musicnn_embeddings.size > 0 and np.all(np.isfinite(processed_musicnn_embeddings)):
+        try:
+            moods = predict_moods(processed_musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS)
+        except Exception as e_mood:
+            print(f"Error during predict_moods: {e_mood}. Using default moods.")
+        try:
+            other_predictions = predict_other_models(processed_musicnn_embeddings)
+        except Exception as e_other:
+            print(f"Error during predict_other_models: {e_other}. Using default other_predictions.")
+    else:
+        print(f"Warning: Processed MusicNN embeddings are empty or invalid. Skipping mood/other predictions. Shape: {processed_musicnn_embeddings.shape if isinstance(processed_musicnn_embeddings, np.ndarray) else 'N/A'}")
 
     # Combine all predictions into a single dictionary
     all_predictions = {
@@ -189,8 +224,8 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
         "energy": float(average_energy_per_sample), # Store average energy per sample
         **other_predictions  # Include danceable, aggressive, etc. directly
     }
-
-    return all_predictions
+    # Return the predictions dictionary and the PROCESSED (1D) embeddings numpy array
+    return all_predictions, processed_musicnn_embeddings
 
 # --- RQ Task Definitions ---
 
@@ -201,10 +236,12 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
+        from app import save_track_embedding # Import here
         initial_details = {"album_name": album_name, "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Album analysis task started."]}
         save_task_status(current_task_id, "album_analysis", TASK_STATUS_STARTED, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=0, details=initial_details)
         headers = {"X-Emby-Token": jellyfin_token}
         tracks_analyzed_count = 0
+        tracks_skipped_count = 0
         current_progress_val = 0
         # Accumulate logs here for the current task
         current_task_logs = initial_details["log"]
@@ -292,8 +329,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     current_track_analysis_details=None)
 
                 if track_exists(item['Id']):
-                    log_and_update_album_task(f"Skipping '{track_name_full}' (already analyzed)", current_progress_val, current_track_name=track_name_full)
-                    tracks_analyzed_count +=1
+                    log_and_update_album_task(f"Skipping '{track_name_full}' (already fully analyzed with embedding)", current_progress_val, current_track_name=track_name_full)
+                    tracks_skipped_count +=1
                     continue
 
                 path = download_track(jellyfin_url, headers, TEMP_DIR, item)
@@ -303,7 +340,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     continue
 
                 try:
-                    analysis_results = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
+                    # analyze_track now returns two values: results dict and the embedding
+                    analysis_results, track_embedding = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
                     tempo = analysis_results.get("tempo", 0.0)
                     key = analysis_results.get("key", "")
                     scale = analysis_results.get("scale", "")
@@ -332,6 +370,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     }
                     # Save only the top_n_moods
                     save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_moods_to_save_dict, energy=energy, other_features=other_features_str)
+                    # Save the embedding
+                    save_track_embedding(item['Id'], track_embedding)
                     tracks_analyzed_count += 1
 
                     # For logging, we already have the top_moods_to_save_dict
@@ -359,12 +399,13 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
 
             success_summary = {
                 "tracks_analyzed": tracks_analyzed_count,
+                "tracks_skipped": tracks_skipped_count,
                 "total_tracks_in_album": total_tracks_in_album,
                 "message": f"Album '{album_name}' analysis complete."
             }
-            log_and_update_album_task(f"Album '{album_name}' analysis complete. Analyzed {tracks_analyzed_count}/{total_tracks_in_album} tracks.",
+            log_and_update_album_task(f"Album '{album_name}' analysis complete. Analyzed {tracks_analyzed_count}, Skipped {tracks_skipped_count} (out of {total_tracks_in_album} total).",
                                       100, task_state=TASK_STATUS_SUCCESS, final_summary_details=success_summary)
-            return {"status": "SUCCESS", "message": f"Album '{album_name}' analysis complete.", "tracks_analyzed": tracks_analyzed_count, "total_tracks": total_tracks_in_album}
+            return {"status": "SUCCESS", "message": f"Album '{album_name}' analysis complete.", "tracks_analyzed": tracks_analyzed_count, "tracks_skipped": tracks_skipped_count, "total_tracks": total_tracks_in_album}
         except Exception as e:
             error_tb = traceback.format_exc()
             failure_details = {"error": str(e), "traceback": error_tb, "album_name": album_name}
@@ -606,6 +647,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             final_summary_for_db = {
                 "successful_albums": successful_albums,
                 "failed_albums": failed_albums,
+            # total_tracks_analyzed_all_albums will now reflect only newly/re-analyzed tracks
                 "total_tracks_analyzed": total_tracks_analyzed_all_albums
             }
             final_message = f"Main analysis complete. Successful albums: {successful_albums}, Failed albums: {failed_albums}. Total tracks analyzed: {total_tracks_analyzed_all_albums}."

@@ -16,11 +16,12 @@ HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
-NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "3000")) # Convert to int
+NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
 AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "NONE").upper() # Accepted: OLLAMA, GEMINI, NONE
+ENABLE_CLUSTERING_EMBEDDINGS = os.environ.get("ENABLE_CLUSTERING_EMBEDDINGS", "False").lower() == "true"
 
 # --- DBSCAN Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for DBSCAN parameters
@@ -34,6 +35,9 @@ DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20"))
 # Default ranges for KMeans parameters
 NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "40"))
 NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "100"))
+# New for MiniBatchKMeans
+USE_MINIBATCH_KMEANS = os.environ.get("USE_MINIBATCH_KMEANS", "True").lower() == "true" # Enable MiniBatchKMeans
+MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE = int(os.getenv("MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE", "1000")) # Internal batch size for MiniBatchKMeans partial_fit
 
 # --- GMM Only Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for GMM parameters
@@ -44,7 +48,7 @@ GMM_COVARIANCE_TYPE = os.environ.get("GMM_COVARIANCE_TYPE", "full") # 'full', 't
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
 PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA
-PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components for PCA
+PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components for PCA 8 for score vectore, 199 for embeding
 
 # --- Clustering Runs for Diversity (New Constant) ---
 CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "5000")) # Default to 100 runs for evolutionary search
@@ -52,7 +56,8 @@ MAX_QUEUED_ANALYSIS_JOBS = int(os.environ.get("MAX_QUEUED_ANALYSIS_JOBS", "100")
 
 # --- Batching Constants for Clustering Runs ---
 ITERATIONS_PER_BATCH_JOB = int(os.environ.get("ITERATIONS_PER_BATCH_JOB", "20")) # Number of clustering iterations per RQ batch job
-MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "6")) # Max number of batch jobs to run concurrently
+MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "10")) # Max number of batch jobs to run concurrently
+DB_FETCH_CHUNK_SIZE = int(os.environ.get("DB_FETCH_CHUNK_SIZE", "1000")) # Chunk size for fetching full track data from DB in batch jobs
 
 # --- Guided Evolutionary Clustering Constants ---
 TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10")) # Number of best solutions to keep as elites
@@ -84,12 +89,28 @@ LN_MOOD_DIVERSITY_STATS = {
     "sd": float(os.environ.get("LN_MOOD_DIVERSITY_SD", "0.3541"))
 }
 
+# Constants for Log-Transformed and Standardized Mood Diversity WHEN EMBEDDINGS ARE USED
+LN_MOOD_DIVERSITY_EMBEDING_STATS = { # Corrected spelling to "EMBEDING"
+    "min": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_MIN", "-0.174")),
+    "max": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_MAX", "0.570")),
+    "mean": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_MEAN", "-0.101")),
+    "sd": float(os.environ.get("LN_MOOD_DIVERSITY_EMBEDDING_SD", "0.245")) # Kept env var name consistent for now
+}
+
 # Constants for Log-Transformed and Standardized Mood Purity
 LN_MOOD_PURITY_STATS = {
     "min": float(os.environ.get("LN_MOOD_PURITY_MIN", "0.6981")),
     "max": float(os.environ.get("LN_MOOD_PURITY_MAX", "7.2848")),
     "mean": float(os.environ.get("LN_MOOD_PURITY_MEAN", "5.8679")),
     "sd": float(os.environ.get("LN_MOOD_PURITY_SD", "1.1557"))
+}
+
+# Constants for Log-Transformed and Standardized Mood Purity WHEN EMBEDDINGS ARE USED
+LN_MOOD_PURITY_EMBEDING_STATS = { # Note: User provided "EMBEDING" spelling
+    "min": float(os.environ.get("LN_MOOD_PURITY_EMBEDDING_MIN", "-0.494")),
+    "max": float(os.environ.get("LN_MOOD_PURITY_EMBEDDING_MAX", "2.583")),
+    "mean": float(os.environ.get("LN_MOOD_PURITY_EMBEDDING_MEAN", "0.673")),
+    "sd": float(os.environ.get("LN_MOOD_PURITY_EMBEDDING_SD", "1.063"))
 }
 
 # --- Statistics for Log-Transformed and Standardized "Other Features" Scores ---
