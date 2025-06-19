@@ -81,7 +81,7 @@ After deploying with the K3S Quick Start, you'll want to run an **Analysis Task*
 
 2.  **K-Means Specific: `NUM_CLUSTERS_MIN` & `NUM_CLUSTERS_MAX`**
     *   **`NUM_CLUSTERS_MIN`** (Default: `40`): The minimum number of playlists (clusters) the algorithm should try to create.
-    *   **`NUM_CLUSTERS_MAX`** (Default: `100`): The maximum number of playlists (clusters) the algorithm should try to create.
+    *   **`NUM_CLUSTERS_MAX`** (Default: `100`): The maximum number of playlists (clusters) the algorithm should try to create. (Note: K-Means generally performs well with feature vectors).
     *   **Guidance:**
         *   Think about how many distinct playlists you'd ideally like. These parameters define the range the evolutionary algorithm will explore for the K-Means `K` value.
         *   The number of clusters cannot exceed the number of songs in the dataset being clustered for a given run. The system will automatically cap the `K` value if your `NUM_CLUSTERS_MAX` is too high for the available songs in a particular iteration's sample.
@@ -184,7 +184,7 @@ The **mandatory** parameter that you need to change from the example are this:
 | `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://YOUR_JELLYFIN_IP:8096`    |
 | `JELLYFIN_USER_ID` | (Required) Jellyfin User ID.                   | *(N/A - from Secret)* |
 | `JELLYFIN_TOKEN`   | (Required) Jellyfin API Token.                 | *(N/A - from Secret)* |
-| `POSTGRES_USER`    | (Required) PostgreSQL username.                | *(N/A - from Secret)* |
+| `POSTGRES_USER`    | (Required) PostgreSQL username.                | *(N/A - from Secret)* | # Corrected typo
 | `POSTGRES_PASSWORD`| (Required) PostgreSQL password.                | *(N/A - from Secret)* |
 | `POSTGRES_DB`      | (Required) PostgreSQL database name.           | *(N/A - from Secret)* |
 | `POSTGRES_HOST`    | (Required) PostgreSQL host.                    | `postgres-service.playlist`       |
@@ -203,12 +203,13 @@ This are the default parameters on wich the analysis or clustering task will be 
 
 | Parameter                                | Description                                                                  | Default Value                        |
 |------------------------------------------|------------------------------------------------------------------------------|--------------------------------------|
-| **Analysis General**                     |                                                                              |                                      |
+| **Analysis General**                     |                                                                              |                                      | 
 | `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `3000`                               |
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
+| `ENABLE_CLUSTERING_EMBEDDINGS`           | Whether to use audio embeddings (True) or score-based features (False) for clustering. | `false`                              |
 | `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
-| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `40`                                 |
+| `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `0`                                  |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
 | `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
@@ -216,10 +217,6 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `100`                                |
 | `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `5`                                  |
 | `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
-| `SAMPLING_PERCENTAGE_CHANGE_PER_RUN`     | Percentage of songs to swap out in the stratified sample between runs (0.0 to 1.0). | `0.2`                                |
-| `MIN_SONGS_PER_GENRE_FOR_STRATIFICATION` | Minimum number of songs to target per stratified genre during sampling.    | `100`                                |
-| `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `75`                                 |
-| `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
 | `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
 | `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
 | `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
@@ -234,12 +231,18 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `20`                                 |
 | `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `60`                                 |
 | `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
+| `USE_MINIBATCH_KMEANS`                   | Whether to use MiniBatchKMeans (True) or standard KMeans (False) when clustering embeddings. | `true`                               |
 | **PCA Ranges**                           |                                                                              |                                      |
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
-| `PCA_COMPONENTS_MAX`                     | Max PCA components.                                                        | `8`                                  |
+| `PCA_COMPONENTS_MAX`                     | Max PCA components (e.g., `8` for feature vectors, `199` for embeddings).    | `8`                                  |
 | **AI Naming (*)**                        |                                                                              |                                      |
 | `AI_MODEL_PROVIDER`                      | AI provider: `OLLAMA`, `GEMINI`, or `NONE`.                                | `NONE`                               |
-| `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>11434/api/generate` |
+| **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
+| `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
+| `SAMPLING_PERCENTAGE_CHANGE_PER_RUN`     | Percentage of songs to swap out in the stratified sample between runs (0.0 to 1.0). | `0.2`                                |
+| `MIN_SONGS_PER_GENRE_FOR_STRATIFICATION` | Minimum number of songs to target per stratified genre during sampling.    | `100`                                |
+| `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `75`                                 |
+| `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>:11434/api/generate` |
 | `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
 | `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
 | **Scoring Weights**                      |                                                                              |                                      |
@@ -252,6 +255,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
 | **K-Means Ranges**                       |                                                                              |                                      |
 | `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `40`                                 |
+| `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
 | `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `100`                                |
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
@@ -317,6 +321,8 @@ This is the main workflow of how this algorithm works. For an easy way to use it
         *   Essentia and TensorFlow models analyze tracks for features (tempo, key, energy) and predictions (genres, moods, etc.).
         *   Analysis results are saved to PostgreSQL.
     *   **Clustering Phase:**
+        *   The option to use embeddings for clustering is currently available in the "Advanced" section of the UI.
+        *   The system can use either the traditional feature vectors (derived from tempo, moods, energy, etc.) or the richer MusiCNN embeddings directly for clustering, based on user configuration.
         *   An evolutionary algorithm performs numerous clustering runs (e.g., K-Means, DBSCAN, or GMM) on the analyzed data. It explores different parameters to find optimal playlist structures based on a comprehensive scoring system.
 *   **Playlist Generation & Naming:**
     *   Playlists are formed from the best clustering solution found by the evolutionary process.
@@ -340,6 +346,7 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
 
 3.  **Embedding Generation (TensorFlow & Essentia):**
     *   **MusiCNN Embeddings:** The cornerstone of the audio representation is a 200-dimensional embedding vector. This vector is generated using `TensorflowPredictMusiCNN` with the pre-trained model `msd-musicnn-1.pb` (specifically, the output from the `model/dense/BiasAdd` layer). MusiCNN is a Convolutional Neural Network (CNN) architecture that has been extensively trained on large music datasets (like the Million Song Dataset) for tasks such as music tagging. The resulting embedding is a dense, numerical summary that captures high-level semantic information and complex sonic characteristics of the track, going beyond simple acoustic features.
+    *   **Important Note:** These embeddings are **always generated and saved** during the analysis phase for every track processed. This ensures they are available if you later choose to use them for clustering.
 
 4.  **Prediction Models (TensorFlow & Essentia):**
     The rich MusiCNN embeddings serve as the input to several specialized `TensorflowPredict2D` models, each designed to predict specific characteristics of the music:
@@ -347,6 +354,7 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
         *   Model: `msd-msd-musicnn-1.pb`
         *   Output: This model produces a vector of probability scores. Each score corresponds to a predefined tag or genre from a list (defined by `MOOD_LABELS` in `config.py`, including labels like 'rock', 'pop', 'electronic', 'jazz', 'chillout', '80s', 'instrumental', etc.). These scores indicate the likelihood of each tag/genre being applicable to the track.
     *   **Other Feature Predictions:** The `predict_other_models` function leverages a suite of distinct `TensorflowPredict2D` models, each targeting a specific musical attribute. These models also take the MusiCNN embedding as input and typically use a `model/Softmax` output layer:
+        *   `danceable`: Predicted using `danceability-msd-musicnn-1.pb`.
         *   `danceable`: Predicted using `danceability-msd-musicnn-1.pb`.
         *   `aggressive`: Predicted using `mood_aggressive-msd-musicnn-1.pb`.
         *   `happy`: Predicted using `mood_happy-msd-musicnn-1.pb`.
@@ -356,7 +364,7 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
         *   Output: Each of these models outputs a probability score (typically the probability of the positive class in a binary classification, e.g., the likelihood the track is 'danceable'). This provides a nuanced understanding of various moods and characteristics beyond the primary tags.
 
 5.  **Feature Vector Preparation for Clustering (`score_vector` function):**
-    Before the actual clustering can occur, all the extracted and predicted features are meticulously assembled and transformed into a single numerical vector for each track. This is a critical step for machine learning algorithms:
+    When not using embeddings directly for clustering, all the extracted and predicted features are meticulously assembled and transformed into a single numerical vector for each track using the `score_vector` function. This is a critical step for machine learning algorithms:
     *   **Normalization:** Tempo and the calculated average energy are normalized to a 0-1 range using configured minimum/maximum values (`TEMPO_MIN_BPM`, `TEMPO_MAX_BPM`, `ENERGY_MIN`, `ENERGY_MAX`). This ensures these features have a comparable scale.
     *   **Normalization:**
         *   Tempo (BPM) and the calculated average energy per sample are normalized to a 0-1 range. This is achieved by scaling them based on predefined minimum and maximum values (e.g., `TEMPO_MIN_BPM = 40.0`, `TEMPO_MAX_BPM = 200.0`, `ENERGY_MIN = 0.01`, `ENERGY_MAX = 0.15` from `config.py`). Normalization ensures that these features, which might have vastly different original scales, contribute more equally during the initial stages of vector construction.
@@ -365,18 +373,27 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
     *   **Standardization:**
         *   This complete feature vector is then standardized using `sklearn.preprocessing.StandardScaler`. Standardization transforms the data for each feature to have a zero mean and unit variance across the entire dataset. This step is particularly crucial for distance-based clustering algorithms like K-Means. It prevents features with inherently larger numerical ranges from disproportionately influencing the distance calculations, ensuring that all features contribute more equitably to the clustering process. The mean and standard deviation (scale) computed by the `StandardScaler` for each feature are saved. These saved values are essential later for inverse transforming cluster centroids back to an interpretable scale, which aids in understanding the characteristics of each generated cluster.
 
+6.  **Option to Use Embeddings Directly for Clustering:**
+    *   As an alternative to the `score_vector`, AudioMuse-AI now offers the option to use the raw MusiCNN embeddings (200-dimensional vectors) directly as input for the clustering algorithms. This is controlled by the `ENABLE_CLUSTERING_EMBEDDINGS` parameter (configurable via the UI).
+    *   Using embeddings directly can capture more nuanced and complex relationships between tracks, as they represent a richer, higher-dimensional summary of the audio. However, this may also require different parameter tuning for the clustering algorithms (e.g., GMM often performs well with embeddings) and can be more computationally intensive, especially with algorithms like standard K-Means (MiniBatchKMeans is used to mitigate this when embeddings are enabled). The maximum number of PCA components can also be higher when using embeddings (e.g., up to 199) compared to feature vectors (e.g., up to 8).
+    *   When embeddings are used with K-Means, **MiniBatchKMeans is employed by default** (controlled by `USE_MINIBATCH_KMEANS`, default is `True`) to handle the larger data size more efficiently. MiniBatchKMeans processes data in smaller batches, making it faster and more memory-efficient for large datasets, though it might yield slightly less accurate cluster centroids compared to standard K-Means. The maximum number of PCA components can also be higher when using embeddings (e.g., up to 199) compared to feature vectors (e.g., up to 8).
+    *   Regardless of the K-Means variant, embeddings are standardized using `StandardScaler` before being fed into the clustering algorithms.
+
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
 
 ## **Clustering Algorithm Deep Dive**
 
-AudioMuse-AI offers three algorithms, each suited for different scenarios when clustering music based on tempo and 5 mood scores. This clustering algorithm is executed multiple times (default 1000\) following an Evolutionary Monte Carlo approach: in this way, multiple configurations of parameters are tested, and the best ones are kept.
+AudioMuse-AI offers three main clustering algorithms (K-Means, DBSCAN, GMM). A key feature is the ability to choose the input data for these algorithms:
+*   **Score-based Feature Vectors:** The traditional approach, using a vector composed of normalized tempo, energy, mood scores, and other derived features (as described in the Analysis section). This is the default.
+*   **Direct Audio Embeddings:** Using the 200-dimensional MusiCNN embeddings generated during analysis. This can provide a more nuanced clustering based on deeper audio characteristics. This option is controlled by the `ENABLE_CLUSTERING_EMBEDDINGS` parameter in the UI's "Advanced" section and configuration. GMM may perform particularly well with embeddings. When embeddings are used with K-Means, MiniBatchKMeans is employed to handle the larger data size more efficiently.
 
+Regardless of the input data chosen, the selected clustering algorithm is executed multiple times (default 5000) following an Evolutionary Monte Carlo approach. This allows the system to test multiple configurations of parameters and find the best ones.
 Here's an explanation of the pros and cons of the different algorithms:
 
 ### **1\. K-Means**
 
 * **Best For:** Speed, simplicity, when clusters are roughly spherical and of similar size.  
-* **Pros:** Very fast, scalable, clear "average" cluster profiles.  
+* **Pros:** Very fast (especially MiniBatchKMeans for large datasets/embeddings), scalable, clear "average" cluster profiles.  
 * **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers.
 
 ### **2\. DBSCAN**
@@ -391,7 +408,7 @@ Here's an explanation of the pros and cons of the different algorithms:
 * **Pros:** Flexible cluster shapes, "soft" assignments, model-based insights.  
 * **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
 
-**Recommendation:** Start with **K-Means** for general use due to its speed in the evolutionary search. Experiment with **GMM** for more nuanced results. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 1000\) helps the integrated evolutionary algorithm to find a good solution.
+**Recommendation:** Start with **K-Means** (which will use MiniBatchKMeans by default if embeddings are enabled) due to its speed in the evolutionary search. MiniBatchKMeans is particularly helpful for larger libraries or when using embeddings. Experiment with **GMM** for more nuanced results, especially when using direct audio embeddings. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 5000) helps the integrated evolutionary algorithm to find a good solution.
 
 ### Montecarlo Evolutionary Approach
 
@@ -407,7 +424,7 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
 
 2.  **Data Perturbation:** For subsequent runs after the first, the sampled subset isn't entirely random. A percentage of songs (`SAMPLING_PERCENTAGE_CHANGE_PER_RUN`) are randomly swapped out, while the rest are kept from the previous iteration's sample. This controlled perturbation introduces variability while retaining some continuity between runs.
 
-1.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 1000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
+1.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 5000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
 
 3.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
     *   **Elite Solutions:** The parameter sets from the best-performing runs (the "elites") are remembered.
