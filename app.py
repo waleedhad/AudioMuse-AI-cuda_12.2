@@ -1388,4 +1388,4 @@ def get_playlists_endpoint():
 if __name__ == '__main__':
     os.makedirs(TEMP_DIR, exist_ok=True)
     # The app context for init_db is handled at the top level of the script.
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    app.run(debug=False, host='0.0.0.0', port=8000)

@@ -8,6 +8,7 @@ import sqlglot # Import sqlglot
 import json # For potential future use with more complex AI responses
 import html # For unescaping HTML entities
 import re # For regex-based quote escaping
+import traceback # For logging full tracebacks on the server
 
 # Import AI configuration from the main config.py
 # This assumes config.py is in the same directory as app_chat.py or accessible via Python path.
@@ -328,7 +329,11 @@ def chat_playlist_api():
     This is a synchronous endpoint.
     """
     data = request.get_json()
-    print(f"DEBUG: chat_playlist_api called. Raw request data: {data}") # Log raw request
+    # Mask API key if present in the debug log
+    data_for_log = dict(data) if data else {}
+    if 'gemini_api_key' in data_for_log and data_for_log['gemini_api_key']:
+        data_for_log['gemini_api_key'] = 'API-KEY' # Masked
+    print(f"DEBUG: chat_playlist_api called. Raw request data: {data_for_log}")
 
     from app import get_db # Import get_db here, inside the function
     if not data or 'userInput' not in data:
@@ -353,7 +358,11 @@ def chat_playlist_api():
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
     data = request.get_json()
-    print(f"DEBUG: chat_playlist_api called. Raw request data: {data}") # Log raw request
+    # Mask API key if present in the debug log (repeated due to duplicated block in original file)
+    data_for_log_dup = dict(data) if data else {}
+    if 'gemini_api_key' in data_for_log_dup and data_for_log_dup['gemini_api_key']:
+        data_for_log_dup['gemini_api_key'] = 'API-KEY' # Masked
+    print(f"DEBUG: chat_playlist_api called. Raw request data (dup block): {data_for_log_dup}")
 
     from app import get_db # Import get_db here, inside the function
     if not data or 'userInput' not in data:
@@ -542,7 +551,9 @@ Original full prompt context (for reference):
                 if not ai_user_setup_done: 
                     raise Exception("AI user setup flag not set after configuration attempt.")
             except Exception as setup_err:
-                ai_response_message += f"Critical Error: Could not ensure AI user setup: {setup_err}\nQuery will not be executed.\n"
+                # Log detailed error on the server
+                print(f"ERROR during AI user setup in chat_playlist_api: {setup_err}\n{traceback.format_exc()}")
+                ai_response_message += "Critical Error: Could not ensure AI user setup. Query will not be executed.\n" # Generic message for client
                 last_error_for_retry = f"AI User setup failed: {setup_err}"
                 break 
 
@@ -574,7 +585,9 @@ Original full prompt context (for reference):
             except Exception as db_exec_error:
                 get_db().rollback()
                 db_error_str = f"Database Error executing query: {str(db_exec_error)}"
-                ai_response_message += f"{db_error_str}\n"
+                # Log detailed error on the server
+                print(f"ERROR executing AI generated query in chat_playlist_api: {db_error_str}\n{traceback.format_exc()}")
+                ai_response_message += "Database Error executing query. Please check server logs.\n" # Generic message for client
                 last_error_for_retry = db_error_str
                 if attempt_num >= max_retries: break
                 continue
@@ -686,10 +699,17 @@ def create_jellyfin_playlist_api():
         return jsonify({"message": f"Successfully created playlist '{jellyfin_playlist_name}' on Jellyfin with ID: {created_playlist_info.get('Id')}"}), 200
 
     except requests.exceptions.RequestException as e:
-        error_message = f"Error creating playlist on Jellyfin: {str(e)}"
+        # Log detailed error on the server
+        error_details_for_server = f"Jellyfin API RequestException: {str(e)}\n"
         if hasattr(e, 'response') and e.response is not None: # type: ignore
-            try: error_message += f" - Server Response: {e.response.text}" # type: ignore
+            try: error_details_for_server += f" - Jellyfin Server Response: {e.response.text}\n"
             except: pass
-        return jsonify({"message": error_message}), 500
+        error_details_for_server += traceback.format_exc()
+        print(f"ERROR in create_jellyfin_playlist_api: {error_details_for_server}") # Or use app.logger.error if configured
+        # Return generic error to client
+        return jsonify({"message": "Error communicating with Jellyfin. Please check server logs."}), 500
     except Exception as e: # Catch any other unexpected errors
-        return jsonify({"message": f"An unexpected error occurred: {str(e)}"}), 500
+        # Log detailed error on the server
+        print(f"ERROR in create_jellyfin_playlist_api (Unexpected): {str(e)}\n{traceback.format_exc()}") # Or use app.logger.error
+        # Return generic error to client
+        return jsonify({"message": "An unexpected error occurred while creating the playlist. Please check server logs."}), 500
