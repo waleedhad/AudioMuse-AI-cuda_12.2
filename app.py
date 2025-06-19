@@ -679,7 +679,7 @@ def start_clustering_endpoint():
               enable_clustering_embeddings:
                 type: boolean
                 description: Whether to use embeddings for clustering (True) or score_vector (False).
-                default: "Configured ENABLE_CLUSTERING_EMBEDDINGS"
+                default: false
     responses:
       202:
         description: Clustering task successfully enqueued.
@@ -768,7 +768,7 @@ def start_clustering_endpoint():
     ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
     gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
     gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
-    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS)) # New parameter for clustering
+    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS))
     enable_clustering_embeddings_param = data.get('enable_clustering_embeddings', ENABLE_CLUSTERING_EMBEDDINGS) # Get new flag
     job_id = str(uuid.uuid4())
 
@@ -1309,6 +1309,9 @@ def get_config_endpoint():
                 score_weight_other_feature_purity:
                   type: number
                   format: float
+                enable_clustering_embeddings:
+                  type: boolean
+                  description: Default state for using embeddings in clustering.
     """
     return jsonify({
         "jellyfin_url": JELLYFIN_URL, "jellyfin_user_id": JELLYFIN_USER_ID, "jellyfin_token": JELLYFIN_TOKEN,

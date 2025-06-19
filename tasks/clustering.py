@@ -269,7 +269,7 @@ def run_clustering_task(
             "ollama_model_name_for_run": ollama_model_name_param,
             "gemini_model_name_for_run": gemini_model_name_param,
             "embeddings_enabled_for_clustering": enable_clustering_embeddings_param 
-        }
+        } # Add the new param here for logging
         save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
         current_progress = 0
 
