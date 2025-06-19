@@ -1,5 +1,6 @@
 # app_chat.py
 from flask import Blueprint, render_template, request, jsonify
+from flasgger import swag_from # Import swag_from
 import requests # For Jellyfin API call
 from psycopg2.extras import DictCursor # To get results as dictionaries
 import unicodedata # For ASCII normalization
@@ -138,6 +139,20 @@ def clean_and_validate_sql(raw_sql):
     return cleaned_sql, None
 
 @chat_bp.route('/')
+@swag_from({
+    'tags': ['Chat UI'],
+    'summary': 'Serves the main chat interface HTML page.',
+    'responses': {
+        '200': {
+            'description': 'HTML content of the chat page.',
+            'content': {
+                'text/html': {
+                    'schema': {'type': 'string'}
+                }
+            }
+        }
+    }
+})
 def chat_home():
     """
     Serves the main chat page.
@@ -145,6 +160,39 @@ def chat_home():
     return render_template('chat.html')
 
 @chat_bp.route('/api/config_defaults', methods=['GET'])
+@swag_from({
+    'tags': ['Chat Configuration'],
+    'summary': 'Get default AI configuration for the chat interface.',
+    'responses': {
+        '200': {
+            'description': 'Default AI configuration.',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'default_ai_provider': {
+                                'type': 'string', 'example': 'OLLAMA'
+                            },
+                            'default_ollama_model_name': {
+                                'type': 'string', 'example': 'mistral:7b'
+                            },
+                            'ollama_server_url': {
+                                'type': 'string', 'example': 'http://127.0.0.1:11434/api/generate'
+                            },
+                            'default_gemini_model_name': {
+                                'type': 'string', 'example': 'gemini-1.5-flash-latest'
+                            },
+                            'default_gemini_api_key': {
+                                'type': 'string', 'description': 'The configured Gemini API key (empty if placeholder).'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
 def chat_config_defaults_api():
     """
     API endpoint to provide default configuration values for the chat interface.
@@ -165,9 +213,118 @@ def chat_config_defaults_api():
     }), 200
 
 @chat_bp.route('/api/chatPlaylist', methods=['POST'])
+@swag_from({
+    'tags': ['Chat Interaction'],
+    'summary': 'Process user chat input to generate a playlist idea using AI.',
+    'requestBody': {
+        'description': 'User input and AI configuration for generating a playlist.',
+        'required': True,
+        'content': {
+            'application/json': {
+                'schema': {
+                    'type': 'object',
+                    'required': ['userInput'],
+                    'properties': {
+                        'userInput': {
+                            'type': 'string',
+                            'description': "The user's natural language request for a playlist.",
+                            'example': "Songs for a rainy afternoon"
+                        },
+                        'ai_provider': {
+                            'type': 'string',
+                            'description': 'The AI provider to use (OLLAMA, GEMINI, NONE). Defaults to server config.',
+                            'example': 'GEMINI',
+                            'enum': ['OLLAMA', 'GEMINI', 'NONE']
+                        },
+                        'ai_model': {
+                            'type': 'string',
+                            'description': 'The specific AI model name to use. Defaults to server config for the provider.',
+                            'example': 'gemini-1.5-flash-latest'
+                        },
+                        'ollama_server_url': {
+                            'type': 'string',
+                            'description': 'Custom Ollama server URL (if ai_provider is OLLAMA).',
+                            'example': 'http://localhost:11434/api/generate'
+                        },
+                        'gemini_api_key': {
+                            'type': 'string',
+                            'description': 'Custom Gemini API key (if ai_provider is GEMINI).'
+                        }
+                    }
+                }
+            }
+        }
+    },
+    'responses': {
+        '200': {
+            'description': 'AI response containing the playlist idea, SQL query, and processing log.',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'response': {
+                                'type': 'object',
+                                'properties': {
+                                    'message': {
+                                        'type': 'string',
+                                        'description': 'Log of AI interaction and processing.'
+                                    },
+                                    'original_request': {
+                                        'type': 'string',
+                                        'description': "The user's original input."
+                                    },
+                                    'ai_provider_used': {
+                                        'type': 'string',
+                                        'description': 'The AI provider that was used for the request.'
+                                    },
+                                    'ai_model_selected': {
+                                        'type': 'string',
+                                        'description': 'The specific AI model that was selected/used.'
+                                    },
+                                    'executed_query': {
+                                        'type': 'string',
+                                        'nullable': True,
+                                        'description': 'The SQL query that was executed (or last attempted).'
+                                    },
+                                    'query_results': {
+                                        'type': 'array',
+                                        'nullable': True,
+                                        'description': 'List of songs returned by the query.',
+                                        'items': {
+                                            'type': 'object',
+                                            'properties': {
+                                                'item_id': {'type': 'string'},
+                                                'title': {'type': 'string'},
+                                                'artist': {'type': 'string'}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '400': {
+            'description': 'Bad Request - Missing input or invalid parameters.',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'error': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        }
+    }
+})
 def chat_playlist_api():
     """
-    API endpoint to handle chat input and (mock) AI interaction.
+    Process user chat input to generate a playlist idea using AI.
     This is a synchronous endpoint.
     """
     data = request.get_json()
@@ -195,10 +352,6 @@ def chat_playlist_api():
 
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
-    """
-    API endpoint to handle chat input and (mock) AI interaction.
-    This is a synchronous endpoint.
-    """
     data = request.get_json()
     print(f"DEBUG: chat_playlist_api called. Raw request data: {data}") # Log raw request
 
@@ -442,6 +595,61 @@ Original full prompt context (for reference):
                                  "query_results": final_query_results_list}}), 200
 
 @chat_bp.route('/api/createJellyfinPlaylist', methods=['POST'])
+@swag_from({
+    'tags': ['Chat Interaction'],
+    'summary': 'Create a playlist on Jellyfin from a list of song item IDs.',
+    'requestBody': {
+        'description': 'Playlist name and song item IDs.',
+        'required': True,
+        'content': {
+            'application/json': {
+                'schema': {
+                    'type': 'object',
+                    'required': ['playlist_name', 'item_ids'],
+                    'properties': {
+                        'playlist_name': {
+                            'type': 'string',
+                            'description': 'The desired name for the playlist on Jellyfin.',
+                            'example': 'My Awesome Mix'
+                        },
+                        'item_ids': {
+                            'type': 'array',
+                            'description': 'A list of Jellyfin item IDs for the songs to include.',
+                            'items': {'type': 'string'},
+                            'example': ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"]
+                        }
+                    }
+                }
+            }
+        }
+    },
+    'responses': {
+        '200': {
+            'description': 'Playlist successfully created on Jellyfin.',
+            'content': {
+                'application/json': {
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'message': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        },
+        '400': {
+            'description': 'Bad Request - Missing parameters or invalid input.'
+        },
+        '500': {
+            'description': 'Server Error - Failed to create playlist on Jellyfin.',
+             'content': { # Added content for 400 and 500 for consistency
+                'application/json': {
+                    'schema': {'type': 'object', 'properties': {'message': {'type': 'string'}}}
+                }
+            }
+        }
+    }
+})
 def create_jellyfin_playlist_api():
     """
     API endpoint to create a playlist on Jellyfin.

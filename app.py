@@ -1309,6 +1309,9 @@ def get_config_endpoint():
                 score_weight_other_feature_purity:
                   type: number
                   format: float
+                gmm_covariance_type:
+                  type: string
+                  description: Default GMM covariance type.
                 enable_clustering_embeddings:
                   type: boolean
                   description: Default state for using embeddings in clustering.
