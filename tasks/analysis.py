@@ -485,7 +485,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             from app import rq_queue as main_rq_queue
             
             albums_to_process_queue = list(albums) # Create a queue of albums to process
-            print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Initial albums_to_process_queue size: {len(albums_to_process_queue)}")
+            logger.debug("Initial albums_to_process_queue size: %s", len(albums_to_process_queue))
             albums_launched_count = 0
             albums_completed_count = 0
 
@@ -617,7 +617,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                             # print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_instance.id} (from RQ) ended with status: {job_instance.get_status()}.")
                             job_is_failed_or_canceled = True
                     except NoSuchJobError: # nosec
-                        print(f"[MainAnalysisTask-{current_task_id}] Warning: Final check for job {job_instance.id} - not in Redis. Checking DB.")
+                        logger.warning("Final check for job %s - not in Redis. Checking DB.", job_instance.id)
                         with app.app_context():
                             db_task_info = get_task_info_from_db(job_instance.id)
                         if db_task_info:
@@ -641,8 +641,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                             job_is_failed_or_canceled = True
                 except Exception as e_final_count:
                     job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
-                    print(f"[MainAnalysisTask-{current_task_id}] ERROR during final result processing for job {job_id_for_error}: {e_final_count}. Counting as failed.")
-                    traceback.print_exc()
+                    logger.error("ERROR during final result processing for job %s: %s. Counting as failed.", job_id_for_error, e_final_count, exc_info=True)
                     job_is_successful = False
                     job_is_failed_or_canceled = True # Ensure it's counted as failed
                     album_tracks_analyzed = 0 # Reset tracks analyzed for this problematic job

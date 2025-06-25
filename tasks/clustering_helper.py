@@ -201,8 +201,8 @@ def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
         for item in r.json().get("Items", []):
             if "_automatic" in item.get("Name", ""):
                 del_url = f"{jellyfin_url}/Items/{item['Id']}"
-                del_resp = requests.delete(del_url, headers=headers, timeout=10)
-                if del_resp.ok: print(f"🗑️ Deleted old playlist: {item['Name']}")
+                del_resp = requests.delete(del_url, headers=headers, timeout=10) # nosec
+                if del_resp.ok: logging.info("🗑️ Deleted old playlist: %s", item['Name'])
     except Exception as e: # nosec
         logging.error("Failed to clean old playlists: %s", e, exc_info=True)
 
@@ -284,9 +284,9 @@ def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_ty
         if job_instance.is_finished and isinstance(job_instance.result, dict):
             run_result_data = job_instance.result
     except NoSuchJobError:
-        print(f"[ParentTask-{parent_task_id_for_logging}] Warning: {task_type_for_logging} {job_id_for_result} not found in RQ. Checking DB.")
+        logging.warning("[ParentTask-%s] Warning: %s %s not found in RQ. Checking DB.", parent_task_id_for_logging, task_type_for_logging, job_id_for_result)
     except Exception as e_rq_fetch:
-        print(f"[ParentTask-{parent_task_id_for_logging}] Error fetching {task_type_for_logging} {job_id_for_result} from RQ: {e_rq_fetch}. Will check DB.")
+        logging.error("[ParentTask-%s] Error fetching %s %s from RQ: %s. Will check DB.", parent_task_id_for_logging, task_type_for_logging, job_id_for_result, e_rq_fetch)
 
     if run_result_data is None:
         with app.app_context():
@@ -303,13 +303,13 @@ def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_ty
                                                "best_result_from_batch": details_dict.get("full_best_result_from_batch"),
                                                "final_subset_track_ids": details_dict.get("final_subset_track_ids")}
                         elif 'full_result' in details_dict: # For older single iteration tasks if any
-                            run_result_data = details_dict['full_result']
+                            run_result_data = details_dict['full_result'] # type: ignore
                         else:
-                            print(f"[ParentTask-{parent_task_id_for_logging}] Warning: {task_type_for_logging} {job_id_for_result} (DB status: {db_status}) has no 'full_best_result_from_batch' or 'full_result' in details.")
+                            logging.warning("[ParentTask-%s] Warning: %s %s (DB status: %s) has no 'full_best_result_from_batch' or 'full_result' in details.", parent_task_id_for_logging, task_type_for_logging, job_id_for_result, db_status)
                     except (json.JSONDecodeError, TypeError) as e_json:
-                        print(f"[ParentTask-{parent_task_id_for_logging}] Warning: Could not parse details for {task_type_for_logging} {job_id_for_result} from DB: {e_json}")
+                        logging.warning("[ParentTask-%s] Warning: Could not parse details for %s %s from DB: %s", parent_task_id_for_logging, task_type_for_logging, job_id_for_result, e_json)
             elif db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
-                print(f"[ParentTask-{parent_task_id_for_logging}] Info: {task_type_for_logging} {job_id_for_result} (DB status: {db_status}) did not succeed. No result to process.")
+                logging.info("[ParentTask-%s] Info: %s %s (DB status: %s) did not succeed. No result to process.", parent_task_id_for_logging, task_type_for_logging, job_id_for_result, db_status)
     return run_result_data
 
 def _perform_single_clustering_iteration(
@@ -340,14 +340,14 @@ def _perform_single_clustering_iteration(
         use_embeddings_for_this_iteration = enable_clustering_embeddings_param if enable_clustering_embeddings_param is not None else ENABLE_CLUSTERING_EMBEDDINGS
 
         if not item_ids_for_subset:
-            print(f"{log_prefix} Iteration {run_idx}: Received empty item_ids_for_subset. Cannot cluster.")
+            logging.warning("%s Iteration %s: Received empty item_ids_for_subset. Cannot cluster.", log_prefix, run_idx)
             return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
 
         # Determine if embeddings should be fetched in the initial comprehensive data load.
         # This is true if embeddings are used AND it's NOT MiniBatchKMeans.
         fetch_embeddings_in_initial_load = use_embeddings_for_this_iteration and not USE_MINIBATCH_KMEANS
 
-        print(f"{log_prefix} Iteration {run_idx}: Fetching initial data for {len(item_ids_for_subset)} tracks. Will fetch embeddings in this initial load: {fetch_embeddings_in_initial_load}.")
+        logging.info("%s Iteration %s: Fetching initial data for %s tracks. Will fetch embeddings in this initial load: %s.", log_prefix, run_idx, len(item_ids_for_subset), fetch_embeddings_in_initial_load)
         all_track_data_for_subset_rows_list = []
         with app.app_context():
             for i_chunk in range(0, len(item_ids_for_subset), DB_FETCH_CHUNK_SIZE):
@@ -362,7 +362,7 @@ def _perform_single_clustering_iteration(
                     all_track_data_for_subset_rows_list.extend(chunk_rows)
         
         valid_tracks_for_processing = [dict(row) for row in all_track_data_for_subset_rows_list if row]
-        print(f"{log_prefix} Iteration {run_idx}: Retrieved {len(valid_tracks_for_processing)} valid track records from DB for initial processing.")
+        logging.info("%s Iteration %s: Retrieved %s valid track records from DB for initial processing.", log_prefix, run_idx, len(valid_tracks_for_processing))
 
         X_feat_orig_list = []
         # X_embed_raw_list will only be populated if using embeddings AND NOT MiniBatchKMeans
@@ -386,7 +386,7 @@ def _perform_single_clustering_iteration(
                                 if isinstance(loaded_from_string, list):
                                     parsed_list_for_numpy_non_mbk = loaded_from_string
                             except (json.JSONDecodeError, TypeError):
-                                print(f"{log_prefix} Iteration {run_idx}: Non-MBK - Failed to parse embedding string for {track_row_data.get('item_id')}. Skipping embedding for this track.")
+                                logging.warning("%s Iteration %s: Non-MBK - Failed to parse embedding string for %s. Skipping embedding for this track.", log_prefix, run_idx, track_row_data.get('item_id'))
                     
                     if parsed_list_for_numpy_non_mbk is not None:
                         try:
@@ -395,13 +395,13 @@ def _perform_single_clustering_iteration(
                             if isinstance(emb_vec, np.ndarray) and emb_vec.ndim == 1 and np.issubdtype(emb_vec.dtype, np.number) and emb_vec.size > 0:
                                 X_embed_raw_list_for_non_mbk.append(emb_vec)
                         except Exception as e_np_non_mbk: # Catch numpy conversion errors
-                            print(f"{log_prefix} Iteration {run_idx}: Non-MBK - NumPy error processing embedding for {track_row_data.get('item_id')}. Skipping embedding for this track.")
+                            logging.warning("%s Iteration %s: Non-MBK - NumPy error processing embedding for %s. Skipping embedding for this track.", log_prefix, run_idx, track_row_data.get('item_id'))
             except (json.JSONDecodeError, TypeError) as e: # Error from score_vector
-                print(f"{log_prefix} Iteration {run_idx}: Skipping track {track_row_data.get('item_id', 'Unknown ID')} in initial processing due to data parsing error: {e}")
+                logging.warning("%s Iteration %s: Skipping track %s in initial processing due to data parsing error: %s", log_prefix, run_idx, track_row_data.get('item_id', 'Unknown ID'), e)
                 continue
         
         if not X_feat_orig_list:
-            print(f"{log_prefix} Iteration {run_idx}: No valid feature vectors (X_feat_orig) could be constructed. Cannot cluster.")
+            logging.error("%s Iteration %s: No valid feature vectors (X_feat_orig) could be constructed. Cannot cluster.", log_prefix, run_idx)
             return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
         X_feat_orig = np.array(X_feat_orig_list)
 
@@ -446,16 +446,16 @@ def _perform_single_clustering_iteration(
         X_embed_raw_list_for_non_mbk = temp_aligned_X_embed_raw_list_for_non_mbk
 
         if X_feat_orig.shape[0] == 0:
-             print(f"{log_prefix} Iteration {run_idx}: No valid feature vectors (X_feat_orig) after alignment. Cannot cluster.")
+             logging.error("%s Iteration %s: No valid feature vectors (X_feat_orig) after alignment. Cannot cluster.", log_prefix, run_idx)
              return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
 
         scaler_details_for_run = None
         X_to_cluster_standardized = None 
 
         if use_embeddings_for_this_iteration:
-            if not USE_MINIBATCH_KMEANS: 
+            if not USE_MINIBATCH_KMEANS: # type: ignore
                 if not X_embed_raw_list_for_non_mbk or len(X_embed_raw_list_for_non_mbk) != X_feat_orig.shape[0]:
-                    print(f"{log_prefix} Iteration {run_idx}: No/mismatched embedding data for non-MiniBatchKMeans. Expected {X_feat_orig.shape[0]} based on X_feat_orig, got {len(X_embed_raw_list_for_non_mbk)}. Cannot cluster with embeddings.")
+                    logging.error("%s Iteration %s: No/mismatched embedding data for non-MiniBatchKMeans. Expected %s based on X_feat_orig, got %s. Cannot cluster with embeddings.", log_prefix, run_idx, X_feat_orig.shape[0], len(X_embed_raw_list_for_non_mbk))
                     return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": None, "parameters": {}}
                 X_embed_raw = np.array(X_embed_raw_list_for_non_mbk)
                 scaler_embed = StandardScaler()
@@ -468,7 +468,7 @@ def _perform_single_clustering_iteration(
 
         if not (use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS):
             if X_to_cluster_standardized is None or X_to_cluster_standardized.shape[0] == 0:
-                print(f"{log_prefix} Iteration {run_idx}: Data for clustering (X_to_cluster_standardized) is empty. Cannot proceed.")
+                logging.error("%s Iteration %s: Data for clustering (X_to_cluster_standardized) is empty. Cannot proceed.", log_prefix, run_idx)
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {}}
 
         data_for_clustering_current = X_to_cluster_standardized 
@@ -575,7 +575,7 @@ def _perform_single_clustering_iteration(
             max_clusters_or_components_rand = data_for_clustering_current.shape[0] if data_for_clustering_current is not None else 0
 
             if max_clusters_or_components_rand == 0 and not (use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS and clustering_method == "kmeans"):
-                 print(f"{log_prefix} Iteration {run_idx}: No data points for random parameter generation.")
+                 logging.warning("%s Iteration %s: No data points for random parameter generation.", log_prefix, run_idx)
                  return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
             if clustering_method == "kmeans":
@@ -612,7 +612,7 @@ def _perform_single_clustering_iteration(
                         pca_config["enabled"] = False; pca_config["components"] = 0 # type: ignore
                         data_for_clustering_current = X_to_cluster_standardized
                 except Exception as e_refit_pca_guard:
-                    print(f"{log_prefix} Iteration {run_idx}: Error re-fitting PCA (guard): {e_refit_pca_guard}. Disabling PCA.") 
+                    logging.error("%s Iteration %s: Error re-fitting PCA (guard): %s. Disabling PCA.", log_prefix, run_idx, e_refit_pca_guard)
                     pca_config["enabled"] = False; pca_config["components"] = 0; pca_model_for_this_iteration = None
                     data_for_clustering_current = X_to_cluster_standardized
             else: 
@@ -642,7 +642,7 @@ def _perform_single_clustering_iteration(
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
             if use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS:
-                print(f"{log_prefix} Iteration {run_idx}: Using MiniBatchKMeans with n_clusters={params_from_config['n_clusters']}.")
+                logging.info("%s Iteration %s: Using MiniBatchKMeans with n_clusters=%s.", log_prefix, run_idx, params_from_config['n_clusters'])
                 
                 # CRITICAL FIX for MiniBatchKMeans with embeddings:
                 # The initial_centroids_np (if provided from params_from_config) would be based on X_feat_orig (e.g., 13 features).
@@ -756,7 +756,7 @@ def _perform_single_clustering_iteration(
                                 all_standardized_embeddings_for_predict = [] # Signal failure to get valid labels
                                 break # Exit the chunk processing loop for MBK
                             
-                            print(f"{log_prefix} Iteration {run_idx}: MBK - Initializing centroids with first partial_fit using {combined_first_batch.shape[0]} accumulated samples.")
+                            logging.info("%s Iteration %s: MBK - Initializing centroids with first partial_fit using %s accumulated samples.", log_prefix, run_idx, combined_first_batch.shape[0])
                             mbk.partial_fit(combined_first_batch) # This initializes cluster_centers_
                             temp_buffer_for_first_fit = [] # Clear the buffer
                     else:
@@ -823,7 +823,7 @@ def _perform_single_clustering_iteration(
         
         elif method_from_config == "dbscan":
             if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0: # nosec # type: ignore
-                print(f"{log_prefix} Iteration {run_idx}: Data for DBSCAN is empty. Cannot fit.")
+                logging.warning("%s Iteration %s: Data for DBSCAN is empty. Cannot fit.", log_prefix, run_idx)
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
             dbscan = DBSCAN(eps=params_from_config["eps"], min_samples=params_from_config["min_samples"])
             labels = dbscan.fit_predict(data_for_clustering_current)
@@ -841,7 +841,7 @@ def _perform_single_clustering_iteration(
 
         elif method_from_config == "gmm":
             if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0: # nosec # type: ignore
-                print(f"{log_prefix} Iteration {run_idx}: Data for GMM is empty. Cannot fit.")
+                logging.warning("%s Iteration %s: Data for GMM is empty. Cannot fit.", log_prefix, run_idx)
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
             gmm = GaussianMixture(n_components=params_from_config["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
             gmm.fit(data_for_clustering_current)
@@ -861,7 +861,7 @@ def _perform_single_clustering_iteration(
         num_actual_clusters = len(set(labels) - {-1})
         
         if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0:
-             print(f"{log_prefix} Iteration {run_idx}: data_for_clustering_current is empty before metric calculation.")
+             logging.error("%s Iteration %s: data_for_clustering_current is empty before metric calculation.", log_prefix, run_idx)
              return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
         num_samples_for_metrics = data_for_clustering_current.shape[0]
@@ -871,7 +871,7 @@ def _perform_single_clustering_iteration(
             if 'mbk' in locals() and hasattr(mbk, 'cluster_centers_') and data_for_clustering_current.shape[0] > 0:
                 labels_for_metrics = mbk.predict(data_for_clustering_current) # type: ignore # type: ignore
             else: 
-                print(f"{log_prefix} Iteration {run_idx}: MBK - Cannot get specific labels for metrics. Metrics might be inaccurate.")
+                logging.warning("%s Iteration %s: MBK - Cannot get specific labels for metrics. Metrics might be inaccurate.", log_prefix, run_idx)
                 labels_for_metrics = np.array([])
 
         if num_actual_clusters >= 2 and num_actual_clusters < num_samples_for_metrics and labels_for_metrics.size > 0 and len(np.unique(labels_for_metrics)) >= 2:
@@ -952,7 +952,7 @@ def _perform_single_clustering_iteration(
                     predominant_mood_key = max((k for k in top_scores if k in MOOD_LABELS), key=top_scores.get, default=None)
                     if predominant_mood_key:
                         current_mood_score = top_scores.get(predominant_mood_key, 0.0)
-                        unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score)
+                        unique_predominant_mood_scores[predominant_mood_key] = max(unique_predominant_mood_scores.get(predominant_mood_key, 0.0), current_mood_score) # type: ignore
                 centroid_other_features_for_diversity_evaluation = {lk: top_scores.get(lk, 0.0) for lk in OTHER_FEATURE_LABELS if lk in top_scores}
                 predominant_other_feature_key_for_diversity_score_calc = None 
                 highest_predominant_other_feature_score_this_centroid = 0.3 
@@ -988,8 +988,8 @@ def _perform_single_clustering_iteration(
             else:
                 diversity_stats_to_use = LN_MOOD_DIVERSITY_STATS
                 logging.debug("%s Iteration %s: Using REGULAR mood diversity stats.", log_prefix, run_idx)
-            config_mean_ln_diversity = diversity_stats_to_use.get("mean"); config_sd_ln_diversity = diversity_stats_to_use.get("sd") # type: ignore
-            if config_mean_ln_diversity is None or config_sd_ln_diversity is None: print(f"{log_prefix} Iteration {run_idx}: LN_MOOD_DIVERSITY_STATS missing mean/sd.")
+            config_mean_ln_diversity = diversity_stats_to_use.get("mean"); config_sd_ln_diversity = diversity_stats_to_use.get("sd")
+            if config_mean_ln_diversity is None or config_sd_ln_diversity is None: logging.warning("%s Iteration %s: LN_MOOD_DIVERSITY_STATS missing mean/sd.", log_prefix, run_idx)
             elif abs(config_sd_ln_diversity) < 1e-9: base_diversity_score = 0.0 # Avoid division by zero or very small SD
             else: base_diversity_score = (ln_mood_diversity - config_mean_ln_diversity) / config_sd_ln_diversity
         
@@ -1032,14 +1032,14 @@ def _perform_single_clustering_iteration(
             logging.debug("%s Iteration %s: Using REGULAR mood purity stats.", log_prefix, run_idx)
         config_mean_ln_purity = purity_stats_to_use.get("mean"); config_sd_ln_purity = purity_stats_to_use.get("sd")
         playlist_purity_component = 0.0
-        if config_mean_ln_purity is None or config_sd_ln_purity is None: print(f"{log_prefix} Iteration {run_idx}: LN_MOOD_PURITY_STATS missing mean/sd.")
+        if config_mean_ln_purity is None or config_sd_ln_purity is None: logging.warning("%s Iteration %s: LN_MOOD_PURITY_STATS missing mean/sd.", log_prefix, run_idx)
         elif abs(config_sd_ln_purity) < 1e-9: playlist_purity_component = 0.0
         else: playlist_purity_component = (ln_mood_purity - config_mean_ln_purity) / config_sd_ln_purity
         raw_other_features_diversity_score = sum(unique_predominant_other_feature_scores.values()) 
         ln_other_features_diversity = np.log1p(raw_other_features_diversity_score) # type: ignore
         config_mean_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("mean"); config_sd_ln_other_div = LN_OTHER_FEATURES_DIVERSITY_STATS.get("sd")
         other_features_diversity_score = 0.0
-        if config_mean_ln_other_div is None or config_sd_ln_other_div is None: print(f"{log_prefix} Iteration {run_idx}: LN_OTHER_FEATURES_DIVERSITY_STATS missing mean/sd.")
+        if config_mean_ln_other_div is None or config_sd_ln_other_div is None: logging.warning("%s Iteration %s: LN_OTHER_FEATURES_DIVERSITY_STATS missing mean/sd.", log_prefix, run_idx)
         elif abs(config_sd_ln_other_div) < 1e-9: other_features_diversity_score = 0.0
         else: other_features_diversity_score = (ln_other_features_diversity - config_mean_ln_other_div) / config_sd_ln_other_div
         
@@ -1055,7 +1055,7 @@ def _perform_single_clustering_iteration(
                         if fs > max_score_for_predominant_other: max_score_for_predominant_other = fs; predominant_other_feature_for_this_playlist = fl
                 if not predominant_other_feature_for_this_playlist: continue
                 try: predominant_other_feature_index_in_labels = OTHER_FEATURE_LABELS.index(predominant_other_feature_for_this_playlist)
-                except ValueError: print(f"{log_prefix} Iteration {run_idx}: Predominant other feature '{predominant_other_feature_for_this_playlist}' not in OTHER_FEATURE_LABELS."); continue
+                except ValueError: logging.warning("%s Iteration %s: Predominant other feature '%s' not in OTHER_FEATURE_LABELS.", log_prefix, run_idx, predominant_other_feature_for_this_playlist); continue
                 scores_of_predominant_other_feature_for_songs = [] # nosec # type: ignore
                 for item_id_in_playlist, _, _ in songs_in_playlist_info_list:
                     song_original_index = item_id_to_song_index_map.get(item_id_in_playlist)
@@ -1070,16 +1070,30 @@ def _perform_single_clustering_iteration(
         ln_other_features_purity = np.log1p(raw_other_feature_purity_component)
         config_mean_ln_other_pur = LN_OTHER_FEATURES_PURITY_STATS.get("mean"); config_sd_ln_other_pur = LN_OTHER_FEATURES_PURITY_STATS.get("sd")
         other_feature_purity_component = 0.0
-        if config_mean_ln_other_pur is None or config_sd_ln_other_pur is None: print(f"{log_prefix} Iteration {run_idx}: LN_OTHER_FEATURES_PURITY_STATS missing mean/sd.")
+        if config_mean_ln_other_pur is None or config_sd_ln_other_pur is None: logging.warning("%s Iteration %s: LN_OTHER_FEATURES_PURITY_STATS missing mean/sd.", log_prefix, run_idx)
         elif abs(config_sd_ln_other_pur) < 1e-9: other_feature_purity_component = 0.0
         else: other_feature_purity_component = (ln_other_features_purity - config_mean_ln_other_pur) / config_sd_ln_other_pur
 
         final_enhanced_score = (current_score_weight_diversity * base_diversity_score) + (current_score_weight_purity * playlist_purity_component) + (current_score_weight_other_feature_diversity * other_features_diversity_score) + (current_score_weight_other_feature_purity * other_feature_purity_component) + (current_score_weight_silhouette * silhouette_metric_value) + (current_score_weight_davies_bouldin * davies_bouldin_metric_value) + (current_score_weight_calinski_harabasz * calinski_harabasz_metric_value)
-        print(f"{log_prefix} Iteration {run_idx}: Scores -> MoodDiv: {raw_mood_diversity_score:.2f}/{base_diversity_score:.2f}, MoodPur: {raw_playlist_purity_component:.2f}/{playlist_purity_component:.2f}, OtherFeatDiv: {raw_other_features_diversity_score:.2f}/{other_features_diversity_score:.2f}, OtherFeatPur: {raw_other_feature_purity_component:.2f}/{other_feature_purity_component:.2f}, Sil: {s_score_raw_val_for_log:.2f}/{silhouette_metric_value:.2f}, DB: {db_score_raw_val_for_log:.2f}/{davies_bouldin_metric_value:.2f}, CH: {ch_score_raw_val_for_log:.2f}/{calinski_harabasz_metric_value:.2f}, FinalScore: {final_enhanced_score:.2f} (Weights: MoodDiv={current_score_weight_diversity}, MoodPur={current_score_weight_purity}, OtherFeatDiv={current_score_weight_other_feature_diversity}, OtherFeatPur={current_score_weight_other_feature_purity}, Sil={current_score_weight_silhouette}, DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})")
+        log_message = (
+            f"{log_prefix} Iteration {run_idx}: Scores -> "
+            f"MoodDiv: {raw_mood_diversity_score:.2f}/{base_diversity_score:.2f}, "
+            f"MoodPur: {raw_playlist_purity_component:.2f}/{playlist_purity_component:.2f}, "
+            f"OtherFeatDiv: {raw_other_features_diversity_score:.2f}/{other_features_diversity_score:.2f}, "
+            f"OtherFeatPur: {raw_other_feature_purity_component:.2f}/{other_feature_purity_component:.2f}, "
+            f"Sil: {s_score_raw_val_for_log:.2f}/{silhouette_metric_value:.2f}, "
+            f"DB: {db_score_raw_val_for_log:.2f}/{davies_bouldin_metric_value:.2f}, "
+            f"CH: {ch_score_raw_val_for_log:.2f}/{calinski_harabasz_metric_value:.2f}, "
+            f"FinalScore: {final_enhanced_score:.2f} "
+            f"(Weights: MoodDiv={current_score_weight_diversity}, MoodPur={current_score_weight_purity}, "
+            f"OtherFeatDiv={current_score_weight_other_feature_diversity}, OtherFeatPur={current_score_weight_other_feature_purity}, "
+            f"Sil={current_score_weight_silhouette}, DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})"
+        )
+        logging.info(log_message)
         pca_model_details_to_return = None
         if pca_model_for_this_iteration and pca_config.get("enabled"):
-            try: pca_model_details_to_return = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()}
-            except AttributeError as e_pca_attr: print(f"{log_prefix} Iteration {run_idx}: Warning - PCA model details retrieval error: {e_pca_attr}")
+            try: pca_model_details_to_return = {"n_components": pca_model_for_this_iteration.n_components_, "explained_variance_ratio": pca_model_for_this_iteration.explained_variance_ratio_.tolist(), "mean": pca_model_for_this_iteration.mean_.tolist()} # type: ignore
+            except AttributeError as e_pca_attr: logging.warning("%s Iteration %s: Warning - PCA model details retrieval error: %s", log_prefix, run_idx, e_pca_attr)
         result = {"diversity_score": float(final_enhanced_score), "named_playlists": dict(current_named_playlists), "playlist_centroids": current_playlist_centroids, "pca_model_details": pca_model_details_to_return, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
         return result
     except Exception as e_iter:

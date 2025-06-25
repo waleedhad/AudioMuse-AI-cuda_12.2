@@ -127,7 +127,7 @@ def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
         # Read delay from environment/config if needed, otherwise use the default
         gemini_call_delay = int(os.environ.get("GEMINI_API_CALL_DELAY_SECONDS", "7")) # type: ignore
         if gemini_call_delay > 0:
-            print(f"DEBUG AI (Gemini): Waiting for {gemini_call_delay}s before API call to respect rate limits.")
+            logger.debug("Waiting for %ss before Gemini API call to respect rate limits.", gemini_call_delay)
             time.sleep(gemini_call_delay)
 
         genai.configure(api_key=gemini_api_key)
@@ -143,7 +143,7 @@ def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
         if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
             extracted_text = "".join(part.text for part in response.candidates[0].content.parts)
         else:
-            print(f"DEBUG AI (Gemini): No content in response. Raw response: {response}")
+            logger.debug("Gemini returned no content. Raw response: %s", response)
             return "Error: Gemini returned no content."
 
         # The final cleaning and length check is done in the general function
@@ -200,7 +200,7 @@ def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key
     # The new prompt only requires the song list sample # type: ignore
     full_prompt = prompt_template.format(song_list_sample=formatted_song_list)
 
-    print(f"Sending prompt to AI ({provider}):\n{full_prompt}") # Log the prompt for debugging
+    logger.info("Sending prompt to AI (%s):\n%s", provider, full_prompt)
 
     # --- Call the AI Model ---
     name = "AI Naming Skipped" # Default if provider is NONE or invalid

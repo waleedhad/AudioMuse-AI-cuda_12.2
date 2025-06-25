@@ -9,6 +9,16 @@ import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
 
 # RQ imports
+
+logger = logging.getLogger(__name__)
+
+# Configure basic logging for the entire application
+logging.basicConfig(
+    level=logging.INFO, # Set the default logging level (e.g., INFO, DEBUG, WARNING, ERROR, CRITICAL)
+    format='[%(levelname)s]-[%(asctime)s]-%(message)s', # Custom format string
+    datefmt='%d-%m-%Y %H-%M-%S' # Custom date/time format
+)
+
 from redis import Redis
 from rq import Queue, Retry
 from rq.job import Job, JobStatus
@@ -988,7 +998,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     for child_task_row in children_tasks:
         child_job_id = child_task_row['task_id']
         child_task_type = child_task_row['task_type'] # Child's own type
-        print(f"Recursively cancelling child job: {child_job_id} of type {child_task_type}")
+        logger.info("Recursively cancelling child job: %s of type %s", child_job_id, child_task_type)
         # The count from recursive calls will be added
         cancelled_count += cancel_job_and_children_recursive(child_job_id, child_task_type)
 
