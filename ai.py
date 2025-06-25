@@ -33,6 +33,8 @@ def clean_playlist_name(name):
     name = unicodedata.normalize('NFKC', name)
     # Stricter regex: only allows characters explicitly mentioned in the prompt.
     cleaned_name = re.sub(r'[^a-zA-Z0-9\s\-\&\'!\.\,\?\(\)\[\]]', '', name)
+    # Also remove trailing number in parentheses, e.g., "My Playlist (2)" -> "My Playlist", to prevent AI from interfering with disambiguation logic.
+    cleaned_name = re.sub(r'\s\(\d+\)$', '', cleaned_name)
     cleaned_name = re.sub(r'\s+', ' ', cleaned_name).strip()
     return cleaned_name
 

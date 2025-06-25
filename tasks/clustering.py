@@ -583,12 +583,12 @@ def run_clustering_task(
                 try:
                     ai_renamed_playlists_final = {} # Changed from defaultdict(list)
                     ai_renamed_centroids_final = {} # Changed from regular dict
-                    ai_base_name_generation_count = defaultdict(int) # To track AI base name generations
+                    ai_base_name_generation_count = defaultdict(int) # To track AI base name collisions
                     total_playlists_to_name = len(final_named_playlists)
                     playlists_named_count = 0
                     for original_name, songs_in_playlist in final_named_playlists.items():
                         if not songs_in_playlist:
-                            ai_renamed_playlists_final[original_name].extend(songs_in_playlist)
+                            ai_renamed_playlists_final[original_name] = songs_in_playlist
                             if original_name in final_playlist_centroids:
                                 ai_renamed_centroids_final[original_name] = final_playlist_centroids[original_name]
                             continue
@@ -640,11 +640,23 @@ def run_clustering_task(
                             print(f"{log_prefix_main_task_ai} AI naming for '{original_name}' failed or returned error/skip message: '{ai_generated_name_str}'. Using original.")
                             ai_generated_base_name = original_name
                         
+                        # Disambiguate playlist names if the AI generates the same name for different clusters.
                         ai_base_name_generation_count[ai_generated_base_name] += 1
-                        current_playlist_final_name = ai_generated_base_name # Start with the AI name
-                        if ai_base_name_generation_count[ai_generated_base_name] > 1: # Collision on AI name
-                            current_playlist_final_name = f"{ai_generated_base_name} (from {original_name})" # Disambiguate
+                        current_playlist_final_name = ai_generated_base_name
+                        
+                        # If this is not the first time we've seen this base name, it's a collision.
+                        if ai_base_name_generation_count[ai_generated_base_name] > 1:
+                            # Append a number, e.g., "Chill Vibes (2)"
+                            suffix = ai_base_name_generation_count[ai_generated_base_name]
+                            current_playlist_final_name = f"{ai_generated_base_name} ({suffix})"
 
+                        # It's possible the AI generated "Chill Vibes (2)" directly, which might already be taken.
+                        # Loop until we find a unique name.
+                        while current_playlist_final_name in ai_renamed_playlists_final:
+                            ai_base_name_generation_count[ai_generated_base_name] += 1
+                            suffix = ai_base_name_generation_count[ai_generated_base_name]
+                            current_playlist_final_name = f"{ai_generated_base_name} ({suffix})"
+                        
                         ai_renamed_playlists_final[current_playlist_final_name] = songs_in_playlist # Assign directly
                         if original_name in final_playlist_centroids:
                             ai_renamed_centroids_final[current_playlist_final_name] = final_playlist_centroids[original_name]
@@ -659,7 +671,7 @@ def run_clustering_task(
                     # Log if any AI-generated base names were generated for multiple input playlists
                     for ai_name, contribution_count in ai_base_name_generation_count.items():
                         if contribution_count > 1:
-                            print(f"{log_prefix_main_task_ai} AI-generated base name '{ai_name}' was generated for {contribution_count} input playlists. They are stored as distinct playlists (e.g., '{ai_name} (from OriginalName)').")
+                            print(f"{log_prefix_main_task_ai} AI-generated base name '{ai_name}' was generated for {contribution_count} input playlists. They are stored as distinct playlists with numerical suffixes (e.g., '{ai_name} (2)').")
 
                     if ai_renamed_playlists_final:
                         final_named_playlists = ai_renamed_playlists_final
