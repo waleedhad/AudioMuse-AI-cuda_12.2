@@ -7,9 +7,11 @@ import unicodedata # For ASCII normalization
 import sqlglot # Import sqlglot
 import json # For potential future use with more complex AI responses
 import html # For unescaping HTML entities
+import logging
 import re # For regex-based quote escaping
-import traceback # For logging full tracebacks on the server
 
+
+logger = logging.getLogger(__name__)
 # Import AI configuration from the main config.py
 # This assumes config.py is in the same directory as app_chat.py or accessible via Python path.
 from config import (
@@ -44,38 +46,38 @@ def _ensure_ai_user_configured(db_conn):
             user_exists = cur.fetchone()
 
             if not user_exists:
-                print(f"Creating database user: {AI_CHAT_DB_USER_NAME}")
+                logger.info("Creating database user: %s", AI_CHAT_DB_USER_NAME)
                 cur.execute(f"CREATE USER {AI_CHAT_DB_USER_NAME} WITH PASSWORD %s;", (AI_CHAT_DB_USER_PASSWORD,))
-                print(f"User {AI_CHAT_DB_USER_NAME} created.")
+                logger.info("User %s created.", AI_CHAT_DB_USER_NAME)
             else:
-                print(f"User {AI_CHAT_DB_USER_NAME} already exists.")
+                logger.info("User %s already exists.", AI_CHAT_DB_USER_NAME)
 
             # Grant necessary permissions
             cur.execute("SELECT current_database();")
             current_db_name = cur.fetchone()[0]
 
-            print(f"Granting CONNECT ON DATABASE {current_db_name} TO {AI_CHAT_DB_USER_NAME}")
+            logger.info("Granting CONNECT ON DATABASE %s TO %s", current_db_name, AI_CHAT_DB_USER_NAME)
             cur.execute(f"GRANT CONNECT ON DATABASE {current_db_name} TO {AI_CHAT_DB_USER_NAME};")
 
-            print(f"Granting USAGE ON SCHEMA public TO {AI_CHAT_DB_USER_NAME}")
+            logger.info("Granting USAGE ON SCHEMA public TO %s", AI_CHAT_DB_USER_NAME)
             cur.execute(f"GRANT USAGE ON SCHEMA public TO {AI_CHAT_DB_USER_NAME};")
             
-            print(f"Granting SELECT ON public.score TO {AI_CHAT_DB_USER_NAME}")
+            logger.info("Granting SELECT ON public.score TO %s", AI_CHAT_DB_USER_NAME)
             cur.execute(f"GRANT SELECT ON TABLE public.score TO {AI_CHAT_DB_USER_NAME};")
             
             # Revoke all other default privileges on public schema if necessary (more secure)
             # This is an advanced step and might be too restrictive if other public tables are needed by this user.
             # For now, we rely on explicit grants.
-            # print(f"Revoking ALL ON SCHEMA public FROM {AI_CHAT_DB_USER_NAME} (except USAGE already granted)")
+            # logger.info(f"Revoking ALL ON SCHEMA public FROM {AI_CHAT_DB_USER_NAME} (except USAGE already granted)")
             # cur.execute(f"REVOKE ALL ON SCHEMA public FROM {AI_CHAT_DB_USER_NAME};") # This revokes USAGE too
             # cur.execute(f"GRANT USAGE ON SCHEMA public TO {AI_CHAT_DB_USER_NAME};") # Re-grant USAGE
 
             db_conn.commit()
-            print(f"Permissions configured for user {AI_CHAT_DB_USER_NAME}.")
+            logger.info("Permissions configured for user %s.", AI_CHAT_DB_USER_NAME)
             ai_user_setup_done = True
     except Exception as e:
+        logger.error("Error during AI user setup. AI user might not be correctly configured.", exc_info=True)
         db_conn.rollback()
-        print(f"Error during AI user setup: {e}. AI user might not be correctly configured.")
         # ai_user_setup_done remains False, so it might try again on next request.
 
 def clean_and_validate_sql(raw_sql):
@@ -111,7 +113,7 @@ def clean_and_validate_sql(raw_sql):
     try:
         cleaned_sql = unicodedata.normalize('NFKD', cleaned_sql).encode('ascii', 'ignore').decode('utf-8')
     except Exception as e_norm:
-        print(f"Warning: Could not fully normalize SQL string to ASCII: {e_norm}")
+        logger.warning("Could not fully normalize SQL string to ASCII: %s", e_norm)
 
     # 2. Convert C-style escaped single quotes (e.g., \') to SQL standard double single quotes ('').
     #    This should be done after normalization, in case normalization affects the backslash,
@@ -333,7 +335,7 @@ def chat_playlist_api():
     data_for_log = dict(data) if data else {}
     if 'gemini_api_key' in data_for_log and data_for_log['gemini_api_key']:
         data_for_log['gemini_api_key'] = 'API-KEY' # Masked
-    print(f"DEBUG: chat_playlist_api called. Raw request data: {data_for_log}")
+    logger.debug("chat_playlist_api called. Raw request data: %s", data_for_log)
 
     from app import get_db # Import get_db here, inside the function
     if not data or 'userInput' not in data:
@@ -362,7 +364,7 @@ def chat_playlist_api():
     data_for_log_dup = dict(data) if data else {}
     if 'gemini_api_key' in data_for_log_dup and data_for_log_dup['gemini_api_key']:
         data_for_log_dup['gemini_api_key'] = 'API-KEY' # Masked
-    print(f"DEBUG: chat_playlist_api called. Raw request data (dup block): {data_for_log_dup}")
+    logger.debug("chat_playlist_api called. Raw request data (dup block): %s", data_for_log_dup)
 
     from app import get_db # Import get_db here, inside the function
     if not data or 'userInput' not in data:
@@ -552,7 +554,7 @@ Original full prompt context (for reference):
                     raise Exception("AI user setup flag not set after configuration attempt.")
             except Exception as setup_err:
                 # Log detailed error on the server
-                print(f"ERROR during AI user setup in chat_playlist_api: {setup_err}\n{traceback.format_exc()}")
+                logger.error("Error during AI user setup in chat_playlist_api", exc_info=True)
                 ai_response_message += "Critical Error: Could not ensure AI user setup. Query will not be executed.\n" # Generic message for client
                 last_error_for_retry = f"AI User setup failed: {setup_err}"
                 break 
@@ -586,7 +588,7 @@ Original full prompt context (for reference):
                 get_db().rollback()
                 db_error_str = f"Database Error executing query: {str(db_exec_error)}"
                 # Log detailed error on the server
-                print(f"ERROR executing AI generated query in chat_playlist_api: {db_error_str}\n{traceback.format_exc()}")
+                logger.error("Error executing AI generated query in chat_playlist_api: %s", db_error_str, exc_info=True)
                 ai_response_message += "Database Error executing query. Please check server logs.\n" # Generic message for client
                 last_error_for_retry = db_error_str
                 if attempt_num >= max_retries: break
@@ -703,13 +705,12 @@ def create_jellyfin_playlist_api():
         error_details_for_server = f"Jellyfin API RequestException: {str(e)}\n"
         if hasattr(e, 'response') and e.response is not None: # type: ignore
             try: error_details_for_server += f" - Jellyfin Server Response: {e.response.text}\n"
-            except: pass
-        error_details_for_server += traceback.format_exc()
-        print(f"ERROR in create_jellyfin_playlist_api: {error_details_for_server}") # Or use app.logger.error if configured
+            except: pass # nosec
+        logger.error("Error in create_jellyfin_playlist_api: %s", error_details_for_server, exc_info=True)
         # Return generic error to client
         return jsonify({"message": "Error communicating with Jellyfin. Please check server logs."}), 500
     except Exception as e: # Catch any other unexpected errors
         # Log detailed error on the server
-        print(f"ERROR in create_jellyfin_playlist_api (Unexpected): {str(e)}\n{traceback.format_exc()}") # Or use app.logger.error
+        logger.error("Unexpected error in create_jellyfin_playlist_api", exc_info=True)
         # Return generic error to client
         return jsonify({"message": "An unexpected error occurred while creating the playlist. Please check server logs."}), 500

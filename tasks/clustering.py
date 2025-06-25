@@ -8,8 +8,8 @@ import numpy as np
 import json
 import time
 import random
+import logging
 import uuid
-import traceback
 
 # RQ import
 from rq import get_current_job
@@ -44,6 +44,8 @@ from .clustering_helper import (
     get_job_result_safely,
     _perform_single_clustering_iteration
 )
+
+logger = logging.getLogger(__name__)
 
 # Task specific helper function
 
@@ -96,7 +98,7 @@ def run_clustering_batch_task(
             nonlocal current_progress_batch, current_task_logs_batch
             current_progress_batch = progress
             if print_console: 
-                print(f"[ClusteringBatchTask-{current_task_id}] {message}")
+                logger.info("[ClusteringBatchTask-%s] %s", current_task_id, message)
 
             db_details_batch = {"batch_id": batch_id_str, "start_run_idx": start_run_idx, "num_iterations_in_batch": num_iterations_in_batch}
             if details_extra: db_details_batch.update(details_extra)
@@ -145,13 +147,13 @@ def run_clustering_batch_task(
                 try:
                     elite_solutions_params_list_for_iter = json.loads(elite_solutions_params_list_json)
                 except json.JSONDecodeError:
-                    print(f"{log_prefix_for_iter} Warning: Could not decode elite solutions JSON. Proceeding without elites for this batch.")
+                    logger.warning("%s Warning: Could not decode elite solutions JSON. Proceeding without elites for this batch.", log_prefix_for_iter)
             mutation_config_for_iter = {}
             if mutation_config_json:
                 try:
                     mutation_config_for_iter = json.loads(mutation_config_json)
                 except json.JSONDecodeError:
-                    print(f"{log_prefix_for_iter} Warning: Could not decode mutation config JSON. Using default mutation behavior.")
+                    logger.warning("%s Warning: Could not decode mutation config JSON. Using default mutation behavior.", log_prefix_for_iter)
 
             best_result_in_this_batch = None
             best_score_in_this_batch = -1.0
@@ -161,7 +163,7 @@ def run_clustering_batch_task(
                 current_run_global_idx = start_run_idx + i
                 # Revocation check
                 if current_job:
-                    with app.app_context():
+                    with app.app_context(): # type: ignore
                         task_db_info_iter_check = get_task_info_from_db(current_task_id) 
                         parent_task_db_info_iter_check = get_task_info_from_db(parent_task_id) if parent_task_id else None
                         is_self_revoked_iter = task_db_info_iter_check and task_db_info_iter_check.get('status') == TASK_STATUS_REVOKED
@@ -221,10 +223,17 @@ def run_clustering_batch_task(
             log_and_update_batch_task(f"Batch {batch_id_str} complete. Best score in batch: {best_score_in_this_batch:.2f}", 100, details_extra=final_batch_summary, task_state=TASK_STATUS_SUCCESS)
             return {"status": "SUCCESS", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch}
         except Exception as e:
-            error_tb = traceback.format_exc()
-            failure_details = {"error": str(e), "traceback": error_tb, "batch_id": batch_id_str}
-            log_and_update_batch_task(f"Failed clustering batch {batch_id_str}: {e}", current_progress_batch, details_extra=failure_details, task_state=TASK_STATUS_FAILURE)
-            print(f"ERROR: Clustering batch {batch_id_str} failed: {e}\n{error_tb}")
+            # Log the full traceback on the server for debugging.
+            logger.error("Clustering batch %s failed", batch_id_str, exc_info=True)
+            # Save a generic error to the DB, without the stack trace.
+            failure_details = {"error": "An unexpected error occurred in the clustering batch.", "batch_id": batch_id_str}
+            log_and_update_batch_task(
+                f"Failed clustering batch {batch_id_str}: An unexpected error occurred.",
+                current_progress_batch,
+                details_extra=failure_details,
+                task_state=TASK_STATUS_FAILURE,
+                print_console=False # The detailed error is already printed above
+            )
             return {"status": "FAILURE", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": None, "final_subset_track_ids": current_sampled_track_ids_in_batch}
 
 
@@ -276,7 +285,7 @@ def run_clustering_task(
         def log_and_update_main_clustering(message, progress, details_to_add_or_update=None, task_state=TASK_STATUS_PROGRESS, print_console=True):
             nonlocal current_progress, _main_task_accumulated_details
             current_progress = progress
-            if print_console: print(f"[MainClusteringTask-{current_task_id}] {message}")
+            if print_console: logger.info("[MainClusteringTask-%s] %s", current_task_id, message)
             if details_to_add_or_update: _main_task_accumulated_details.update(details_to_add_or_update)
             _main_task_accumulated_details["status_message"] = message
             log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
@@ -308,7 +317,7 @@ def run_clustering_task(
             ai_model_provider_for_run = ai_model_provider_param
             ollama_server_url_for_run = ollama_server_url_param
             ollama_model_name_for_run = ollama_model_name_param 
-            gemini_api_key_for_run = gemini_api_key_param
+            gemini_api_key_for_run = gemini_api_key_param # type: ignore
             gemini_model_name_for_run = gemini_model_name_param
 
             log_and_update_main_clustering("📊 Starting main clustering process...", 0)
@@ -326,7 +335,7 @@ def run_clustering_task(
                 cur.execute("SELECT item_id, author, mood_vector FROM score WHERE mood_vector IS NOT NULL AND mood_vector != ''")
             lightweight_rows = cur.fetchall()
             cur.close()
-            log_and_update_main_clustering(f"Retrieved {len(lightweight_rows)} lightweight track records from database.", 2, print_console=False)
+            log_and_update_main_clustering(f"Retrieved {len(lightweight_rows)} lightweight track records from database.", 2, print_console=False) # type: ignore
 
             min_tracks_for_kmeans = num_clusters_min if clustering_method == "kmeans" else 2
             min_tracks_for_gmm = gmm_n_components_min if clustering_method == "gmm" else 2
@@ -339,7 +348,7 @@ def run_clustering_task(
                 return {"status": "FAILURE", "message": err_msg}
             if num_clustering_runs == 0:
                 log_and_update_main_clustering("Number of clustering runs is 0. Nothing to do.", 100, task_state=TASK_STATUS_SUCCESS)
-                app.logger.info(f"[MainClusteringTask-{current_task_id}] Number of clustering runs is 0.")
+                logger.info("Number of clustering runs is 0.")
                 return {"status": "SUCCESS", "message": "Number of clustering runs was 0."}
             active_mood_labels = MOOD_LABELS[:top_n_moods_for_clustering_param] if top_n_moods_for_clustering_param > 0 else MOOD_LABELS
             log_and_update_main_clustering(f"Active mood labels for clustering: {active_mood_labels}", 4, print_console=False)
@@ -364,7 +373,7 @@ def run_clustering_task(
                     else:
                         genre_to_lightweight_track_data_map['__other__'].append(minimal_track_info)
                 else: # Should not happen due to WHERE clause, but defensive
-                    genre_to_lightweight_track_data_map['__other__'].append({'item_id': row['item_id'], 'mood_vector': ''})
+                    genre_to_lightweight_track_data_map['__other__'].append({'item_id': row['item_id'], 'mood_vector': ''}) # type: ignore
 
 
             songs_counts_for_stratified_genres = []
@@ -380,7 +389,7 @@ def run_clustering_task(
                     current_progress, print_console=False
                 )
             else:
-                log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False) # type: ignore
+                log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
             target_songs_per_genre = max(min_songs_per_genre_for_stratification_param, int(np.floor(calculated_target_based_on_percentile))) # Use passed param
             if target_songs_per_genre == 0 and len(lightweight_rows) > 0:
                 target_songs_per_genre = 1 
@@ -439,10 +448,10 @@ def run_clustering_task(
                             is_child_truly_completed_this_cycle = True
                         else:
                             db_status_for_log = db_task_info_child.get('status') if db_task_info_child else "UNKNOWN (not in DB)"
-                            print(f"[MainClusteringTask-{current_task_id}] Warning: Active batch job {job_id} missing from RQ, DB status '{db_status_for_log}' is not terminal. Treating as completed (abnormally) to prevent stall.")
+                            logger.warning("[MainClusteringTask-%s] Warning: Active batch job %s missing from RQ, DB status '%s' is not terminal. Treating as completed (abnormally) to prevent stall.", current_task_id, job_id, db_status_for_log)
                             is_child_truly_completed_this_cycle = True 
                     except Exception as e_monitor_child_active:
-                        print(f"[MainClusteringTask-{current_task_id}] ERROR monitoring active batch job {job_id}: {e_monitor_child_active}. Treating as completed.")
+                        logger.error("[MainClusteringTask-%s] ERROR monitoring active batch job %s: %s. Treating as completed.", current_task_id, job_id, e_monitor_child_active, exc_info=True)
                         is_child_truly_completed_this_cycle = True
                     if is_child_truly_completed_this_cycle:
                         processed_in_this_cycle_ids.append(job_id)
@@ -470,9 +479,9 @@ def run_clustering_task(
                                     best_diversity_score = batch_best_score
                                     _main_task_accumulated_details["best_score"] = best_diversity_score
                                     best_clustering_results = best_from_batch 
-                                    print(f"[MainClusteringTask-{current_task_id}] Intermediate new best score: {best_diversity_score:.2f} from batch job {job_id_just_completed}")
+                                    logger.info("[MainClusteringTask-%s] Intermediate new best score: %.2f from batch job %s", current_task_id, best_diversity_score, job_id_just_completed)
                         else:
-                            print(f"[MainClusteringTask-{current_task_id}] Warning: Batch job {job_id_just_completed} completed but no result.")
+                            logger.warning("[MainClusteringTask-%s] Warning: Batch job %s completed but no result.", current_task_id, job_id_just_completed)
                 if newly_completed_elite_candidates:
                     all_potential_elites = elite_solutions_list + newly_completed_elite_candidates
                     all_potential_elites.sort(key=lambda x: x["score"], reverse=True)
@@ -486,7 +495,7 @@ def run_clustering_task(
                         current_batch_start_run_idx = next_batch_job_idx_to_launch * ITERATIONS_PER_BATCH_JOB
                         num_iterations_for_this_batch = min(ITERATIONS_PER_BATCH_JOB, num_clustering_runs - current_batch_start_run_idx)
                         if num_iterations_for_this_batch <= 0:
-                            print(f"[MainClusteringTask-{current_task_id}] Warning: Calculated 0 iterations for batch {next_batch_job_idx_to_launch}. Skipping.")
+                            logger.warning("[MainClusteringTask-%s] Warning: Calculated 0 iterations for batch %s. Skipping.", current_task_id, next_batch_job_idx_to_launch)
                             next_batch_job_idx_to_launch +=1 
                             continue
                         batch_id_for_logging = f"Batch_{next_batch_job_idx_to_launch}"
@@ -562,8 +571,8 @@ def run_clustering_task(
             log_and_update_main_clustering("All clustering batch jobs completed. Finalizing best result...", 90,
                                            details_to_add_or_update={"best_score": best_diversity_score})
             if not best_clustering_results or best_diversity_score < 0:
-                log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE)
-                app.logger.error(f"[MainClusteringTask-{current_task_id}] No valid clustering solution found. Best score: {best_diversity_score}")
+                log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE) # type: ignore
+                logger.error("No valid clustering solution found. Best score: %s", best_diversity_score)
                 return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
             current_progress = 92
             log_and_update_main_clustering(f"Best clustering found with diversity score: {best_diversity_score:.2f}. Preparing to create playlists.", current_progress, details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")})
@@ -574,7 +583,7 @@ def run_clustering_task(
             final_scaler_details = best_clustering_results["scaler_details"]     
             log_prefix_main_task_ai = f"[MainClusteringTask-{current_task_id} AI Naming]"
             if ai_model_provider_for_run in ["OLLAMA", "GEMINI"]:
-                print(f"{log_prefix_main_task_ai} AI Naming block entered. Attempting to import 'ai' module.")
+                logger.info("%s AI Naming block entered. Attempting to import 'ai' module.", log_prefix_main_task_ai)
                 ai_naming_start_progress = 90
                 ai_naming_end_progress = 95
                 ai_naming_progress_range = ai_naming_end_progress - ai_naming_start_progress
@@ -601,7 +610,7 @@ def run_clustering_task(
                             feature1_for_ai = "Vibe"
                             feature2_for_ai = "Focused"
                             feature3_for_ai = "Collection"
-                            print(f"{log_prefix_main_task_ai} Embeddings used for clustering. Using generic tags for AI: '{feature1_for_ai}', '{feature2_for_ai}', '{feature3_for_ai}'.")
+                            logger.info("%s Embeddings used for clustering. Using generic tags for AI: '%s', '%s', '%s'.", log_prefix_main_task_ai, feature1_for_ai, feature2_for_ai, feature3_for_ai)
                         else:
                             # If not using embeddings, derive tags from the rule-based original_name
                             name_parts = original_name.split('_')
@@ -611,7 +620,7 @@ def run_clustering_task(
                                 feature3_for_ai = name_parts[2]
                             elif len(name_parts) >= 2 and name_parts[1].lower() not in ["slow", "medium", "fast"]: # Check second part if third is tempo
                                 feature3_for_ai = name_parts[1]
-                        print(f"{log_prefix_main_task_ai} Generating AI name for '{original_name}' ({len(song_list_for_ai)} songs) using provider '{ai_model_provider_for_run}'. Tags for AI: F1: '{feature1_for_ai}', F2: '{feature2_for_ai}', F3: '{feature3_for_ai}'.")
+                        logger.info("%s Generating AI name for '%s' (%s songs) using provider '%s'. Tags for AI: F1: '%s', F2: '%s', F3: '%s'.", log_prefix_main_task_ai, original_name, len(song_list_for_ai), ai_model_provider_for_run, feature1_for_ai, feature2_for_ai, feature3_for_ai)
                         centroid_features_for_ai = final_playlist_centroids.get(original_name, {})
                         ai_generated_name_str = get_ai_playlist_name(
                             ai_model_provider_for_run,
@@ -621,7 +630,7 @@ def run_clustering_task(
                             feature1_for_ai, feature2_for_ai, feature3_for_ai, # Pass the potentially generic tags
                             song_list_for_ai,
                             centroid_features_for_ai)
-                        print(f"{log_prefix_main_task_ai} Raw AI output for '{original_name}': '{ai_generated_name_str}'")
+                        logger.info("%s Raw AI output for '%s': '%s'", log_prefix_main_task_ai, original_name, ai_generated_name_str)
                         current_playlist_final_name = original_name
                         ai_generated_base_name = original_name # This will be the name before disambiguation
 
@@ -629,15 +638,15 @@ def run_clustering_task(
                              clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
                              if clean_ai_name:
                                  if clean_ai_name.lower() != original_name.lower().strip().replace("_", " "):
-                                      print(f"{log_prefix_main_task_ai} AI: '{original_name}' -> '{clean_ai_name}'")
+                                      logger.info("%s AI: '%s' -> '%s'", log_prefix_main_task_ai, original_name, clean_ai_name)
                                       ai_generated_base_name = clean_ai_name # This is the name AI produced
                                  else:
                                       ai_generated_base_name = original_name # No change, effectively
                              else:
-                                 print(f"{log_prefix_main_task_ai} AI for '{original_name}' returned empty after cleaning. Raw: '{ai_generated_name_str}'. Using original.")
+                                 logger.warning("%s AI for '%s' returned empty after cleaning. Raw: '%s'. Using original.", log_prefix_main_task_ai, original_name, ai_generated_name_str)
                                  ai_generated_base_name = original_name
                         else:
-                            print(f"{log_prefix_main_task_ai} AI naming for '{original_name}' failed or returned error/skip message: '{ai_generated_name_str}'. Using original.")
+                            logger.warning("%s AI naming for '%s' failed or returned error/skip message: '%s'. Using original.", log_prefix_main_task_ai, original_name, ai_generated_name_str)
                             ai_generated_base_name = original_name
                         
                         # Disambiguate playlist names if the AI generates the same name for different clusters.
@@ -671,24 +680,22 @@ def run_clustering_task(
                     # Log if any AI-generated base names were generated for multiple input playlists
                     for ai_name, contribution_count in ai_base_name_generation_count.items():
                         if contribution_count > 1:
-                            print(f"{log_prefix_main_task_ai} AI-generated base name '{ai_name}' was generated for {contribution_count} input playlists. They are stored as distinct playlists with numerical suffixes (e.g., '{ai_name} (2)').")
+                            logger.info("%s AI-generated base name '%s' was generated for %s input playlists. They are stored as distinct playlists with numerical suffixes (e.g., '%s (2)').", log_prefix_main_task_ai, ai_name, contribution_count, ai_name)
 
                     if ai_renamed_playlists_final:
                         final_named_playlists = ai_renamed_playlists_final
                         final_playlist_centroids = ai_renamed_centroids_final
                     log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming for best playlist set completed.", ai_naming_end_progress, print_console=True)
                 except ImportError:
-                    print(f"{log_prefix_main_task_ai} Could not import 'ai' module. Skipping AI naming for final playlists.")
-                    traceback.print_exc()
+                    logger.error("%s Could not import 'ai' module. Skipping AI naming for final playlists.", log_prefix_main_task_ai, exc_info=True)
                     current_progress = ai_naming_end_progress
                     log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming skipped due to import error.", current_progress, print_console=True)
                 except Exception as e_ai_final:
-                    print(f"{log_prefix_main_task_ai} Error during final AI playlist naming: {e_ai_final}. Using original names.")
-                    traceback.print_exc()
+                    logger.error("%s Error during final AI playlist naming: %s. Using original names.", log_prefix_main_task_ai, e_ai_final, exc_info=True)
                     current_progress = ai_naming_end_progress
                     log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming skipped due to error.", current_progress, print_console=True)
             else:
-                print(f"{log_prefix_main_task_ai} AI Naming skipped: Provider is '{ai_model_provider_for_run}'.")
+                logger.info("%s AI Naming skipped: Provider is '%s'.", log_prefix_main_task_ai, ai_model_provider_for_run)
             playlists_to_create_on_jellyfin = {}
             centroids_for_jellyfin_playlists = {}
             for name, songs in final_named_playlists.items():
@@ -715,7 +722,14 @@ def run_clustering_task(
             log_and_update_main_clustering(f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}.", current_progress, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
             return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had diversity score of {best_diversity_score:.2f}."}
         except Exception as e:
-            error_tb = traceback.format_exc()
-            print(f"FATAL ERROR: Clustering failed: {e}\n{error_tb}")
+            # Log the full traceback on the server for debugging.
+            logger.critical("FATAL ERROR: Main clustering task failed: %s", e, exc_info=True)
             with app.app_context():
-                log_and_update_main_clustering(f"❌ Main clustering failed: {e}", current_progress, details_to_add_or_update={"error_message": str(e), "traceback": error_tb}, task_state=TASK_STATUS_FAILURE)
+                # Save a generic error to the DB, without the stack trace.
+                log_and_update_main_clustering(
+                    "❌ Main clustering failed due to an unexpected error.",
+                    current_progress,
+                    details_to_add_or_update={"error_message": "An unexpected error occurred. Check server logs for details."},
+                    task_state=TASK_STATUS_FAILURE,
+                    print_console=False # The detailed error is already printed above
+                )
