@@ -27,10 +27,10 @@ jobs:
 
       - name: Set target branch
         id: branch
-        run: echo "::set-output name=target::$(if [ \"${GITHUB_REF}\" == \"refs/heads/devel\" ]; then echo devel; else echo main; fi)"
+        run: echo "target=$(if [[ \"${GITHUB_REF}\" == \"refs/heads/devel\" ]]; then echo devel; else echo main; fi)" >> $GITHUB_OUTPUT
 
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.1
+        uses: helm/chart-releaser-action@v1.5.0
         with:
           charts_dir: helm-chart
           target_branch: ${{ steps.branch.outputs.target }}
