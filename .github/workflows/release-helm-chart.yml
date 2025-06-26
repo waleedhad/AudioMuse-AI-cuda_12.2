@@ -28,7 +28,7 @@ jobs:
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.1 # Updated to a version that supports 'prerelease'
+        uses: helm/chart-releaser-action@v1.5.0 # Updated to a version that supports 'prerelease'
         with:
           # The path to the chart directory.
           charts_dir: helm-chart
