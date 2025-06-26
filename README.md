@@ -8,7 +8,6 @@ Addional important information on this project can also be found here:
 * Brief slide presentation: [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/main/docs/slide.pdf).
 * Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
 
-
 **IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
 
 ## **Table of Contents**
