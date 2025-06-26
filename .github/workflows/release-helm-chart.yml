@@ -18,8 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Fetches all history for all branches and tags, which is required
-          # by the chart-releaser action to determine changes.
           fetch-depth: 0
 
       - name: Configure Git
@@ -27,15 +25,15 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      - name: Set target branch
+        id: branch
+        run: echo "::set-output name=target::$(if [ \"${GITHUB_REF}\" == \"refs/heads/devel\" ]; then echo devel; else echo main; fi)"
+
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.6.0
+        uses: helm/chart-releaser-action@v1.6.1
         with:
-          # The path to the chart directory.
           charts_dir: helm-chart
-          # If the push is to the 'devel' branch, mark the GitHub Release as a pre-release.
-          # Otherwise, it will be a full release.
+          target_branch: ${{ steps.branch.outputs.target }}
           prerelease: ${{ github.ref == 'refs/heads/devel' }}
         env:
-          # The chart-releaser action uses this token to create releases and push to gh-pages.
-          # GITHUB_TOKEN is automatically provided by GitHub Actions.
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
