@@ -10,7 +10,6 @@ on:
 
 jobs:
   release:
-    # Grant permissions to create a GitHub Release and push to the gh-pages branch.
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -25,15 +24,9 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
-      - name: Set target branch
-        id: branch
-        run: echo "target=$(if [[ \"${GITHUB_REF}\" == \"refs/heads/devel\" ]]; then echo devel; else echo main; fi)" >> $GITHUB_OUTPUT
-
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.5.0
         with:
           charts_dir: helm-chart
-          target_branch: ${{ steps.branch.outputs.target }}
-          prerelease: ${{ github.ref == 'refs/heads/devel' }}
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
