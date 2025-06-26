@@ -7,9 +7,28 @@ on:
     branches:
       - main
       - devel
+    # Only run this workflow if files in the helm-chart directory change.
+    paths:
+      - 'helm-chart/**'
+
+# Ensures that only one workflow runs at a time for the same branch,
+# cancelling any in-progress runs when a new one is triggered.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Helm Lint
+        run: helm lint ./helm-chart
+
   release:
+    needs: lint # This job will only run if the 'lint' job succeeds.
     # Grant permissions to create a GitHub Release and push to the gh-pages branch.
     permissions:
       contents: write
@@ -28,15 +47,10 @@ jobs:
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.5.0
+        uses: helm/chart-releaser-action@v1 # Use the latest v1.x.y release
         with:
           charts_dir: helm-chart
-        env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        uses: helm/chart-releaser-action@v1.6.0 # Use v1.6.0 or later for 'prerelease' support
-        with:
           # The path to the chart directory.
-          charts_dir: helm-chart
           # If the push is to the 'devel' branch, mark the GitHub Release as a pre-release.
           # Otherwise, it will be a full release.
           prerelease: ${{ github.ref == 'refs/heads/devel' }}
