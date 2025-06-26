@@ -33,7 +33,6 @@ jobs:
           # The path to the chart directory.
           charts_dir: helm-chart
           # If the push is to the 'devel' branch, mark the GitHub Release as a pre-release.
-          target_branch: main # <--- Add this line
           # Otherwise, it will be a full release.
           prerelease: ${{ github.ref == 'refs/heads/devel' }}
         env:
