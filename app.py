@@ -4,10 +4,21 @@ from psycopg2.extras import DictCursor
 from flask import Flask, jsonify, request, render_template, g
 from contextlib import closing
 import json
+import logging
 import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
 
 # RQ imports
+
+logger = logging.getLogger(__name__)
+
+# Configure basic logging for the entire application
+logging.basicConfig(
+    level=logging.INFO, # Set the default logging level (e.g., INFO, DEBUG, WARNING, ERROR, CRITICAL)
+    format='[%(levelname)s]-[%(asctime)s]-%(message)s', # Custom format string
+    datefmt='%d-%m-%Y %H-%M-%S' # Custom date/time format
+)
+
 from redis import Redis
 from rq import Queue, Retry
 from rq.job import Job, JobStatus
@@ -28,6 +39,8 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
     AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
+
+logger = logging.getLogger(__name__)
 
 # --- Flask App Setup ---
 app = Flask(__name__)
@@ -308,14 +321,14 @@ def save_track_analysis(item_id, title, author, tempo, key, scale, moods, energy
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"Error saving track analysis for {item_id}: {e}")
+        logger.error("Error saving track analysis for %s: %s", item_id, e)
     finally:
         cur.close()
 
 def save_track_embedding(item_id, embedding_vector):
     """Saves or updates the embedding vector for a track."""
     if embedding_vector is None: # Should not happen if analysis is successful
-        print(f"Warning: Embedding vector for {item_id} is None. Skipping save.")
+        logger.warning("Embedding vector for %s is None. Skipping save.", item_id)
         return
 
     conn = get_db()
@@ -330,8 +343,7 @@ def save_track_embedding(item_id, embedding_vector):
         """, (item_id, embedding_json))
         conn.commit()
     except Exception as e:
-        conn.rollback()
-        print(f"Error saving track embedding for {item_id}: {e}")
+        logger.error("Error saving track embedding for %s: %s", item_id, e)
     finally:
         cur.close()
 
@@ -402,7 +414,7 @@ def update_playlist_table(playlists): # Removed db_path
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"Error updating playlist table: {e}")
+        logger.error("Error updating playlist table: %s", e)
     finally:
         cur.close()
 
@@ -912,7 +924,7 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     """Helper to cancel a job and its children based on DB records."""
     cancelled_count = 0
 
-    # First, determine the task_type for the current job_id
+    # First, determine the task_type for the current job_id # type: ignore
     db_task_info = get_task_info_from_db(job_id)
     current_task_type = db_task_info.get('task_type') if db_task_info else task_type_from_db
 
@@ -933,32 +945,32 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     # If current_task_type is known, proceed with RQ cancellation attempt
     action_taken_in_rq = False
     try:
-        job_rq = Job.fetch(job_id, connection=redis_conn)
+        job_rq = Job.fetch(job_id, connection=redis_conn) # type: ignore
         current_rq_status = job_rq.get_status()
-        print(f"Job {job_id} (type: {current_task_type}) found in RQ with status: {current_rq_status}")
+        logger.info("Job %s (type: %s) found in RQ with status: %s", job_id, current_task_type, current_rq_status)
 
         if job_rq.is_started:
-            print(f"  Job {job_id} is STARTED. Attempting to send stop command.")
+            logger.info("  Job %s is STARTED. Attempting to send stop command.", job_id)
             try:
                 send_stop_job_command(redis_conn, job_id) # This will likely move it to 'failed' in RQ
                 action_taken_in_rq = True
-                print(f"    Stop command sent for job {job_id}.")
+                logger.info("    Stop command sent for job %s.", job_id)
             except InvalidJobOperation:
-                print(f"    Job {job_id} was in 'started' state but became non-executable for stop command (InvalidJobOperation). Will mark as REVOKED in DB.")
+                logger.warning("    Job %s was in 'started' state but became non-executable for stop command (InvalidJobOperation). Will mark as REVOKED in DB.", job_id)
             except Exception as e_stop_cmd: # Catch other potential errors from send_stop_job_command
-                print(f"    Error sending stop command for job {job_id}: {e_stop_cmd}")
+                logger.error("    Error sending stop command for job %s: %s", job_id, e_stop_cmd)
         elif not (job_rq.is_finished or job_rq.is_failed or job_rq.is_canceled):
             # If it's not started, and not in a terminal state (e.g., queued, deferred)
-            print(f"  Job {job_id} is {current_rq_status}. Attempting to cancel via job.cancel().")
+            logger.info("  Job %s is %s. Attempting to cancel via job.cancel().", job_id, current_rq_status)
             job_rq.cancel() # This moves it to 'canceled' status in RQ
             action_taken_in_rq = True
         else:
-            print(f"  Job {job_id} is already in a terminal RQ state: {current_rq_status}. No RQ action needed.")
+            logger.info("  Job %s is already in a terminal RQ state: %s. No RQ action needed.", job_id, current_rq_status)
 
     except NoSuchJobError:
-        print(f"Job {job_id} (type: {current_task_type}) not found in RQ. Will mark as REVOKED in DB.")
+        logger.warning("Job %s (type: %s) not found in RQ. Will mark as REVOKED in DB.", job_id, current_task_type)
     except Exception as e_rq_interaction:
-        print(f"Warning: Error interacting with RQ for job {job_id} (type: {current_task_type}): {e_rq_interaction}")
+        logger.error("Error interacting with RQ for job %s (type: %s): %s", job_id, current_task_type, e_rq_interaction)
 
     if action_taken_in_rq:
         cancelled_count += 1
@@ -982,11 +994,11 @@ def cancel_job_and_children_recursive(job_id, task_type_from_db=None):
     """, (job_id, terminal_statuses_tuple))
     children_tasks = cur.fetchall()
     cur.close()
-
+    
     for child_task_row in children_tasks:
         child_job_id = child_task_row['task_id']
         child_task_type = child_task_row['task_type'] # Child's own type
-        print(f"Recursively cancelling child job: {child_job_id} of type {child_task_type}")
+        logger.info("Recursively cancelling child job: %s of type %s", child_job_id, child_task_type)
         # The count from recursive calls will be added
         cancelled_count += cancel_job_and_children_recursive(child_job_id, child_task_type)
 

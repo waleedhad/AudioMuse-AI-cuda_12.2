@@ -1,13 +1,14 @@
-# /home/guido/Music/AudioMuse-AI/ai.py
-
 import requests
 import json
 import re
 import ftfy # Import the ftfy library
 import time # Import the time library
+import logging
 import unicodedata
 import google.generativeai as genai # Import Gemini library
 import os # Import os to potentially read GEMINI_API_CALL_DELAY_SECONDS
+
+logger = logging.getLogger(__name__)
 
 # creative_prompt_template is imported in tasks.py, so it should be defined here
 creative_prompt_template = (
@@ -33,6 +34,8 @@ def clean_playlist_name(name):
     name = unicodedata.normalize('NFKC', name)
     # Stricter regex: only allows characters explicitly mentioned in the prompt.
     cleaned_name = re.sub(r'[^a-zA-Z0-9\s\-\&\'!\.\,\?\(\)\[\]]', '', name)
+    # Also remove trailing number in parentheses, e.g., "My Playlist (2)" -> "My Playlist", to prevent AI from interfering with disambiguation logic.
+    cleaned_name = re.sub(r'\s\(\d+\)$', '', cleaned_name)
     cleaned_name = re.sub(r'\s+', ' ', cleaned_name).strip()
     return cleaned_name
 
@@ -68,7 +71,7 @@ def get_ollama_playlist_name(ollama_url, model_name, full_prompt):
     }
 
     try:
-        print(f"DEBUG AI (Ollama): Starting API call for model '{model_name}' at '{ollama_url}'.") # Debug print
+        logger.debug("Starting API call for model '%s' at '%s'.", model_name, ollama_url)
 
         response = requests.post(ollama_url, headers=headers, data=json.dumps(payload), stream=True, timeout=960) # Increased timeout
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
@@ -82,7 +85,7 @@ def get_ollama_playlist_name(ollama_url, model_name, full_prompt):
                     if chunk.get('done'):
                         break # Stop processing when the 'done' signal is received
                 except json.JSONDecodeError:
-                    print(f"Warning: Could not decode JSON line from stream: {line.decode('utf-8', errors='ignore')}")
+                    logger.warning("Could not decode JSON line from stream: %s", line.decode('utf-8', errors='ignore'))
                     continue
 
         # Ollama models often include thought blocks, extract text after common thought tags
@@ -97,10 +100,12 @@ def get_ollama_playlist_name(ollama_url, model_name, full_prompt):
 
     except requests.exceptions.RequestException as e:
         # Catch network-related errors, bad HTTP responses, etc.
-        return f"Error calling Ollama API: {e}"
+        logger.error("Error calling Ollama API: %s", e, exc_info=True)
+        return "Error: AI service is currently unavailable."
     except Exception as e:
         # Catch any other unexpected errors.
-        return f"An unexpected error occurred: {e}"
+        logger.error("An unexpected error occurred in get_ollama_playlist_name", exc_info=True)
+        return "Error: AI service is currently unavailable."
 
 # --- Gemini Specific Function ---
 def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
@@ -117,35 +122,36 @@ def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
     # Allow any provided key, even if it's the placeholder, but check if it's empty/default
     if not gemini_api_key or gemini_api_key == "YOUR-GEMINI-API-KEY-HERE":
          return "Error: Gemini API key is missing or empty. Please provide a valid API key."
-
+    
     try:
         # Read delay from environment/config if needed, otherwise use the default
-        gemini_call_delay = int(os.environ.get("GEMINI_API_CALL_DELAY_SECONDS", "7"))
+        gemini_call_delay = int(os.environ.get("GEMINI_API_CALL_DELAY_SECONDS", "7")) # type: ignore
         if gemini_call_delay > 0:
-            print(f"DEBUG AI (Gemini): Waiting for {gemini_call_delay}s before API call to respect rate limits.")
+            logger.debug("Waiting for %ss before Gemini API call to respect rate limits.", gemini_call_delay)
             time.sleep(gemini_call_delay)
 
         genai.configure(api_key=gemini_api_key)
         model = genai.GenerativeModel(model_name)
 
-        print(f"DEBUG AI (Gemini): Starting API call for model '{model_name}'.") # Debug print
+        logger.debug("Starting API call for model '%s'.", model_name)
  
         generation_config = genai.types.GenerationConfig(
             temperature=0.9 # Explicitly set temperature for more creative/varied responses
         )
         response = model.generate_content(full_prompt, generation_config=generation_config, request_options={'timeout': 960})
-        # Extract text from the response
+        # Extract text from the response # type: ignore
         if response and response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
             extracted_text = "".join(part.text for part in response.candidates[0].content.parts)
         else:
-            print(f"DEBUG AI (Gemini): No content in response. Raw response: {response}")
+            logger.debug("Gemini returned no content. Raw response: %s", response)
             return "Error: Gemini returned no content."
 
         # The final cleaning and length check is done in the general function
         return extracted_text
 
     except Exception as e:
-        return f"Error calling Gemini API: {e}"
+        logger.error("Error calling Gemini API: %s", e, exc_info=True)
+        return "Error: AI service is currently unavailable."
 
 # --- General AI Naming Function ---
 def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key, gemini_model_name, prompt_template, feature1, feature2, feature3, song_list, other_feature_scores_dict):
@@ -191,10 +197,10 @@ def get_ai_playlist_name(provider, ollama_url, ollama_model_name, gemini_api_key
     formatted_song_list = "\n".join([f"- {song.get('title', 'Unknown Title')} by {song.get('author', 'Unknown Artist')}" for song in song_list]) # Send all songs
 
     # Construct the full prompt using the template and all features
-    # The new prompt only requires the song list sample
+    # The new prompt only requires the song list sample # type: ignore
     full_prompt = prompt_template.format(song_list_sample=formatted_song_list)
 
-    print(f"Sending prompt to AI ({provider}):\n{full_prompt}") # Log the prompt for debugging
+    logger.info("Sending prompt to AI (%s):\n%s", provider, full_prompt)
 
     # --- Call the AI Model ---
     name = "AI Naming Skipped" # Default if provider is NONE or invalid
