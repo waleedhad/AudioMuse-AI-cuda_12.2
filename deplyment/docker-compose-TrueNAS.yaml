@@ -1,6 +1,4 @@
 version: '3.8'
-# Remember to scale the worker to minimum 2
-# docker compose up -d --scale audiomuse-ai-worker=2
 services:
   # Redis service for RQ (task queue)
   redis:
@@ -53,10 +51,10 @@ services:
       - postgres
     restart: unless-stopped
 
-  # AudioMuse-AI RQ Worker service
-  audiomuse-ai-worker:
+  # AudioMuse-AI RQ Worker service (Instance 1)
+  audiomuse-ai-worker-1:
     image: ghcr.io/neptunehub/audiomuse-ai:0.3.6-beta # Reflects deployment.yaml
-    container_name: audiomuse-ai-worker-instance
+    container_name: audiomuse-ai-worker-instance-1
     environment:
       SERVICE_TYPE: "worker" # Tells the container to run the RQ worker
       JELLYFIN_USER_ID: "0e45c44b3e2e4da7a2be11a72a1c8575" # From jellyfin-credentials secret
@@ -72,7 +70,32 @@ services:
       GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE" # From gemini-api-credentials secret
       TEMP_DIR: "/app/temp_audio"
     volumes:
-      - temp-audio-worker:/app/temp_audio # Volume for temporary audio files
+      - temp-audio-worker-1:/app/temp_audio # Volume for temporary audio files for worker 1
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+
+  # AudioMuse-AI RQ Worker service (Instance 2)
+  audiomuse-ai-worker-2:
+    image: ghcr.io/neptunehub/audiomuse-ai:0.3.6-beta # Reflects deployment.yaml
+    container_name: audiomuse-ai-worker-instance-2
+    environment:
+      SERVICE_TYPE: "worker" # Tells the container to run the RQ worker
+      JELLYFIN_USER_ID: "0e45c44b3e2e4da7a2be11a72a1c8575" # From jellyfin-credentials secret
+      JELLYFIN_TOKEN: "e0b8c325bc1b426c81922b90c0aa2ff1" # From jellyfin-credentials secret
+      JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087" # From audiomuse-ai-config ConfigMap
+      # DATABASE_URL is now constructed by config.py from the following:
+      POSTGRES_USER: "audiomuse"
+      POSTGRES_PASSWORD: "audiomusepassword"
+      POSTGRES_DB: "audiomusedb"
+      POSTGRES_HOST: "postgres" # Service name of the postgres container
+      POSTGRES_PORT: "5432"
+      REDIS_URL: "redis://redis:6379/0" # Connects to the 'redis' service
+      GEMINI_API_KEY: "YOUR_GEMINI_API_KEY_HERE" # From gemini-api-credentials secret
+      TEMP_DIR: "/app/temp_audio"
+    volumes:
+      - temp-audio-worker-2:/app/temp_audio # Volume for temporary audio files for worker 2
     depends_on:
       - redis
       - postgres
@@ -83,4 +106,5 @@ volumes:
   redis-data:
   postgres-data:
   temp-audio-flask: # Volume for Flask app's temporary audio
-  temp-audio-worker: # Volume for Worker's temporary audio
+  temp-audio-worker-1: # Volume for Worker 1's temporary audio
+  temp-audio-worker-2: # Volume for Worker 2's temporary audio

@@ -343,6 +343,7 @@ For a quick local setup or for users not using Kubernetes, a `docker-compose.yam
     ```bash
     docker compose down
     ```
+**IMPORTANT** If you can't run the --scale command, use **docker-compose-TrueNAS.yaml** as a workearound. You will directly have 2 worker container in it (audiomuse-ai-worker-1 and audiomuse-ai-worker-2). REMEMBER to pass to both worker the same environment value.
 ## **Docker Image Tagging Strategy**
 
 Our GitHub Actions workflow automatically builds and pushes Docker images. Here's how our tags work:
