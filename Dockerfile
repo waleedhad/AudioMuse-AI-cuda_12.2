@@ -12,6 +12,7 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
+    supervisor \
     strace \
     procps \
     iputils-ping \
@@ -64,12 +65,15 @@ RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
 
+# Copy the application code
 COPY . /app
 
-ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
+# Copy the supervisor configuration
+COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
+ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
 
 EXPOSE 8000
 
 WORKDIR /workspace
-CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then python3 /app/rq_worker.py; else python3 /app/app.py; fi"]
+CMD ["bash", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then echo 'Starting worker processes via supervisord...' && /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf; else echo 'Starting web service...' && python3 /app/app.py; fi"]

@@ -12,7 +12,7 @@ import logging
 import uuid
 
 # RQ import
-from rq import get_current_job
+from rq import get_current_job, Retry
 from rq.job import Job
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
@@ -79,6 +79,7 @@ def run_clustering_batch_task(
     ):
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
+    logger.info(f"Starting clustering batch task {current_task_id} (Batch: {batch_id_str}) from queue: {current_job.origin if current_job else 'N/A'}")
 
     with app.app_context():
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Clustering Batch Task {batch_id_str} (Job ID: {current_task_id}) started. Iterations: {start_run_idx} to {start_run_idx + num_iterations_in_batch - 1}."
@@ -251,11 +252,25 @@ def run_clustering_task(
     score_weight_other_feature_purity_param,    
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, 
     gemini_api_key_param, gemini_model_name_param, top_n_moods_for_clustering_param,
-    enable_clustering_embeddings_param): 
+    enable_clustering_embeddings_param): # type: ignore
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4()) 
+    logger.info(f"Starting main clustering task {current_task_id} from queue: {current_job.origin if current_job else 'N/A'}")
 
     with app.app_context():
+        # IDEMPOTENCY CHECK: If task is already in a terminal state, don't run again.
+        task_info = get_task_info_from_db(current_task_id)
+        if task_info and task_info.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+            logger.info(f"Main clustering task {current_task_id} is already in a terminal state ('{task_info.get('status')}'). Skipping execution.")
+            final_details = {}
+            if task_info.get('details'):
+                try:
+                    final_details = json.loads(task_info.get('details'))
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse details JSON for already terminal task {current_task_id}.")
+            # Return the existing final status and details
+            return {"status": task_info.get('status'), "message": f"Task already in terminal state '{task_info.get('status')}'.", "details": final_details}
+
         initial_log_message = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main clustering task started."
         _main_task_accumulated_details = {
             "message": "Initializing clustering...",
@@ -279,9 +294,11 @@ def run_clustering_task(
             "gemini_model_name_for_run": gemini_model_name_param,
             "embeddings_enabled_for_clustering": enable_clustering_embeddings_param 
         } # Add the new param here for logging
-        save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
+        
+        # Define current_progress before the helper function that uses it
         current_progress = 0
 
+        # Define the helper function BEFORE it's called
         def log_and_update_main_clustering(message, progress, details_to_add_or_update=None, task_state=TASK_STATUS_PROGRESS, print_console=True):
             nonlocal current_progress, _main_task_accumulated_details
             current_progress = progress
@@ -312,6 +329,62 @@ def run_clustering_task(
                 current_job.meta['details'] = meta_details
                 current_job.save_meta()
             save_task_status(current_task_id, "main_clustering", task_state, progress=progress, details=_main_task_accumulated_details)
+        
+        # --- STATE REHYDRATION BLOCK (for idempotency) ---
+        # This block runs on start and restart to rebuild the state from the DB.
+        log_and_update_main_clustering("Checking for existing state (rehydrating)...", 2, print_console=False)
+        
+        # Initial state variables that will be rehydrated
+        active_jobs_map = {}
+        elite_solutions_list = []
+        best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
+        best_clustering_results = None
+        batches_completed_count = 0
+        total_iterations_completed_count = 0
+        next_batch_job_idx_to_launch = 0
+        last_subset_track_ids_for_batch_chaining = [] # Will be populated by rehydration
+        
+        # Fetch all children of this main task from the DB
+        db = get_db()
+        cur = db.cursor(cursor_factory=DictCursor)
+        cur.execute("SELECT task_id, status, sub_type_identifier FROM task_status WHERE parent_task_id = %s", (current_task_id,))
+        child_tasks_from_db = cur.fetchall()
+        cur.close()
+
+        batch_index_to_task_map = {}
+        if child_tasks_from_db:
+            for child_row in child_tasks_from_db:
+                batch_id_str = child_row['sub_type_identifier']
+                if batch_id_str and batch_id_str.startswith("Batch_"):
+                    try:
+                        batch_index = int(batch_id_str.split('_')[1])
+                        batch_index_to_task_map[batch_index] = child_row
+                    except (ValueError, IndexError):
+                        logger.warning(f"Could not parse batch index from sub_type_identifier: {batch_id_str}")
+
+        # Process completed batches in order to correctly chain the subset IDs
+        max_processed_batch_idx = -1
+        if batch_index_to_task_map:
+            sorted_batch_indices = sorted(batch_index_to_task_map.keys())
+            for batch_idx in sorted_batch_indices:
+                child_task = batch_index_to_task_map[batch_idx]
+                child_status = child_task['status']
+                child_id = child_task['task_id']
+
+                if child_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                    logger.info(f"Rehydrating from failed/revoked batch job {child_id} (Batch_{batch_idx}).")
+                    batches_completed_count += 1
+                    max_processed_batch_idx = batch_idx
+                elif child_status in [TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS]:
+                    logger.info(f"Rehydrating and monitoring active batch job {child_id} (Batch_{batch_idx}).")
+                    try:
+                        job_instance = Job.fetch(child_id, connection=redis_conn)
+                        active_jobs_map[child_id] = job_instance
+                    except NoSuchJobError:
+                        logger.warning(f"Job {child_id} was active in DB but not found in RQ. It will be ignored.")
+        # --- END OF STATE REHYDRATION BLOCK ---
+        save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
+        # current_progress is now initialized before the helper function
 
         try:
             ai_model_provider_for_run = ai_model_provider_param
@@ -391,8 +464,7 @@ def run_clustering_task(
             else:
                 log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
             target_songs_per_genre = max(min_songs_per_genre_for_stratification_param, int(np.floor(calculated_target_based_on_percentile))) # Use passed param
-            if target_songs_per_genre == 0 and len(lightweight_rows) > 0:
-                target_songs_per_genre = 1 
+            if target_songs_per_genre == 0 and len(lightweight_rows) > 0: target_songs_per_genre = 1
             log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)
             genre_to_lightweight_track_data_map_json = json.dumps(genre_to_lightweight_track_data_map) # Already dicts
             log_and_update_main_clustering("Stratified sampling preparation complete.", 6, print_console=False)
@@ -402,11 +474,46 @@ def run_clustering_task(
                 previous_subset_track_ids=None,
                 percentage_change=0.0
             )
-            last_subset_track_ids_for_batch_chaining = [t['item_id'] for t in initial_subset_lightweight]
+            # If we are not rehydrating, set the initial subset. Otherwise, rehydration has already set it.
+            if not last_subset_track_ids_for_batch_chaining:
+                last_subset_track_ids_for_batch_chaining = [t['item_id'] for t in initial_subset_lightweight]
 
             best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
             best_clustering_results = None 
-            elite_solutions_list = []      
+            elite_solutions_list = []
+
+            # Re-process successful jobs after other states are handled to ensure correct chaining
+            if batch_index_to_task_map:
+                sorted_batch_indices_for_success = sorted(batch_index_to_task_map.keys())
+                for batch_idx in sorted_batch_indices_for_success:
+                    child_task = batch_index_to_task_map[batch_idx]
+                    if child_task['status'] == TASK_STATUS_SUCCESS:
+                        child_id = child_task['task_id']
+                        logger.info(f"Rehydrating from successful batch job {child_id} (Batch_{batch_idx}).")
+                        batch_job_result = get_job_result_safely(child_id, current_task_id, f"clustering_batch (rehydration)")
+                        if batch_job_result:
+                            iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
+                            total_iterations_completed_count += iterations_from_batch
+                            best_from_batch = batch_job_result.get("best_result_from_batch")
+                            if "final_subset_track_ids" in batch_job_result and batch_job_result["final_subset_track_ids"] is not None:
+                                last_subset_track_ids_for_batch_chaining = batch_job_result["final_subset_track_ids"]
+                            if best_from_batch and isinstance(best_from_batch, dict):
+                                batch_best_score = best_from_batch.get("diversity_score", -1.0)
+                                batch_best_params = best_from_batch.get("parameters")
+                                if batch_best_score > -1.0 and batch_best_params:
+                                    elite_solutions_list.append({"score": batch_best_score, "params": batch_best_params})
+                                if batch_best_score > best_diversity_score:
+                                    best_diversity_score = batch_best_score
+                                    _main_task_accumulated_details["best_score"] = best_diversity_score
+                                    best_clustering_results = best_from_batch
+                        batches_completed_count += 1
+                        max_processed_batch_idx = batch_idx
+            
+            # Update elites and next batch index after processing all found children
+            elite_solutions_list.sort(key=lambda x: x["score"], reverse=True)
+            elite_solutions_list = elite_solutions_list[:TOP_N_ELITES]
+            next_batch_job_idx_to_launch = max_processed_batch_idx + 1
+
             mutation_config = {
                 "int_abs_delta": MUTATION_INT_ABS_DELTA,
                 "float_abs_delta": MUTATION_FLOAT_ABS_DELTA,
@@ -415,17 +522,21 @@ def run_clustering_task(
             mutation_config_json = json.dumps(mutation_config)
             exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
             all_launched_child_jobs_instances = []
-            from app import rq_queue as main_rq_queue 
-            active_jobs_map = {}
-            total_iterations_completed_count = 0
-            next_batch_job_idx_to_launch = 0
+            from app import rq_queue_default
+            # active_jobs_map, total_iterations_completed_count, next_batch_job_idx_to_launch,
+            # and batches_completed_count are now initialized by the rehydration block.
             num_total_batch_jobs = (num_clustering_runs + ITERATIONS_PER_BATCH_JOB - 1) // ITERATIONS_PER_BATCH_JOB
             _main_task_accumulated_details["total_batch_jobs"] = num_total_batch_jobs 
-            batches_completed_count = 0
             data_source_for_clustering_log = "embeddings" if enable_clustering_embeddings_param else "score vectors"
             log_and_update_main_clustering(f"Processing {len(lightweight_rows)} tracks using {data_source_for_clustering_log}. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 8)
 
             while batches_completed_count < num_total_batch_jobs:
+                # --- Worker Shutdown Check ---
+                if current_job and current_job.is_stopped:
+                    logger.warning(f"Main clustering task {current_task_id} received stop signal from worker. Raising exception to force re-queue.")
+                    raise Exception("Worker shutdown detected, re-queueing task for graceful restart.")
+                # --- End Worker Shutdown Check ---
+
                 if current_job:
                     with app.app_context():
                         main_task_db_info = get_task_info_from_db(current_task_id)
@@ -491,7 +602,10 @@ def run_clustering_task(
                     num_slots_to_fill = MAX_CONCURRENT_BATCH_JOBS - len(active_jobs_map)
                     for _ in range(num_slots_to_fill):
                         if next_batch_job_idx_to_launch >= num_total_batch_jobs: break
-                        batch_job_task_id = str(uuid.uuid4())
+                        
+                        # IDEMPOTENCY: Use a deterministic job ID for batch tasks
+                        batch_job_task_id = f"{current_task_id}_batch_{next_batch_job_idx_to_launch}"
+
                         current_batch_start_run_idx = next_batch_job_idx_to_launch * ITERATIONS_PER_BATCH_JOB
                         num_iterations_for_this_batch = min(ITERATIONS_PER_BATCH_JOB, num_clustering_runs - current_batch_start_run_idx)
                         if num_iterations_for_this_batch <= 0:
@@ -511,7 +625,7 @@ def run_clustering_task(
                         log_and_update_main_clustering(f"Preparing to enqueue batch job {batch_id_for_logging} (runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1}). Initial subset IDs for this batch: {'Provided' if last_subset_track_ids_for_batch_chaining else 'None'}", current_progress, print_console=False)
                         initial_subset_for_this_batch_json = json.dumps(last_subset_track_ids_for_batch_chaining) if last_subset_track_ids_for_batch_chaining else "[]"
 
-                        new_job = main_rq_queue.enqueue(
+                        new_job = rq_queue_default.enqueue( # Enqueue sub-task on the DEFAULT priority queue
                             run_clustering_batch_task,
                             args=(
                                 batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch,
@@ -534,8 +648,9 @@ def run_clustering_task(
                             ),
                             job_id=batch_job_task_id,
                             description=f"Clustering Batch {next_batch_job_idx_to_launch} (Runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1})",
-                            job_timeout=3600 * (ITERATIONS_PER_BATCH_JOB / 2),
-                            meta={'parent_task_id': current_task_id}
+                            job_timeout=3600 * (ITERATIONS_PER_BATCH_JOB / 2), # Updated to reflect longer iters per batch
+                            meta={'parent_task_id': current_task_id},
+                            retry=Retry(max=3) # RETRY: Add retry mechanism for batch tasks
                         )
                         active_jobs_map[new_job.id] = new_job
                         all_launched_child_jobs_instances.append(new_job)

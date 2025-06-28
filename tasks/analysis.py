@@ -17,10 +17,10 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_har
 from sklearn.preprocessing import StandardScaler
 
 # Essentia imports
-from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy
+from essentia.standard import MonoLoader, RhythmExtractor2013, KeyExtractor, TensorflowPredictMusiCNN, TensorflowPredict2D, Energy # type: ignore
 
 # RQ import
-from rq import get_current_job
+from rq import get_current_job, Retry
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
@@ -36,7 +36,7 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, REDIS_URL, DATABASE_URL,
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME,
     DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH,
-    SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ,
+    SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, # type: ignore
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
@@ -116,24 +116,31 @@ def download_track(jellyfin_url, headers, temp_dir, item):
             return None
 
 def predict_moods(embeddings_input, prediction_model_path, mood_labels_list):
-    """Predicts moods using pre-computed embeddings and a mood classification model."""
-    # embeddings_input is the 1D track-level embedding from TensorflowPredictMusiCNN
+    """
+    Predicts moods using a 2D matrix of segment-level embeddings.
+    It returns a dictionary of track-level mood scores (averaged from segment predictions).
+    """
+    # TensorflowPredict2D expects a 2D matrix (segments, features), which is what raw_musicnn_embeddings is.
     model = TensorflowPredict2D(
         graphFilename=prediction_model_path,
         input="serving_default_model_Placeholder", # Ensure this matches your mood model's input tensor name
         output="PartitionedCall" # Ensure this matches your mood model's output tensor name
     )
-    # model() will take the 1D embeddings_input, promote to (1, D), and output (1, num_moods)
-    # [0] extracts the 1D array of mood scores
-    mood_predictions = model(embeddings_input)[0]
-    mood_results = dict(zip(mood_labels_list, mood_predictions))
+    # The model will output a 2D matrix of predictions (segments, num_moods).
+    segment_predictions = model(embeddings_input)
+
+    # Average the predictions across all segments to get a single track-level prediction vector.
+    track_level_predictions = np.mean(segment_predictions, axis=0)
+
+    mood_results = dict(zip(mood_labels_list, track_level_predictions))
     return {label: float(score) for label, score in mood_results.items()}
 
 def predict_other_models(embeddings): # Now accepts embeddings
-    """Predicts danceability, aggression, happiness, party, relaxed, and sadness using MusiCNN embeddings."""
-    # MusiCNN embeddings are passed directly to this function.
+    """
+    Predicts other features using a 2D matrix of segment-level embeddings.
+    Returns a dictionary of track-level scores.
+    """
     model_paths = {
-        # Ensure these paths in config.py point to your new MusiCNN-based models
         "danceable": DANCEABILITY_MODEL_PATH,
         "aggressive": AGGRESSIVE_MODEL_PATH,
         "happy": HAPPY_MODEL_PATH,
@@ -145,9 +152,14 @@ def predict_other_models(embeddings): # Now accepts embeddings
     for mood, path in model_paths.items():
         try:
             model = TensorflowPredict2D(graphFilename=path, output="model/Softmax") # Using "model/Softmax" as per your example
-            prediction = model(embeddings)
-            if prediction is not None and prediction.size > 0 and len(prediction) > 0 and len(prediction[0]) == 2:  # Assuming binary classification
-                predictions[mood] = float(prediction[0][0])  # Probability of the positive class
+            # The model will output a 2D matrix of predictions (segments, 2 for binary classification).
+            segment_predictions = model(embeddings)
+
+            # Average the predictions across all segments.
+            track_level_prediction = np.mean(segment_predictions, axis=0)
+
+            if track_level_prediction is not None and track_level_prediction.size == 2:
+                predictions[mood] = float(track_level_prediction[0])  # Probability of the positive class
             else:
                 predictions[mood] = 0.0  # Default value if prediction is invalid
         except Exception as e:
@@ -165,7 +177,8 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
     musicnn_embedding_model = TensorflowPredictMusiCNN(
         graphFilename=embedding_model_path, output="model/dense/BiasAdd" # Main embedding model
     )
-    raw_musicnn_embeddings = musicnn_embedding_model(audio) # Raw output, potentially 2D
+    # This is the 2D matrix of segment embeddings, which will be used for predictions.
+    raw_musicnn_embeddings = musicnn_embedding_model(audio)
 
     processed_musicnn_embeddings = np.array([]) # Initialize as empty 1D array
 
@@ -206,17 +219,19 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
         "party": 0.0, "relaxed": 0.0, "sad": 0.0
     }
 
-    if processed_musicnn_embeddings.size > 0 and np.all(np.isfinite(processed_musicnn_embeddings)):
+    # --- Perform predictions using the RAW (2D) segment-level embeddings ---
+    # This is more accurate as it averages predictions, not features.
+    if isinstance(raw_musicnn_embeddings, np.ndarray) and raw_musicnn_embeddings.ndim == 2 and raw_musicnn_embeddings.shape[0] > 0:
         try:
-            moods = predict_moods(processed_musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS)
+            moods = predict_moods(raw_musicnn_embeddings, PREDICTION_MODEL_PATH, MOOD_LABELS)
         except Exception as e_mood:
             logger.error("Error during predict_moods: %s. Using default moods.", e_mood, exc_info=True)
         try:
-            other_predictions = predict_other_models(processed_musicnn_embeddings)
+            other_predictions = predict_other_models(raw_musicnn_embeddings)
         except Exception as e_other:
             logger.error("Error during predict_other_models: %s. Using default other_predictions.", e_other, exc_info=True)
     else:
-        logger.warning("Processed MusicNN embeddings are empty or invalid. Skipping mood/other predictions. Shape: %s", processed_musicnn_embeddings.shape if isinstance(processed_musicnn_embeddings, np.ndarray) else 'N/A')
+        logger.warning("Raw MusicNN embeddings are not a valid 2D matrix. Skipping mood/other predictions. Shape: %s", raw_musicnn_embeddings.shape if isinstance(raw_musicnn_embeddings, np.ndarray) else 'N/A')
 
     # Combine all predictions into a single dictionary
     all_predictions = {
@@ -429,6 +444,20 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
+        # IDEMPOTENCY CHECK: If task is already in a terminal state, don't run again.
+        task_info = get_task_info_from_db(current_task_id)
+        if task_info and task_info.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+            logger.info(f"Main analysis task {current_task_id} is already in a terminal state ('{task_info.get('status')}'). Skipping execution.")
+            final_details = {}
+            if task_info.get('details'):
+                try:
+                    final_details = json.loads(task_info.get('details'))
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse details JSON for already terminal task {current_task_id}.")
+            # Return the existing final status and details
+            return {"status": task_info.get('status'), "message": f"Task already in terminal state '{task_info.get('status')}'.", "details": final_details}
+
+
         initial_details = {"message": "Fetching albums...", "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main analysis task started."]}
         save_task_status(current_task_id, "main_analysis", TASK_STATUS_STARTED, progress=0, details=initial_details)
         headers = {"X-Emby-Token": jellyfin_token}
@@ -482,7 +511,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             album_jobs = []
             album_job_ids = []
             active_album_jobs_map = {}
-            from app import rq_queue as main_rq_queue
+            from app import rq_queue_default # Use the default queue for sub-tasks
             
             albums_to_process_queue = list(albums) # Create a queue of albums to process
             logger.debug("Initial albums_to_process_queue size: %s", len(albums_to_process_queue))
@@ -490,6 +519,12 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             albums_completed_count = 0
 
             while albums_completed_count < total_albums or active_album_jobs_map: # Keep looping if there are active jobs
+                # --- Worker Shutdown Check ---
+                if current_job and current_job.is_stopped:
+                    logger.warning(f"Main analysis task {current_task_id} received stop signal from worker. Raising exception to force re-queue.")
+                    raise Exception("Worker shutdown detected, re-queueing task for graceful restart.")
+                # --- End Worker Shutdown Check ---
+
                 # === Cooperative Cancellation Check for Main Analysis Task ===
                 if current_job: # Check if running as an RQ job
                     with app.app_context(): # Ensure DB access
@@ -570,14 +605,15 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 while len(active_album_jobs_map) < MAX_QUEUED_ANALYSIS_JOBS and albums_to_process_queue:
                     album = albums_to_process_queue.pop(0) # Get next album
                     logger.debug("Enqueuing job for album: %s", album.get('Name'))
-                    sub_task_id = str(uuid.uuid4())
+                    sub_task_id = str(uuid.uuid4()) # type: ignore
                     save_task_status(sub_task_id, "album_analysis", "PENDING", parent_task_id=current_task_id, sub_type_identifier=album['Id'], details={"album_name": album['Name']})
-                    job = main_rq_queue.enqueue(
+                    job = rq_queue_default.enqueue(
                         analyze_album_task,
                         args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
                         job_id=sub_task_id,
                         description=f"Analyzing album: {album['Name']}",
-                        job_timeout=-1, 
+                        job_timeout=-1,
+                        retry=Retry(max=3), # Add retry for sub-tasks
                         meta={'parent_task_id': current_task_id}
                     )
                     album_jobs.append(job) # Keep original list for final summary
@@ -671,8 +707,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     "❌ Main analysis failed due to an unexpected error.",
                     current_progress,
                     details_extra={"error_message": "An unexpected error occurred. Check server logs for details."},
-                    task_state=TASK_STATUS_FAILURE,
-                    print_console=False # The detailed error is already printed above
+                    task_state=TASK_STATUS_FAILURE
                 )
                 # Attempt to mark children as REVOKED if the parent fails
                 if 'album_jobs' in locals() and album_jobs: # Check if album_jobs was initialized

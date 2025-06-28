@@ -292,7 +292,7 @@ metadata:
     app: audiomuse-ai
     component: worker # Changed from celery to worker
 spec:
-  replicas: 3 # Scale as needed for parallel processing, minimum 2 for Main task and Children.
+  replicas: 3 # Scale as needed. Each replica runs both a high-priority and a default-priority worker process.
   selector:
     matchLabels:
       app: audiomuse-ai

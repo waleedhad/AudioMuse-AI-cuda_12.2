@@ -60,7 +60,8 @@ redis_conn = Redis.from_url(
     socket_connect_timeout=15,  # seconds to wait for connection
     socket_timeout=15           # seconds for read/write operations
 )
-rq_queue = Queue(connection=redis_conn)  # Default queue
+rq_queue_high = Queue('high', connection=redis_conn) # High priority for main tasks
+rq_queue_default = Queue('default', connection=redis_conn) # Default queue for sub-tasks
 
 # --- Database Setup (PostgreSQL) ---
 # DATABASE_URL is now imported from config.py
@@ -534,12 +535,12 @@ def start_analysis_endpoint():
     clean_successful_task_details_on_new_start()
     save_task_status(job_id, "main_analysis", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
 
-    job = rq_queue.enqueue(
+    job = rq_queue_high.enqueue( # Enqueue main task on the HIGH priority queue
         run_analysis_task,
         args=(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods),
         job_id=job_id,
-        description="Main Music Analysis",
-        retry=Retry(max=1), # Optional: retry once if fails
+        description="Main Music Analysis", # Already has retry=Retry(max=1)
+        retry=Retry(max=3), # Optional: retry once if fails
         job_timeout=-1 # No timeout
     )
     return jsonify({"task_id": job.id, "task_type": "main_analysis", "status": job.get_status()}), 202
@@ -788,7 +789,7 @@ def start_clustering_endpoint():
     clean_successful_task_details_on_new_start()
     save_task_status(job_id, "main_clustering", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
 
-    job = rq_queue.enqueue(
+    job = rq_queue_high.enqueue( # Enqueue main task on the HIGH priority queue
         run_clustering_task,
         args=(
             clustering_method, num_clusters_min_val, num_clusters_max_val,
@@ -811,7 +812,7 @@ def start_clustering_endpoint():
         ),
         job_id=job_id,
         description="Main Music Clustering",
-        retry=Retry(max=1),
+        retry=Retry(max=3),
         job_timeout=-1 # No timeout
     )
     return jsonify({"task_id": job.id, "task_type": "main_clustering", "status": job.get_status()}), 202

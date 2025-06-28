@@ -17,22 +17,23 @@ from rq import Worker
 # This ensures the worker uses the same Redis connection, queue configuration,
 # and application context as your Flask app.
 try:
-    from app import app, redis_conn, rq_queue
+    # Import the specific queues we defined
+    from app import app, redis_conn, rq_queue_high, rq_queue_default
 except ImportError as e:
     print(f"Error importing from app.py: {e}")
     print("Please ensure app.py is in the Python path and does not have top-level errors.")
     sys.exit(1)
 
 # The queues the worker will listen on.
-# We use rq_queue directly, which is already configured with redis_conn.
-# You can add more queues here if you define them in app.py, e.g., high_priority_queue
-queues_to_listen = [rq_queue]
+# The order is important! Workers will always check 'high' before 'default'.
+queues_to_listen = ['default']
 
 if __name__ == '__main__':
     # The redis_conn is already initialized when imported from app.py.
     # The queues_to_listen are already configured with this connection.
 
-    print(f"RQ Worker starting. Listening on queues: {[q.name for q in queues_to_listen]}")
+    # Use the list of names directly for the log message
+    print(f"DEFAULT RQ Worker starting. Listening on queues: {queues_to_listen}")
     print(f"Using Redis connection: {redis_conn.connection_pool.connection_kwargs}")
 
     # Create a worker instance, explicitly passing the connection.
@@ -42,9 +43,10 @@ if __name__ == '__main__':
     # or by using functions from app.py that manage their own context.
     worker = Worker(
         queues_to_listen,
-        connection=redis_conn
-        # default_timeout=3600, # Optional: set a default timeout for jobs
-        # log_job_description=True # Optional: logs job descriptions
+        connection=redis_conn,
+        # --- Resilience Settings for Kubernetes ---
+        worker_ttl=30,  # Consider worker dead if no heartbeat for 30 seconds.
+        job_monitoring_interval=10 # Check for dead workers every 10 seconds.
     )
 
     # Start the worker.
