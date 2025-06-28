@@ -198,7 +198,7 @@ spec:
         fsGroup: 0
       containers:
       - name: flask-app
-        image: ghcr.io/neptunehub/audiomuse-ai:0.3.5-beta # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.4.0-beta # Your image from GHCR
         imagePullPolicy: Always
         ports:
         - containerPort: 8000 # Flask app listens on 8000
@@ -292,7 +292,7 @@ metadata:
     app: audiomuse-ai
     component: worker # Changed from celery to worker
 spec:
-  replicas: 3 # Scale as needed for parallel processing, minimum 2 for Main task and Children.
+  replicas: 3 # Scale as needed. Each replica runs both a high-priority and a default-priority worker process.
   selector:
     matchLabels:
       app: audiomuse-ai
@@ -309,7 +309,7 @@ spec:
         fsGroup: 0
       containers:
       - name: rq-worker # Changed from celery-worker
-        image: ghcr.io/neptunehub/audiomuse-ai:0.3.5-beta # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.4.0-beta # Your image from GHCR
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE

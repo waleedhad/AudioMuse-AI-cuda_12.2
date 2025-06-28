@@ -1,18 +1,16 @@
-# **AudioMuse-AI**
+# **AudioMuse-AI - Let the choice happen, the open-source way**
 
-AudioMuse-AI is a Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using deep audio analysis via [Essentia](https://essentia.upf.edu/) with TensorFlow. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo, you also have a /deployment/deployment.yaml example that you need to configure following the configuration parameter chapter.
+AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using sonic audio analysis via [Essentia](https://essentia.upf.edu/) and playlist automatic generation using clustering algorithm and AI based feature. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
 
-The main scope of this application is testing the clustering algorithm. A front-end is provided for easy use. You can also find the stand-alone Python script in the Jellyfin-Essentia-Playlist repo.
 
 Addional important information on this project can also be found here:
-* Brief slide presentation: [docs/slide.pdf](https://github.com/NeptuneHub/AudioMuse-AI/blob/main/docs/slide.pdf).
 * Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
-
 
 **IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
 
 ## **Table of Contents**
 
+- [Quick Start Deployment on K3S WITH HELM](#quick-start-deployment-on-k3s-with-helm)
 - [Quick Start Deployment on K3S](#quick-start-deployment-on-k3s)
 - [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
 - [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
@@ -37,9 +35,65 @@ Addional important information on this project can also be found here:
 - [How To Contribute](#how-to-contribute)
 - [Contributors](#contributors)
 
+## **Quick Start Deployment on K3S WITH HELM**
+
+This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster WITH HELM. This is the fast way to deploy it!
+
+*  **Prerequisites:**
+    *   A running K3S cluster.
+    *   `kubectl` configured to interact with your cluster.
+    *   `helm` installed.
+
+The helm chart repo is provided here:
+* https://github.com/NeptuneHub/AudioMuse-AI-helm
+
+And to easy install it you can run this command
+
+```bash
+helm repo add audiomuse-ai https://NeptuneHub.github.io/AudioMuse-AI-helm
+helm repo update
+helm install my-audiomuse audiomuse-ai/audiomuse-ai \
+  --namespace audiomuse-ai \
+  --create-namespace \
+  --values my-custom-values.yaml
+```
+
+Here is a minimal configuration example for your `my-custom-values.yaml`:
+
+```yaml
+postgres:
+  user: "audiomuse"
+  password: "audiomusepassword" # IMPORTANT: Change this for production
+  aiChatDbUser: "ai_user"
+  aiChatDbUserPassword: "ChangeThisSecurePassword123!" # IMPORTANT: Change this for production
+
+# IMPORTANT: Set the correct Jellyfin values
+jellyfin:
+  userId: "0e45c44b3e2e4da7a2be11a72a1c8575"
+  token: "e0b8c325bc1b426c81922b90c0aa2ff1"
+  url: "http://jellyfin.192.168.3.131.nip.io:8087"
+
+gemini:
+  apiKey: "YOUR_GEMINI_API_KEY_HERE" # IMPORTANT: Change this for production
+
+# AI Configuration
+# You can use "OLLAMA", "GEMINI", or "NONE" (some features will be disabled if NONE)
+config:
+  aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
+  ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
+  ollamaModelName: "mistral:7b"
+  geminiModelName: "gemini-1.5-flash-latest"
+  aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
+```
+
+For the full list of supported configuration values, refer to the [values.yaml file](https://github.com/NeptuneHub/AudioMuse-AI-helm/blob/main/values.yaml).
+
+For detailed documentation on each environment variable, have a look at the parameter chapter.
+
+
 ## **Quick Start Deployment on K3S**
 
-This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster.
+This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster by using the **deployment.yaml** file.
 
 1.  **Prerequisites:**
     *   A running K3S cluster.
@@ -70,7 +124,7 @@ After deploying with the K3S Quick Start, you'll want to run an **Analysis Task*
 
 ### **Analysis Task Quick Start**
 
-1.  **`NUM_RECENT_ALBUMS`** (Default: `3000`)
+1.  **`NUM_RECENT_ALBUMS`** (Default: `0`)
     *   How many of your most recently added albums to scan and analyze. Set to `0` to analyze *all* albums in your library (can take a very long time for large libraries).
     *   **Recommendation:** For a first run, you might want to set this to a smaller number (e.g., `50`, `100`) to see results quickly. For a full analysis, use `0` or a large number.
 
@@ -148,7 +202,7 @@ For a quick and interactive way to generate playlists without running the full e
 The Quick Start provided in the `playlist` namespace the following resources:
 
 **Pods (Workloads):**
-*   **`audiomuse-ai-worker`**: Runs the background job processors using Redis Queue. It's recommended to run a **minimum of 2 replicas** to ensure one worker can handle main tasks while others manage subprocesses, preventing potential stalls. You can scale this based on your cluster size and workload.
+*   **`audiomuse-ai-worker`**: Runs the background job processors using Redis Queue. It's recommended to run a **minimum of 2 replicas** to ensure one worker can handle main tasks while others manage subprocesses, preventing potential stalls. You can scale this based on your cluster size and workload (starting from version **v0.4.0-beta** one worker should be able to handle both main and sub tasks, so a minimum of 1 replica is enough)
 *   **`audiomuse-ai-flask`**: Hosts the Flask API server and the web front-end. This is the user-facing component.
 *   **`postgres-deployment`**: Manages the PostgreSQL database instance, which persists analyzed track data, playlist structures, and task status.
 *   **`redis-master`**: Provides the Redis instance used by Redis Queue to manage the task queue.
@@ -228,8 +282,8 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `DBSCAN_MIN_SAMPLES_MIN`                 | Min `min_samples` for DBSCAN.                                              | `5`                                  |
 | `DBSCAN_MIN_SAMPLES_MAX`                 | Max `min_samples` for DBSCAN.                                              | `20`                                 |
 | **GMM Ranges**                           |                                                                              |                                      |
-| `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `20`                                 |
-| `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `60`                                 |
+| `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `40`                                 |
+| `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `100`                                 |
 | `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
 | `USE_MINIBATCH_KMEANS`                   | Whether to use MiniBatchKMeans (True) or standard KMeans (False) when clustering embeddings. | `true`                               |
 | **PCA Ranges**                           |                                                                              |                                      |
@@ -241,7 +295,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `TOP_N_ELITES`                           | Number of best solutions kept as elites.                                   | `10`                                 |
 | `SAMPLING_PERCENTAGE_CHANGE_PER_RUN`     | Percentage of songs to swap out in the stratified sample between runs (0.0 to 1.0). | `0.2`                                |
 | `MIN_SONGS_PER_GENRE_FOR_STRATIFICATION` | Minimum number of songs to target per stratified genre during sampling.    | `100`                                |
-| `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `75`                                 |
+| `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `50`                                 |
 | `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>:11434/api/generate` |
 | `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
 | `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
@@ -280,7 +334,7 @@ For a quick local setup or for users not using Kubernetes, a `docker-compose.yam
     ```bash
     docker compose up -d --scale audiomuse-ai-worker=2
     ```
-    This command starts all services (Flask app, RQ workers, Redis, PostgreSQL) in detached mode (`-d`). The `--scale audiomuse-ai-worker=2` ensures at least two worker instances are running, which is recommended for the task processing architecture.
+    This command starts all services (Flask app, RQ workers, Redis, PostgreSQL) in detached mode (`-d`). The `--scale audiomuse-ai-worker=2` ensures at least two worker instances are running, which is recommended for the task processing architecture (starting from version **v0.4.0-beta** one worker should be able to handle both main and sub tasks, so a minimum of 1 replica is enough).
 4.  **Access the Application:**
     Once the containers are up, you can access the web UI at `http://localhost:8000`.
 5.  **Stopping the Services:**
@@ -330,8 +384,10 @@ This is the main workflow of how this algorithm works. For an easy way to use it
     *   Optionally, AI models (Ollama or Gemini) can be used to generate creative, human-readable names for these playlists.
     *   Finalized playlists are created directly in your Jellyfin library.
 *   **Advanced Task Management:**
-    *   The web UI provides real-time monitoring of task progress, including main and sub-tasks.
-    *   A key feature is the ability to cancel tasks (both parent and child) even while they are actively running, offering robust control over long processes. This is more advanced than typical queue systems where cancellation might only affect pending tasks.
+    *   The web UI offers real-time monitoring of task progress, including main and sub-tasks.
+    *   **Worker Supervision and High Availability:** In scenarios with multiple worker container instances, the system incorporates mechanisms to maintain high availability. HA is achived using **supervisord** and re-enquequing configuration in Redis Queue. For HA Redis and PostgreSQL must also be deployed in HA (deployment example in this repository don't cover this possibility ad the moment, so you need to change it)
+    *  **Task Cancellation** A key feature is the ability to cancel tasks (both parent and child) even while they are actively running, offering robust control over long processes. This is more advanced than typical queue systems where cancellation might only affect pending tasks.
+
 
 ## Analysis Algorithm Deep Dive
 
@@ -545,12 +601,19 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/Instant_playlist.png "Instant Playlist interface")
 
+
+
+https://github.com/user-attachments/assets/30ef6fae-ea8b-4d37-ac4c-9c07e9044114
+
+
+
 ## **Key Technologies**
 
 AudioMuse AI is built upon a robust stack of open-source technologies:
 
 * [**Flask:**](https://flask.palletsprojects.com/) Provides the lightweight web interface for user interaction and API endpoints.  
-* [**Redis Queue (RQ):**](https://redis.io/glossary/redis-queue/) A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.  
+* [**Redis Queue (RQ):**](https://redis.io/glossary/redis-queue/) A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.
+* [**Supervisord:**](https://supervisord.org/) Supervisor is a client/server system that allows its users to monitor and control a number of processes on UNIX-like operating systems. Paired with Redis Queue is used to properly handling renquequing for High Avaiability purpose.
 * [**Essentia-tensorflow**](https://essentia.upf.edu/) An open-source library for audio analysis, feature extraction, and music information retrieval. It's used here for:  
   * MonoLoader: Loading and resampling audio files.  
   * RhythmExtractor2013: Extracting tempo information.
