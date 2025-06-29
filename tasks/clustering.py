@@ -20,7 +20,8 @@ from rq.exceptions import NoSuchJobError, InvalidJobOperation
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
                 track_exists, save_track_analysis, get_all_tracks, get_tracks_by_ids, update_playlist_table, JobStatus,
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
-                TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
+                TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
+                get_child_tasks_from_db) # Import the new function
 from psycopg2.extras import DictCursor
 
 
@@ -330,27 +331,19 @@ def run_clustering_task(
                 current_job.save_meta()
             save_task_status(current_task_id, "main_clustering", task_state, progress=progress, details=_main_task_accumulated_details)
         
-        # --- STATE REHYDRATION BLOCK (for idempotency) ---
-        # This block runs on start and restart to rebuild the state from the DB.
-        log_and_update_main_clustering("Checking for existing state (rehydrating)...", 2, print_console=False)
+        # --- STATE RECOVERY BLOCK ---
+        log_and_update_main_clustering("Checking for existing state (recovering)...", 2, print_console=False)
         
-        # Initial state variables that will be rehydrated
         active_jobs_map = {}
         elite_solutions_list = []
         best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
         best_clustering_results = None
         batches_completed_count = 0
         total_iterations_completed_count = 0
-        next_batch_job_idx_to_launch = 0
-        last_subset_track_ids_for_batch_chaining = [] # Will be populated by rehydration
+        last_subset_track_ids_for_batch_chaining = []
         
-        # Fetch all children of this main task from the DB
-        db = get_db()
-        cur = db.cursor(cursor_factory=DictCursor)
-        cur.execute("SELECT task_id, status, sub_type_identifier FROM task_status WHERE parent_task_id = %s", (current_task_id,))
-        child_tasks_from_db = cur.fetchall()
-        cur.close()
-
+        child_tasks_from_db = get_child_tasks_from_db(current_task_id)
+        
         batch_index_to_task_map = {}
         if child_tasks_from_db:
             for child_row in child_tasks_from_db:
@@ -362,7 +355,6 @@ def run_clustering_task(
                     except (ValueError, IndexError):
                         logger.warning(f"Could not parse batch index from sub_type_identifier: {batch_id_str}")
 
-        # Process completed batches in order to correctly chain the subset IDs
         max_processed_batch_idx = -1
         if batch_index_to_task_map:
             sorted_batch_indices = sorted(batch_index_to_task_map.keys())
@@ -371,20 +363,50 @@ def run_clustering_task(
                 child_status = child_task['status']
                 child_id = child_task['task_id']
 
-                if child_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
-                    logger.info(f"Rehydrating from failed/revoked batch job {child_id} (Batch_{batch_idx}).")
-                    batches_completed_count += 1
-                    max_processed_batch_idx = batch_idx
-                elif child_status in [TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS]:
-                    logger.info(f"Rehydrating and monitoring active batch job {child_id} (Batch_{batch_idx}).")
+                if child_status in [TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS]:
+                    logger.info(f"Recovering and monitoring active batch job {child_id} (Batch_{batch_idx}).")
                     try:
                         job_instance = Job.fetch(child_id, connection=redis_conn)
                         active_jobs_map[child_id] = job_instance
                     except NoSuchJobError:
                         logger.warning(f"Job {child_id} was active in DB but not found in RQ. It will be ignored.")
-        # --- END OF STATE REHYDRATION BLOCK ---
+                
+                elif child_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                    logger.info(f"Recovering from failed/revoked batch job {child_id} (Batch_{batch_idx}).")
+                    batches_completed_count += 1
+                    max_processed_batch_idx = batch_idx
+                
+                elif child_status == TASK_STATUS_SUCCESS:
+                    logger.info(f"Recovering from successful batch job {child_id} (Batch_{batch_idx}).")
+                    batch_job_result = get_job_result_safely(child_id, current_task_id, f"clustering_batch (recovery)")
+                    if batch_job_result:
+                        iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
+                        total_iterations_completed_count += iterations_from_batch
+                        best_from_batch = batch_job_result.get("best_result_from_batch")
+                        
+                        if "final_subset_track_ids" in batch_job_result and batch_job_result["final_subset_track_ids"] is not None:
+                            last_subset_track_ids_for_batch_chaining = batch_job_result["final_subset_track_ids"]
+
+                        if best_from_batch and isinstance(best_from_batch, dict):
+                            batch_best_score = best_from_batch.get("diversity_score", -1.0)
+                            batch_best_params = best_from_batch.get("parameters")
+                            if batch_best_score > -1.0 and batch_best_params:
+                                elite_solutions_list.append({"score": batch_best_score, "params": batch_best_params})
+                            if batch_best_score > best_diversity_score:
+                                best_diversity_score = batch_best_score
+                                _main_task_accumulated_details["best_score"] = best_diversity_score
+                                best_clustering_results = best_from_batch
+                    batches_completed_count += 1
+                    max_processed_batch_idx = batch_idx
+
+        elite_solutions_list.sort(key=lambda x: x["score"], reverse=True)
+        elite_solutions_list = elite_solutions_list[:TOP_N_ELITES]
+        next_batch_job_idx_to_launch = max_processed_batch_idx + 1
+        
+        logger.info(f"State recovery complete. Resuming. Batches completed: {batches_completed_count}, Iterations completed: {total_iterations_completed_count}, Next batch to launch: {next_batch_job_idx_to_launch}, Best score so far: {best_diversity_score:.2f}")
+        # --- END OF STATE RECOVERY BLOCK ---
+
         save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
-        # current_progress is now initialized before the helper function
 
         try:
             ai_model_provider_for_run = ai_model_provider_param
@@ -468,51 +490,16 @@ def run_clustering_task(
             log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)
             genre_to_lightweight_track_data_map_json = json.dumps(genre_to_lightweight_track_data_map) # Already dicts
             log_and_update_main_clustering("Stratified sampling preparation complete.", 6, print_console=False)
-            initial_subset_lightweight = _get_stratified_song_subset(
-                genre_to_lightweight_track_data_map,
-                target_songs_per_genre,
-                previous_subset_track_ids=None,
-                percentage_change=0.0
-            )
-            # If we are not rehydrating, set the initial subset. Otherwise, rehydration has already set it.
-            if not last_subset_track_ids_for_batch_chaining:
-                last_subset_track_ids_for_batch_chaining = [t['item_id'] for t in initial_subset_lightweight]
-
-            best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
-            best_clustering_results = None 
-            elite_solutions_list = []
-
-            # Re-process successful jobs after other states are handled to ensure correct chaining
-            if batch_index_to_task_map:
-                sorted_batch_indices_for_success = sorted(batch_index_to_task_map.keys())
-                for batch_idx in sorted_batch_indices_for_success:
-                    child_task = batch_index_to_task_map[batch_idx]
-                    if child_task['status'] == TASK_STATUS_SUCCESS:
-                        child_id = child_task['task_id']
-                        logger.info(f"Rehydrating from successful batch job {child_id} (Batch_{batch_idx}).")
-                        batch_job_result = get_job_result_safely(child_id, current_task_id, f"clustering_batch (rehydration)")
-                        if batch_job_result:
-                            iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
-                            total_iterations_completed_count += iterations_from_batch
-                            best_from_batch = batch_job_result.get("best_result_from_batch")
-                            if "final_subset_track_ids" in batch_job_result and batch_job_result["final_subset_track_ids"] is not None:
-                                last_subset_track_ids_for_batch_chaining = batch_job_result["final_subset_track_ids"]
-                            if best_from_batch and isinstance(best_from_batch, dict):
-                                batch_best_score = best_from_batch.get("diversity_score", -1.0)
-                                batch_best_params = best_from_batch.get("parameters")
-                                if batch_best_score > -1.0 and batch_best_params:
-                                    elite_solutions_list.append({"score": batch_best_score, "params": batch_best_params})
-                                if batch_best_score > best_diversity_score:
-                                    best_diversity_score = batch_best_score
-                                    _main_task_accumulated_details["best_score"] = best_diversity_score
-                                    best_clustering_results = best_from_batch
-                        batches_completed_count += 1
-                        max_processed_batch_idx = batch_idx
             
-            # Update elites and next batch index after processing all found children
-            elite_solutions_list.sort(key=lambda x: x["score"], reverse=True)
-            elite_solutions_list = elite_solutions_list[:TOP_N_ELITES]
-            next_batch_job_idx_to_launch = max_processed_batch_idx + 1
+            # If we are not recovering state, set the initial subset. Otherwise, recovery has already set it.
+            if not last_subset_track_ids_for_batch_chaining:
+                initial_subset_lightweight = _get_stratified_song_subset(
+                    genre_to_lightweight_track_data_map,
+                    target_songs_per_genre,
+                    previous_subset_track_ids=None,
+                    percentage_change=0.0
+                )
+                last_subset_track_ids_for_batch_chaining = [t['item_id'] for t in initial_subset_lightweight]
 
             mutation_config = {
                 "int_abs_delta": MUTATION_INT_ABS_DELTA,
@@ -523,8 +510,6 @@ def run_clustering_task(
             exploitation_start_run_idx = int(num_clustering_runs * EXPLOITATION_START_FRACTION)
             all_launched_child_jobs_instances = []
             from app import rq_queue_default
-            # active_jobs_map, total_iterations_completed_count, next_batch_job_idx_to_launch,
-            # and batches_completed_count are now initialized by the rehydration block.
             num_total_batch_jobs = (num_clustering_runs + ITERATIONS_PER_BATCH_JOB - 1) // ITERATIONS_PER_BATCH_JOB
             _main_task_accumulated_details["total_batch_jobs"] = num_total_batch_jobs 
             data_source_for_clustering_log = "embeddings" if enable_clustering_embeddings_param else "score vectors"

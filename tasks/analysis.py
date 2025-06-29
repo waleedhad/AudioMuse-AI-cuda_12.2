@@ -28,7 +28,8 @@ from rq.exceptions import NoSuchJobError, InvalidJobOperation
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
                 track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus, # Removed save_track_embedding from top
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
-                TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
+                TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
+                get_child_tasks_from_db) # Import the new function
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
@@ -170,8 +171,18 @@ def predict_other_models(embeddings): # Now accepts embeddings
 
 def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list):
     """Analyzes a single track for tempo, key, scale, moods, and other models."""
-    # Load audio once at 16000 Hz for all analyses.
-    audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
+    try:
+        # Load audio once at 16000 Hz for all analyses.
+        audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
+    except RuntimeError as e:
+        # Essentia often wraps loading errors in a generic RuntimeError.
+        # Check if the error message is the one we're looking for.
+        if "Audio file has more than 2 channels" in str(e):
+            logger.warning("Skipping track %s: %s", os.path.basename(file_path), e)
+            return None, None # Return a specific failure signal
+        else:
+            # If it's a different runtime error, re-raise it to be caught by the main exception handler.
+            raise
 
     # Generate MusiCNN embeddings once
     musicnn_embedding_model = TensorflowPredictMusiCNN(
@@ -360,6 +371,15 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                 try:
                     # analyze_track now returns two values: results dict and the embedding
                     analysis_results, track_embedding = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
+                    
+                    # NEW: Check for the failure case from analyze_track
+                    if analysis_results is None:
+                        # The error has already been logged in analyze_track.
+                        # We can add another log here for the album task's context.
+                        log_and_update_album_task(f"Skipping '{track_name_full}' due to an audio loading error (e.g., multi-channel).", current_progress_val, current_track_name=track_name_full)
+                        tracks_skipped_count += 1
+                        continue # Move to the next track
+
                     tempo = analysis_results.get("tempo", 0.0)
                     key = analysis_results.get("key", "")
                     scale = analysis_results.get("scale", "")
@@ -433,8 +453,7 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                 f"Failed to analyze album '{album_name}': An unexpected error occurred.",
                 current_progress_val,
                 task_state=TASK_STATUS_FAILURE,
-                final_summary_details=failure_details,
-                print_console=False # The detailed error is already printed above
+                final_summary_details=failure_details
             )
             raise
 
@@ -508,15 +527,68 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
 
             total_albums = len(albums)
             log_and_update_main_analysis(f"Found {total_albums} albums to process.", 5, {"albums_found": total_albums, "album_tasks_ids": []})
-            album_jobs = []
-            album_job_ids = []
-            active_album_jobs_map = {}
+            
             from app import rq_queue_default # Use the default queue for sub-tasks
             
-            albums_to_process_queue = list(albums) # Create a queue of albums to process
-            logger.debug("Initial albums_to_process_queue size: %s", len(albums_to_process_queue))
+            albums_to_process_queue = list(albums)
             albums_launched_count = 0
             albums_completed_count = 0
+            
+            # --- STATE RECOVERY ---
+            # This block will reconstruct the state if the main task restarts.
+            logger.info(f"[{current_task_id}] Checking for existing child tasks to recover state...")
+            existing_child_tasks = get_child_tasks_from_db(current_task_id)
+            active_album_jobs_map = {} # This will hold jobs we need to monitor.
+            album_jobs = [] # This will hold all job instances, recovered or new.
+            album_job_ids = [] # This will hold all job IDs.
+
+            if existing_child_tasks:
+                logger.info(f"[{current_task_id}] Found {len(existing_child_tasks)} existing child tasks. Reconstructing state...")
+                
+                # Create a map of album IDs to album data for quick lookup
+                album_id_map = {album['Id']: album for album in albums}
+                
+                for task in existing_child_tasks:
+                    task_id = task.get('task_id') # Use the correct key 'task_id'
+                    album_id = task.get('sub_type_identifier')
+                    status = task.get('status')
+                    
+                    # If this album is not in the current list to be processed, skip.
+                    if album_id not in album_id_map:
+                        logger.warning(f"[{current_task_id}] Found child task {task_id} for album {album_id} which is not in the current batch. Ignoring.")
+                        continue
+
+                    # Remove the album from the queue of new albums to process
+                    albums_to_process_queue = [a for a in albums_to_process_queue if a['Id'] != album_id]
+                    
+                    # Reconstruct job objects and update counts
+                    try:
+                        job = Job.fetch(task_id, connection=redis_conn)
+                        album_jobs.append(job)
+                        album_job_ids.append(task_id)
+                        albums_launched_count += 1
+
+                        if status in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                            albums_completed_count += 1
+                            logger.info(f"[{current_task_id}] Recovered completed child task {task_id} with status '{status}'.")
+                        else:
+                            # This job is still active or pending, add it to the monitoring map
+                            active_album_jobs_map[task_id] = job
+                            logger.info(f"[{current_task_id}] Recovered active child task {task_id} with status '{status}'. Will continue monitoring.")
+                    except NoSuchJobError:
+                        logger.warning(f"[{current_task_id}] Could not fetch job {task_id} from Redis, but it exists in DB with status '{status}'.")
+                        # If it's terminal in the DB, we can count it as completed.
+                        if status in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                            albums_completed_count += 1
+                        else:
+                            # It's not terminal and not in RQ. It might be lost. We will re-queue it later.
+                            logger.error(f"[{current_task_id}] Job {task_id} is in a non-terminal state '{status}' in the DB but not in RQ. It will be re-queued.")
+                            # Add the album back to the processing queue
+                            albums_to_process_queue.append(album_id_map[album_id])
+
+            logger.info(f"[{current_task_id}] State recovery complete. Resuming. Launched: {albums_launched_count}, Completed: {albums_completed_count}, To Queue: {len(albums_to_process_queue)}")
+            # --- END STATE RECOVERY ---
+
 
             while albums_completed_count < total_albums or active_album_jobs_map: # Keep looping if there are active jobs
                 # --- Worker Shutdown Check ---

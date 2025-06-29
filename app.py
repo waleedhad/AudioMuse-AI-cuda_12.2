@@ -275,6 +275,17 @@ def get_task_info_from_db(task_id):
     cur.close()
     return dict(row) if row else None
 
+def get_child_tasks_from_db(parent_task_id):
+    """Fetches all child tasks for a given parent_task_id from the database."""
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    # Select the task_id which is the job_id, and other necessary fields
+    cur.execute("SELECT task_id, status, sub_type_identifier FROM task_status WHERE parent_task_id = %s", (parent_task_id,))
+    tasks = cur.fetchall()
+    cur.close()
+    # DictCursor returns a list of dictionary-like objects, convert to plain dicts
+    return [dict(row) for row in tasks]
+
 def track_exists(item_id):
     """
     Checks if a track exists in the database AND has been analyzed for key features.
@@ -1210,7 +1221,7 @@ def get_active_tasks_endpoint():
                        isinstance(task_item['details']['best_params'], dict) and \
                        'clustering_method_config' in task_item['details']['best_params'] and \
                        isinstance(task_item['details']['best_params']['clustering_method_config'], dict) and \
-                       'params' in task_item['details']['best_params']['clustering_method_config'] and \
+                       'params' in task_item['details']['best_params']['clustering_method_config']['params'] and \
                        isinstance(task_item['details']['best_params']['clustering_method_config']['params'], dict):
                         task_item['details']['best_params']['clustering_method_config']['params'].pop('initial_centroids', None)
 
