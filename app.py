@@ -5,8 +5,10 @@ from flask import Flask, jsonify, request, render_template, g
 from contextlib import closing
 import json
 import logging
+import threading
 import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
+from annoy import AnnoyIndex
 
 # RQ imports
 
@@ -39,6 +41,8 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
     AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
+
+# NOTE: Annoy Manager import is moved to be local where used to prevent circular imports.
 
 logger = logging.getLogger(__name__)
 
@@ -152,26 +156,48 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Create the embedding table if it doesn't exist
     cur.execute("""
         CREATE TABLE IF NOT EXISTS embedding (
             item_id TEXT PRIMARY KEY,
-            embedding_vector JSONB,
             FOREIGN KEY (item_id) REFERENCES score (item_id) ON DELETE CASCADE
         )
     """)
+    # Check if the 'embedding' column exists in the 'embedding' table and add it if not
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'embedding' AND column_name = 'embedding'
+        )
+    """)
+    column_exists_embedding = cur.fetchone()[0]
+    if not column_exists_embedding:
+        app.logger.info("Adding 'embedding' column of type BYTEA to the 'embedding' table.")
+        cur.execute("ALTER TABLE embedding ADD COLUMN embedding BYTEA")
+
+    # New, consolidated table for Annoy index data
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS annoy_index_data (
+            index_name VARCHAR(255) PRIMARY KEY,
+            index_data BYTEA NOT NULL,
+            id_map_json TEXT NOT NULL,
+            embedding_dimension INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Drop obsolete tables if they exist
+    cur.execute("DROP TABLE IF EXISTS annoy_index;")
+    cur.execute("DROP TABLE IF EXISTS annoy_mappings;")
+
     app.logger.info("Database tables checked/created successfully.")
     db.commit()
     cur.close()
 
+# Initialize the database schema when the application module is loaded.
+# This is safe because it doesn't import other application modules.
 with app.app_context():
     init_db()
-
-# --- Import and Register Blueprints ---
-# Import here to avoid circular dependencies during initial module loading
-from app_chat import chat_bp
-
-app.register_blueprint(chat_bp, url_prefix='/chat') # All routes in chat_bp will be prefixed with /chat
-
 
 # --- DB Cleanup Utility ---
 def clean_successful_task_details_on_new_start():
@@ -221,7 +247,7 @@ def clean_successful_task_details_on_new_start():
 
         if archived_count > 0:
             db.commit()
-            app.logger.info(f"Archived (set status to REVOKED and pruned details for) {archived_count} previously successful tasks.")
+            app.logger.info(f"Archived (set to REVOKED and pruned details for) {archived_count} previously successful tasks.")
         else:
             app.logger.info("No previously successful tasks found to archive.")
     except Exception as e_main_clean:
@@ -232,6 +258,10 @@ def clean_successful_task_details_on_new_start():
 
 # --- DB Utility Functions (used by tasks.py and API) ---
 def save_task_status(task_id, task_type, status=TASK_STATUS_PENDING, parent_task_id=None, sub_type_identifier=None, progress=0, details=None):
+    """
+    Saves or updates a task's status in the database.
+    This function is now wrapped in a try/except block to handle transaction errors gracefully.
+    """
     db = get_db()
     cur = db.cursor()
 
@@ -253,19 +283,32 @@ def save_task_status(task_id, task_type, status=TASK_STATUS_PENDING, parent_task
                 details['log'] = ["Task completed successfully."] # Default minimal log
 
     details_json = json.dumps(details) if details is not None else None
-    cur.execute("""
-        INSERT INTO task_status (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-        ON CONFLICT (task_id) DO UPDATE SET
-            status = EXCLUDED.status,
-            parent_task_id = EXCLUDED.parent_task_id,
-            sub_type_identifier = EXCLUDED.sub_type_identifier,
-            progress = EXCLUDED.progress,
-            details = EXCLUDED.details,
-            timestamp = NOW()
-    """, (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details_json))
-    db.commit()
-    cur.close()
+    
+    try:
+        cur.execute("""
+            INSERT INTO task_status (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (task_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                parent_task_id = EXCLUDED.parent_task_id,
+                sub_type_identifier = EXCLUDED.sub_type_identifier,
+                progress = EXCLUDED.progress,
+                details = EXCLUDED.details,
+                timestamp = NOW()
+        """, (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details_json))
+        db.commit()
+    except psycopg2.Error as e:
+        # If any database error occurs (including InFailedSqlTransaction), log it and roll back.
+        app.logger.error(f"DB Error saving task status for {task_id}: {e}")
+        try:
+            db.rollback()
+            app.logger.info(f"DB transaction rolled back for task status update of {task_id}.")
+        except psycopg2.Error as rb_e:
+            app.logger.error(f"DB Error during rollback for task status {task_id}: {rb_e}")
+        # We don't re-raise the exception, allowing the worker to potentially continue or finish gracefully.
+    finally:
+        cur.close()
+
 
 def get_task_info_from_db(task_id):
     db = get_db()
@@ -338,21 +381,20 @@ def save_track_analysis(item_id, title, author, tempo, key, scale, moods, energy
         cur.close()
 
 def save_track_embedding(item_id, embedding_vector):
-    """Saves or updates the embedding vector for a track."""
-    if embedding_vector is None: # Should not happen if analysis is successful
+    """Saves or updates the embedding vector for a track as an efficient binary blob."""
+    if not isinstance(embedding_vector, np.ndarray) or embedding_vector.size == 0:
         logger.warning("Embedding vector for %s is None. Skipping save.", item_id)
         return
 
     conn = get_db()
     cur = conn.cursor()
     try:
-        # Convert numpy array to list for JSON serialization
-        embedding_list = embedding_vector.tolist() if isinstance(embedding_vector, np.ndarray) else embedding_vector
-        embedding_json = json.dumps(embedding_list)
+        # Convert numpy array to a binary blob of float32 values
+        embedding_blob = embedding_vector.astype(np.float32).tobytes()
         cur.execute("""
-            INSERT INTO embedding (item_id, embedding_vector) VALUES (%s, %s)
-            ON CONFLICT (item_id) DO UPDATE SET embedding_vector = EXCLUDED.embedding_vector
-        """, (item_id, embedding_json))
+            INSERT INTO embedding (item_id, embedding) VALUES (%s, %s)
+            ON CONFLICT (item_id) DO UPDATE SET embedding = EXCLUDED.embedding
+        """, (item_id, psycopg2.Binary(embedding_blob)))
         conn.commit()
     except Exception as e:
         logger.error("Error saving track embedding for %s: %s", item_id, e)
@@ -363,13 +405,21 @@ def get_all_tracks(): # Removed db_path
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
     # Join with embedding table to get embedding_vector
+    # The column is now named 'embedding' and is of type BYTEA
     cur.execute("""
-        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding_vector
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding
         FROM score s
         LEFT JOIN embedding e ON s.item_id = e.item_id
     """)
-    rows = cur.fetchall() # Returns list of DictRow
+    rows = cur.fetchall()
     cur.close()
+    # Post-process to convert BYTEA back to numpy array
+    for row in rows:
+        if row['embedding']:
+            # Use np.frombuffer to convert the binary data back to a numpy array
+            row['embedding_vector'] = np.frombuffer(row['embedding'], dtype=np.float32)
+        else:
+            row['embedding_vector'] = np.array([]) # Use a consistent name
     return rows
 
 def get_tracks_by_ids(item_ids_list):
@@ -380,8 +430,9 @@ def get_tracks_by_ids(item_ids_list):
     cur = conn.cursor(cursor_factory=DictCursor)
     # Using a placeholder for a list of IDs
     # psycopg2 can convert a list to a tuple for the IN operator
+    # The column is now named 'embedding' and is of type BYTEA
     query = """
-        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding_vector
+        SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding
         FROM score s
         LEFT JOIN embedding e ON s.item_id = e.item_id
         WHERE s.item_id IN %s
@@ -389,6 +440,12 @@ def get_tracks_by_ids(item_ids_list):
     cur.execute(query, (tuple(item_ids_list),)) # Pass list as a tuple for IN clause
     rows = cur.fetchall()
     cur.close()
+    # Post-process to convert BYTEA back to numpy array
+    for row in rows:
+        if row['embedding']:
+            row['embedding_vector'] = np.frombuffer(row['embedding'], dtype=np.float32)
+        else:
+            row['embedding_vector'] = np.array([])
     # app.logger.debug(f"Fetched {len(rows)} tracks for {len(item_ids_list)} IDs.")
     return rows
 
@@ -429,11 +486,6 @@ def update_playlist_table(playlists): # Removed db_path
         logger.error("Error updating playlist table: %s", e)
     finally:
         cur.close()
-
-# --- Import Task Functions ---
-# Imports are moved into the respective endpoint functions to avoid circular dependencies
-# from tasks import run_analysis_task, run_clustering_task
-# analyze_album_task and run_single_clustering_iteration_task are called by other tasks, not directly by API
 
 # --- API Endpoints ---
 
@@ -530,9 +582,6 @@ def start_analysis_endpoint():
                 message:
                   type: string
     """
-    # Import task function here to break circular dependency
-    from tasks import run_analysis_task  # Import from the tasks package
-
     data = request.json or {}
     jellyfin_url = data.get('jellyfin_url', JELLYFIN_URL)
     jellyfin_user_id = data.get('jellyfin_user_id', JELLYFIN_USER_ID)
@@ -546,12 +595,14 @@ def start_analysis_endpoint():
     clean_successful_task_details_on_new_start()
     save_task_status(job_id, "main_analysis", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
 
-    job = rq_queue_high.enqueue( # Enqueue main task on the HIGH priority queue
-        run_analysis_task,
+    # Enqueue task using a string path to its function.
+    # This completely breaks the circular import cycle between app.py and the tasks module.
+    job = rq_queue_high.enqueue(
+        'tasks.analysis.run_analysis_task',
         args=(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods),
         job_id=job_id,
-        description="Main Music Analysis", # Already has retry=Retry(max=1)
-        retry=Retry(max=3), # Optional: retry once if fails
+        description="Main Music Analysis",
+        retry=Retry(max=3),
         job_timeout=-1 # No timeout
     )
     return jsonify({"task_id": job.id, "task_type": "main_analysis", "status": job.get_status()}), 202
@@ -736,91 +787,47 @@ def start_clustering_endpoint():
                         status:
                             type: string
     """
-    # Import task function here to break circular dependency
-    from tasks import run_clustering_task # Import from the tasks package
-
-    # Check if a main_clustering task is already active
-    db = get_db()
-    cur = db.cursor(cursor_factory=DictCursor)
-    # Define non-terminal statuses
-    active_statuses = (TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS)
-    cur.execute("""
-        SELECT task_id, status FROM task_status
-        WHERE task_type = 'main_clustering' AND status IN %s
-        ORDER BY timestamp DESC
-        LIMIT 1
-    """, (active_statuses,))
-    existing_active_task = cur.fetchone()
-    cur.close()
-
-    if existing_active_task:
-        return jsonify({"error": "An active clustering task is already in progress.", "task_id": existing_active_task['task_id'], "status": existing_active_task['status']}), 409 # 409 Conflict
-
+    # Enqueue by string to avoid circular imports
     data = request.json
-    clustering_method = data.get('clustering_method', CLUSTER_ALGORITHM)
-    num_clusters_min_val = int(data.get('num_clusters_min', NUM_CLUSTERS_MIN))
-    num_clusters_max_val = int(data.get('num_clusters_max', NUM_CLUSTERS_MAX))
-    dbscan_eps_min_val = float(data.get('dbscan_eps_min', DBSCAN_EPS_MIN))
-    dbscan_eps_max_val = float(data.get('dbscan_eps_max', DBSCAN_EPS_MAX))
-    dbscan_min_samples_min_val = int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN))
-    dbscan_min_samples_max_val = int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX))
-    gmm_n_components_min_val = int(data.get('gmm_n_components_min', GMM_N_COMPONENTS_MIN))
-    gmm_n_components_max_val = int(data.get('gmm_n_components_max', GMM_N_COMPONENTS_MAX))
-    pca_components_min_val = int(data.get('pca_components_min', PCA_COMPONENTS_MIN))
-    pca_components_max_val = int(data.get('pca_components_max', PCA_COMPONENTS_MAX))
-    num_clustering_runs_val = int(data.get('clustering_runs', CLUSTERING_RUNS))
-    max_songs_per_cluster_val = int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER))
-    min_songs_per_genre_for_stratification_val = int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION))
-    stratified_sampling_target_percentile_val = int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE))
-
-    # Retrieve score weights from request, falling back to config defaults
-    score_weight_diversity_val = float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY))
-    score_weight_silhouette_val = float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE))
-    score_weight_davies_bouldin_val = float(data.get('score_weight_davies_bouldin', SCORE_WEIGHT_DAVIES_BOULDIN))
-    score_weight_calinski_harabasz_val = float(data.get('score_weight_calinski_harabasz', SCORE_WEIGHT_CALINSKI_HARABASZ))
-    score_weight_purity_val = float(data.get('score_weight_purity', SCORE_WEIGHT_PURITY))
-    # *** NEW: Retrieve new 'other_feature' weights ***
-    score_weight_other_feature_diversity_val = float(data.get('score_weight_other_feature_diversity', SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY))
-    score_weight_other_feature_purity_val = float(data.get('score_weight_other_feature_purity', SCORE_WEIGHT_OTHER_FEATURE_PURITY))
-
-    # Ensure percentile is within valid range
-    stratified_sampling_target_percentile_val = max(0, min(100, stratified_sampling_target_percentile_val))
-
-    # Get AI Naming parameters from request, fallback to global config
-    ai_model_provider_param = data.get('ai_model_provider', AI_MODEL_PROVIDER).upper()
-    ollama_url_param = data.get('ollama_server_url', OLLAMA_SERVER_URL)
-    ollama_model_param = data.get('ollama_model_name', OLLAMA_MODEL_NAME)
-    gemini_api_key_param = data.get('gemini_api_key', GEMINI_API_KEY)
-    gemini_model_name_param = data.get('gemini_model_name', GEMINI_MODEL_NAME)
-    top_n_moods_for_clustering = int(data.get('top_n_moods', TOP_N_MOODS))
-    enable_clustering_embeddings_param = data.get('enable_clustering_embeddings', ENABLE_CLUSTERING_EMBEDDINGS) # Get new flag
     job_id = str(uuid.uuid4())
 
     # Clean up details of previously successful tasks before starting a new one
     clean_successful_task_details_on_new_start()
     save_task_status(job_id, "main_clustering", TASK_STATUS_PENDING, details={"message": "Task enqueued."})
 
-    job = rq_queue_high.enqueue( # Enqueue main task on the HIGH priority queue
-        run_clustering_task,
-        args=(
-            clustering_method, num_clusters_min_val, num_clusters_max_val,
-            dbscan_eps_min_val, dbscan_eps_max_val, dbscan_min_samples_min_val, dbscan_min_samples_max_val,
-            pca_components_min_val, pca_components_max_val,
-            num_clustering_runs_val,
-            max_songs_per_cluster_val, gmm_n_components_min_val, gmm_n_components_max_val,
-            min_songs_per_genre_for_stratification_val, # Added
-            stratified_sampling_target_percentile_val,  # Added
-            score_weight_diversity_val, score_weight_silhouette_val,
-            score_weight_davies_bouldin_val, score_weight_calinski_harabasz_val,
-            score_weight_purity_val,
-            # *** NEW: Pass the new 'other_feature' weights to the task ***
-            score_weight_other_feature_diversity_val,
-            score_weight_other_feature_purity_val,
-            # Pass AI params and new top_n_moods for clustering
-            ai_model_provider_param, ollama_url_param, ollama_model_param, gemini_api_key_param, gemini_model_name_param,
-            top_n_moods_for_clustering, # Pass to the task
-            enable_clustering_embeddings_param # Pass new flag
-        ),
+    job = rq_queue_high.enqueue(
+        'tasks.clustering.run_clustering_task', # Enqueue by string path
+        kwargs={ # Pass all arguments as a dictionary
+            "clustering_method": data.get('clustering_method', CLUSTER_ALGORITHM),
+            "num_clusters_min": int(data.get('num_clusters_min', NUM_CLUSTERS_MIN)),
+            "num_clusters_max": int(data.get('num_clusters_max', NUM_CLUSTERS_MAX)),
+            "dbscan_eps_min": float(data.get('dbscan_eps_min', DBSCAN_EPS_MIN)),
+            "dbscan_eps_max": float(data.get('dbscan_eps_max', DBSCAN_EPS_MAX)),
+            "dbscan_min_samples_min": int(data.get('dbscan_min_samples_min', DBSCAN_MIN_SAMPLES_MIN)),
+            "dbscan_min_samples_max": int(data.get('dbscan_min_samples_max', DBSCAN_MIN_SAMPLES_MAX)),
+            "gmm_n_components_min": int(data.get('gmm_n_components_min', GMM_N_COMPONENTS_MIN)),
+            "gmm_n_components_max": int(data.get('gmm_n_components_max', GMM_N_COMPONENTS_MAX)),
+            "pca_components_min": int(data.get('pca_components_min', PCA_COMPONENTS_MIN)),
+            "pca_components_max": int(data.get('pca_components_max', PCA_COMPONENTS_MAX)),
+            "num_clustering_runs": int(data.get('clustering_runs', CLUSTERING_RUNS)),
+            "max_songs_per_cluster": int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER)),
+            "min_songs_per_genre_for_stratification": int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION)),
+            "stratified_sampling_target_percentile": int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE)),
+            "score_weight_diversity": float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY)),
+            "score_weight_silhouette": float(data.get('score_weight_silhouette', SCORE_WEIGHT_SILHOUETTE)),
+            "score_weight_davies_bouldin": float(data.get('score_weight_davies_bouldin', SCORE_WEIGHT_DAVIES_BOULDIN)),
+            "score_weight_calinski_harabasz": float(data.get('score_weight_calinski_harabasz', SCORE_WEIGHT_CALINSKI_HARABASZ)),
+            "score_weight_purity": float(data.get('score_weight_purity', SCORE_WEIGHT_PURITY)),
+            "score_weight_other_feature_diversity": float(data.get('score_weight_other_feature_diversity', SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY)),
+            "score_weight_other_feature_purity": float(data.get('score_weight_other_feature_purity', SCORE_WEIGHT_OTHER_FEATURE_PURITY)),
+            "ai_model_provider": data.get('ai_model_provider', AI_MODEL_PROVIDER).upper(),
+            "ollama_server_url": data.get('ollama_server_url', OLLAMA_SERVER_URL),
+            "ollama_model_name": data.get('ollama_model_name', OLLAMA_MODEL_NAME),
+            "gemini_api_key": data.get('gemini_api_key', GEMINI_API_KEY),
+            "gemini_model_name": data.get('gemini_model_name', GEMINI_MODEL_NAME),
+            "top_n_moods_for_clustering": int(data.get('top_n_moods', TOP_N_MOODS)),
+            "enable_clustering_embeddings": data.get('enable_clustering_embeddings', ENABLE_CLUSTERING_EMBEDDINGS),
+        },
         job_id=job_id,
         description="Main Music Clustering",
         retry=Retry(max=3),
@@ -1416,7 +1423,157 @@ def get_playlists_endpoint():
         playlists_data[row['playlist_name']].append({"item_id": row['item_id'], "title": row['title'], "author": row['author']})
     return jsonify(dict(playlists_data)), 200
 
+@app.route('/api/similar_tracks/<item_id>', methods=['GET'])
+def get_similar_tracks_endpoint(item_id):
+    """
+    Find similar tracks for a given track ID.
+    This endpoint uses the pre-loaded Annoy index for fast lookups.
+    ---
+    tags:
+      - Similarity
+    parameters:
+      - name: item_id
+        in: path
+        required: true
+        description: The Jellyfin Item ID of the track to find neighbors for.
+        schema:
+          type: string
+      - name: n
+        in: query
+        description: The number of similar tracks to return.
+        schema:
+          type: integer
+          default: 10
+    responses:
+      200:
+        description: A list of similar tracks with their details.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/SimilarTrack'
+      404:
+        description: Target track not found in the index or no similar tracks found.
+      500:
+        description: Server error, e.g., Annoy index not loaded.
+    components:
+      schemas:
+        SimilarTrack:
+          type: object
+          properties:
+            item_id:
+              type: string
+            title:
+              type: string
+            author:
+              type: string
+            distance:
+              type: number
+              format: float
+              description: The similarity distance (lower is more similar).
+    """
+    # Import locally to prevent circular dependency at module load time.
+    from tasks.annoy_manager import find_nearest_neighbors_by_id
+    num_neighbors = request.args.get('n', 10, type=int)
+    try:
+        # This function now returns a list of dicts with {'item_id': id, 'distance': dist}
+        neighbor_results = find_nearest_neighbors_by_id(item_id, n=num_neighbors)
+        if not neighbor_results:
+            return jsonify({"error": "Target track not found in index or no neighbors found."}), 404
+
+        # Get the full track details for the neighbors
+        neighbor_ids = [n['item_id'] for n in neighbor_results]
+        neighbor_details = get_score_data_by_ids(neighbor_ids)
+
+        # Create a map for easy lookup
+        details_map = {d['item_id']: d for d in neighbor_details}
+        distance_map = {n['item_id']: n['distance'] for n in neighbor_results}
+
+        # Combine details with distance, preserving the order from Annoy
+        final_results = []
+        for neighbor_id in neighbor_ids:
+            if neighbor_id in details_map:
+                track_info = details_map[neighbor_id]
+                final_results.append({
+                    "item_id": track_info['item_id'],
+                    "title": track_info['title'],
+                    "author": track_info['author'],
+                    "distance": distance_map[neighbor_id]
+                })
+
+        return jsonify(final_results)
+    except RuntimeError as e:
+        logger.error(f"Runtime error finding neighbors for {item_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error finding neighbors for {item_id}: {e}", exc_info=True)
+        return jsonify({"error": "An unexpected error occurred."}), 500
+
+def listen_for_index_reloads():
+    """
+    Runs in a background thread to listen for messages on a Redis Pub/Sub channel.
+    When a 'reload' message is received, it triggers the in-memory Annoy index to be reloaded.
+    This is the recommended pattern for inter-process communication in this architecture,
+    avoiding direct HTTP calls from workers to the web server.
+    """
+    # Create a new Redis connection for this thread.
+    # Sharing the main redis_conn object across threads is not recommended.
+    thread_redis_conn = Redis.from_url(REDIS_URL)
+    pubsub = thread_redis_conn.pubsub()
+    pubsub.subscribe('index-updates')
+    logger.info("Background thread started. Listening for Annoy index reloads on Redis channel 'index-updates'.")
+
+    for message in pubsub.listen():
+        # The first message is a confirmation of subscription, so we skip it.
+        if message['type'] == 'message':
+            message_data = message['data'].decode('utf-8')
+            logger.info(f"Received '{message_data}' message on 'index-updates' channel.")
+            if message_data == 'reload':
+                # We need the application context to access 'g' and the database connection.
+                with app.app_context():
+                    logger.info("Triggering in-memory Annoy index reload from background listener.")
+                    try:
+                        from tasks.annoy_manager import load_annoy_index_for_querying
+                        load_annoy_index_for_querying(force_reload=True)
+                        logger.info("In-memory Annoy index reloaded successfully by background listener.")
+                    except Exception as e:
+                        logger.error(f"Error reloading Annoy index from background listener: {e}", exc_info=True)
+
+
+# --- Import and Register Blueprints ---
+# NOTE: This is moved to the `if __name__ == '__main__'` block to prevent
+# circular imports when an RQ worker imports this module.
+# For production deployment with a WSGI server like Gunicorn,
+# this registration should be handled by an application factory pattern.
+# from app_chat import chat_bp
+# app.register_blueprint(chat_bp, url_prefix='/chat')
+
 if __name__ == '__main__':
+    # --- Register Blueprints ---
+    # We register blueprints here to avoid circular imports for RQ workers.
+    from app_chat import chat_bp
+    app.register_blueprint(chat_bp, url_prefix='/chat')
+    
     os.makedirs(TEMP_DIR, exist_ok=True)
-    # The app context for init_db is handled at the top level of the script.
+    # This block runs only when the script is executed directly (e.g., `python app.py`)
+    # It's the entry point for the web server process.
+    with app.app_context():
+        # --- Initial Annoy Index Load ---
+        # Import locally to avoid circular dependency issues.
+        from tasks.annoy_manager import load_annoy_index_for_querying
+        # Load the Annoy index into memory on startup.
+        load_annoy_index_for_querying()
+
+    # --- Start Background Listener Thread ---
+    # This thread will handle live reloads of the Annoy index without needing an API call.
+    # NOTE FOR PRODUCTION: If you use a WSGI server like Gunicorn with multiple workers,
+    # this simple threading model may not be ideal. Each worker would start its own
+    # listener. A more robust production approach would be to use Gunicorn's `post_fork`
+    # server hook to start the listener thread in each worker process, or to use a
+    # more advanced messaging library. For development and single-worker deployments,
+    # this is perfectly fine.
+    listener_thread = threading.Thread(target=listen_for_index_reloads, daemon=True)
+    listener_thread.start()
+
     app.run(debug=False, host='0.0.0.0', port=8000)

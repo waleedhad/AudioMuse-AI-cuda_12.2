@@ -1,0 +1,199 @@
+import os
+import json
+import logging
+import tempfile
+import numpy as np
+import time
+from annoy import AnnoyIndex # type: ignore
+import psycopg2
+from datetime import timezone
+
+from config import EMBEDDING_DIMENSION # Use a central config for this
+
+logger = logging.getLogger(__name__)
+
+INDEX_NAME = "music_library" # The primary key for our index in the DB
+NUM_TREES = 50 # More trees = higher accuracy, larger index, longer build time
+
+# --- Global cache for the loaded Annoy index ---
+# This will hold the index in memory for the web server process to prevent
+# reloading from the database on every API call.
+annoy_index = None
+id_map = None
+
+
+def build_and_store_annoy_index(db_conn):
+    """
+    Fetches all song embeddings, builds a new Annoy index, and stores it
+    atomically in the 'annoy_index_data' table in PostgreSQL.
+    """
+    logger.info("Starting to build and store Annoy index...")
+    cur = db_conn.cursor()
+    try:
+        logger.info("Fetching all embeddings from the database...")
+        cur.execute("SELECT item_id, embedding FROM embedding")
+        all_embeddings = cur.fetchall()
+
+        if not all_embeddings:
+            logger.warning("No embeddings found in DB. Annoy index will not be built.")
+            return
+
+        logger.info(f"Found {len(all_embeddings)} embeddings to index.")
+
+        annoy_index = AnnoyIndex(EMBEDDING_DIMENSION, 'angular')
+        id_map = {}
+        annoy_item_index = 0
+        for item_id, embedding_blob in all_embeddings:
+            if embedding_blob is None:
+                logger.warning(f"Skipping item_id {item_id}: embedding data is NULL.")
+                continue
+            
+            embedding_vector = np.frombuffer(embedding_blob, dtype=np.float32)
+            
+            if embedding_vector.shape[0] != EMBEDDING_DIMENSION:
+                logger.warning(f"Skipping item_id {item_id}: embedding dimension mismatch. "
+                               f"Expected {EMBEDDING_DIMENSION}, got {embedding_vector.shape[0]}.")
+                continue
+            
+            annoy_index.add_item(annoy_item_index, embedding_vector)
+            id_map[annoy_item_index] = item_id
+            annoy_item_index += 1
+
+        if annoy_item_index == 0:
+            logger.warning("No valid embeddings were found to add to the Annoy index. Aborting build process.")
+            return
+
+        logger.info(f"Building index with {annoy_item_index} items and {NUM_TREES} trees...")
+        annoy_index.build(NUM_TREES)
+
+        # Use a robust temporary file pattern to ensure data is written and read correctly.
+        # The Annoy library needs a file path to save to. This pattern avoids potential
+        # file handle buffering issues by separating the file creation, writing, and reading.
+        temp_file_path = None
+        try:
+            # Create a temporary file, getting its path. It is not deleted on close.
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".ann") as tmp:
+                temp_file_path = tmp.name
+            
+            # Save the Annoy index to the now-closed file's path.
+            annoy_index.save(temp_file_path)
+
+            # Re-open the file in binary read mode to get the data.
+            with open(temp_file_path, 'rb') as f:
+                index_binary_data = f.read()
+        finally:
+            # Manually and reliably clean up the temporary file.
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+
+        logger.info(f"Annoy index binary data size to be stored: {len(index_binary_data)} bytes.")
+
+        # Safeguard to prevent writing an empty index to the database
+        if not index_binary_data:
+            logger.error("CRITICAL: Generated Annoy index file is empty. Aborting database storage.")
+            return
+
+        id_map_json = json.dumps(id_map)
+
+        logger.info(f"Storing Annoy index '{INDEX_NAME}' in the database...")
+        upsert_query = """
+            INSERT INTO annoy_index_data (index_name, index_data, id_map_json, embedding_dimension, created_at)
+            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (index_name) DO UPDATE SET
+                index_data = EXCLUDED.index_data,
+                id_map_json = EXCLUDED.id_map_json,
+                embedding_dimension = EXCLUDED.embedding_dimension,
+                created_at = CURRENT_TIMESTAMP;
+        """
+        cur.execute(upsert_query, (INDEX_NAME, psycopg2.Binary(index_binary_data), id_map_json, EMBEDDING_DIMENSION))
+        db_conn.commit()
+        logger.info("Annoy index build and database storage complete.")
+
+    except Exception as e:
+        logger.error("An error occurred during Annoy index build: %s", e, exc_info=True)
+        db_conn.rollback()
+    finally:
+        cur.close()
+
+def load_annoy_index_for_querying(force_reload=False):
+    """
+    Loads the Annoy index from the database into the global in-memory cache.
+    This is called on web server startup and can be called to force a reload.
+    """
+    global annoy_index, id_map # Declare we are modifying the global variables
+
+    if annoy_index is not None and not force_reload:
+        logger.info("Annoy index is already loaded in memory. Skipping reload.")
+        return
+
+    from app import get_db
+
+    logger.info("Attempting to load Annoy index from database into memory...")
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT index_data, id_map_json, embedding_dimension FROM annoy_index_data WHERE index_name = %s", (INDEX_NAME,))
+        record = cur.fetchone()
+
+        if not record:
+            logger.warning(f"Annoy index '{INDEX_NAME}' not found in the database. Cache will be empty.")
+            annoy_index, id_map = None, None # Ensure cache is cleared
+            return
+        
+        index_binary_data, id_map_json, db_embedding_dim = record
+
+        if not index_binary_data:
+            logger.error(f"Annoy index '{INDEX_NAME}' data in database is empty.")
+            annoy_index, id_map = None, None # Ensure cache is cleared
+            return
+
+        if db_embedding_dim != EMBEDDING_DIMENSION:
+            logger.error(f"FATAL: Annoy index dimension mismatch! DB has {db_embedding_dim}, config expects {EMBEDDING_DIMENSION}.")
+            annoy_index, id_map = None, None # Ensure cache is cleared
+            return
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ann") as tmp:
+            tmp.write(index_binary_data)
+            temp_file_path = tmp.name
+        
+        logger.info(f"Loading index from temporary file: {temp_file_path}")
+        loaded_index = AnnoyIndex(EMBEDDING_DIMENSION, 'angular')
+        loaded_index.load(temp_file_path)
+        os.remove(temp_file_path)
+
+        # Update the global variables
+        annoy_index = loaded_index
+        id_map = {int(k): v for k, v in json.loads(id_map_json).items()}
+
+        logger.info(f"Annoy index with {len(id_map)} items loaded successfully into memory.")
+
+    except Exception as e:
+        logger.error("Failed to load Annoy index from database: %s", e, exc_info=True)
+        annoy_index, id_map = None, None # Clear cache on error
+    finally:
+        cur.close()
+
+def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
+    """
+    Finds the N nearest neighbors for a given item_id using the globally cached index.
+    """
+    if annoy_index is None or id_map is None:
+        raise RuntimeError("Annoy index is not loaded in memory. It may be missing, empty, or the server failed to load it on startup.")
+
+    reverse_id_map = {v: k for k, v in id_map.items()}
+    target_annoy_id = reverse_id_map.get(target_item_id)
+
+    if target_annoy_id is None:
+        logger.warning(f"Target item_id '{target_item_id}' not found in the loaded Annoy index map.")
+        return []
+
+    neighbor_annoy_ids, distances = annoy_index.get_nns_by_item(target_annoy_id, n + 1, include_distances=True)
+
+    results = []
+    for annoy_id, dist in zip(neighbor_annoy_ids, distances):
+        if annoy_id != target_annoy_id:
+            item_id = id_map.get(annoy_id)
+            if item_id:
+                results.append({"item_id": item_id, "distance": dist})
+
+    return results[:n]

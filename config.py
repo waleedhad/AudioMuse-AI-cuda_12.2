@@ -168,6 +168,7 @@ TOP_N_MOODS = 5
 TOP_N_OTHER_FEATURES = int(os.environ.get("TOP_N_OTHER_FEATURES", "2")) # Number of top "other features" to consider for clustering vector
 EMBEDDING_MODEL_PATH = "/app/model/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/model/msd-msd-musicnn-1.pb"
+EMBEDDING_DIMENSION = 200 # *** ADDED THIS LINE ***
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)

@@ -46,7 +46,9 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
-from .commons import score_vector # Import from commons
+from .commons import score_vector
+from .annoy_manager import build_and_store_annoy_index
+
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +102,10 @@ def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
 
 def download_track(jellyfin_url, headers, temp_dir, item):
     """Downloads a track from Jellyfin to a temporary directory."""
-    filename = f"{item['Name'].replace('/', '_')}-{item.get('AlbumArtist', 'Unknown')}.mp3"
+    # Sanitize both track name and artist name to remove invalid characters for filenames
+    sanitized_track_name = item['Name'].replace('/', '_').replace('\\', '_')
+    sanitized_artist_name = item.get('AlbumArtist', 'Unknown').replace('/', '_').replace('\\', '_')
+    filename = f"{sanitized_track_name}-{sanitized_artist_name}.mp3"
     path = os.path.join(temp_dir, filename)
     try:
         r = requests.get(f"{jellyfin_url}/Items/{item['Id']}/Download", headers=headers, timeout=120)
@@ -435,8 +440,11 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         "moods": {k: round(v, 2) for k, v in all_moods_predicted.items()}
                     }
                     # Save only the top_n_moods
+                    # IMPORTANT: Ensure save_track_analysis and save_track_embedding are defined
+                    # and accessible here, likely from your app module.
                     save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_moods_to_save_dict, energy=energy, other_features=other_features_str)
-                    # Save the embedding
+                    # IMPORTANT: Ensure save_track_embedding now saves the embedding as a binary blob
+                    # as shown in the new annoy_manager.py example.
                     save_track_embedding(item['Id'], track_embedding)
                     tracks_analyzed_count += 1
 
@@ -585,17 +593,33 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     return {row[0] for row in cur.fetchall()}
                 finally:
                     cur.close()
-            
+
             def monitor_and_clear_jobs():
                 nonlocal albums_completed_count
                 completed_in_cycle = []
-                for job_id, job_instance in list(active_jobs_map.items()):
+                # Iterate over a copy of the keys to allow modification during the loop
+                for job_id in list(active_jobs_map.keys()):
                     try:
-                        job_instance.refresh()
-                        if job_instance.is_finished or job_instance.is_failed or job_instance.is_canceled:
+                        # Fetch the job fresh from Redis to get the most up-to-date status
+                        job = Job.fetch(job_id, connection=redis_conn)
+                        if job.is_finished or job.is_failed or job.is_canceled:
                             completed_in_cycle.append(job_id)
-                    except NoSuchJobError:
-                        completed_in_cycle.append(job_id)
+                    except NoSuchJobError: # This is the critical case to handle robustly
+                        logger.warning(f"Sub-task job {job_id} not found in Redis. Checking database for final status...")
+                        # The main task runs in an app_context, so we can safely call DB functions
+                        db_status_info = get_task_info_from_db(job_id)
+                        if db_status_info and db_status_info.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                            logger.info(f"  DB confirms task {job_id} is in a terminal state: {db_status_info.get('status')}. Marking as complete.")
+                            completed_in_cycle.append(job_id)
+                        else:
+                            # This indicates a lost job. It's gone from Redis but not marked as complete in the DB.
+                            # This can happen if a worker dies without moving the job to the failed queue.
+                            # We will mark it as FAILED to be safe and prevent the main task from waiting forever.
+                            db_status = db_status_info.get('status') if db_status_info else 'NOT_IN_DB'
+                            error_msg = f"Job lost from Redis queue while in a non-terminal state (DB status: {db_status})."
+                            logger.error(f"  CRITICAL: Job {job_id} is missing from Redis but its DB status is '{db_status}'. Marking as failed.")
+                            save_task_status(job_id, "album_analysis", TASK_STATUS_FAILURE, parent_task_id=current_task_id, progress=100, details={"error": error_msg})
+                            completed_in_cycle.append(job_id) # Treat as "completed" to unblock the main task.
                 
                 for job_id in completed_in_cycle:
                     if job_id in active_jobs_map:
@@ -650,7 +674,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 albums_launched_count += 1
                 checked_album_ids.add(album['Id'])
                 
-                progress = 5 + int(85 * (idx / float(total_albums_to_check)))
+                progress = 5 + int(idx / float(total_albums_to_check))
                 status_message = f"Launched: {albums_launched_count}. Completed: {albums_completed_count}/{albums_launched_count}. Active: {len(active_jobs_map)}. Skipped: {albums_skipped_count}/{total_albums_to_check}."
                 log_and_update_main_analysis(
                     status_message,
@@ -682,8 +706,25 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                         failed_albums += 1
                 except Exception:
                     failed_albums += 1
+            
+            # --- Annoy Index Creation ---
+            # This now runs every time the analysis task completes, ensuring the index is always rebuilt.
+            log_and_update_main_analysis("Rebuilding nearest neighbor index...", 95)
+            db_conn = get_db()
+            build_and_store_annoy_index(db_conn)
+            
+            final_message = f"Main analysis complete. Found {total_albums_to_check} albums, skipped {albums_skipped_count}. Of the {albums_launched_count} launched, {successful_albums} succeeded, {failed_albums} failed. Total tracks analyzed: {total_tracks_analyzed_all_albums}. Annoy index created."
 
-            final_message = f"Main analysis complete. Found {total_albums_to_check} albums, skipped {albums_skipped_count}. Of the {albums_launched_count} launched, {successful_albums} succeeded, {failed_albums} failed. Total tracks analyzed: {total_tracks_analyzed_all_albums}."
+            log_and_update_main_analysis("Publishing index-reload notification to Redis...", 98)
+            try:
+                # Use Redis Pub/Sub to notify the web server to reload the index.
+                # This is more robust than an HTTP call in a containerized environment.
+                redis_conn.publish('index-updates', 'reload')
+                logger.info("Successfully published 'reload' message to 'index-updates' channel.")
+            except Exception as e:
+                logger.warning(f"Could not publish index-reload notification to Redis: {e}")
+                final_message += " (Warning: Could not notify web server for live reload.)"
+
             if total_tracks_skipped_in_albums > 0:
                 final_message += f" An additional {total_tracks_skipped_in_albums} tracks were skipped within these albums due to errors (e.g., multi-channel audio)."
 

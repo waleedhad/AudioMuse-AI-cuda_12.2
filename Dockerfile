@@ -21,6 +21,7 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     # Added dependencies for psycopg2-binary
     libpq-dev \
     gcc \
+    g++ \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -35,6 +36,7 @@ RUN pip3 install --no-cache-dir \
     rq \
     pyyaml \
     six \
+    annoy \
     # Added psycopg2-binary for PostgreSQL connectivity
     psycopg2-binary \
     ftfy \
