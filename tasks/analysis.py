@@ -591,6 +591,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 completed_in_cycle = []
                 for job_id, job_instance in list(active_jobs_map.items()):
                     try:
+                        job_instance.refresh()
                         if job_instance.is_finished or job_instance.is_failed or job_instance.is_canceled:
                             completed_in_cycle.append(job_id)
                     except NoSuchJobError:
