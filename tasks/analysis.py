@@ -669,19 +669,25 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             successful_albums = 0
             failed_albums = 0
             total_tracks_analyzed_all_albums = 0
+            total_tracks_skipped_in_albums = 0
             for job_instance in launched_jobs:
                 try:
                     job_instance.refresh()
                     if job_instance.is_finished and isinstance(job_instance.result, dict):
                         successful_albums += 1
                         total_tracks_analyzed_all_albums += job_instance.result.get("tracks_analyzed", 0)
+                        total_tracks_skipped_in_albums += job_instance.result.get("tracks_skipped", 0)
                     else:
                         failed_albums += 1
                 except Exception:
                     failed_albums += 1
 
             final_message = f"Main analysis complete. Found {total_albums_to_check} albums, skipped {albums_skipped_count}. Of the {albums_launched_count} launched, {successful_albums} succeeded, {failed_albums} failed. Total tracks analyzed: {total_tracks_analyzed_all_albums}."
-            log_and_update_main_analysis(final_message, 100, details_extra={"successful_albums": successful_albums, "failed_albums": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}, task_state=TASK_STATUS_SUCCESS)
+            if total_tracks_skipped_in_albums > 0:
+                final_message += f" An additional {total_tracks_skipped_in_albums} tracks were skipped within these albums due to errors (e.g., multi-channel audio)."
+
+            final_details = {"successful_albums": successful_albums, "failed_albums": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums, "total_tracks_skipped_in_albums": total_tracks_skipped_in_albums}
+            log_and_update_main_analysis(final_message, 100, details_extra=final_details, task_state=TASK_STATUS_SUCCESS)
             clean_temp(TEMP_DIR)
             return {"status": "SUCCESS", "message": final_message}
 
