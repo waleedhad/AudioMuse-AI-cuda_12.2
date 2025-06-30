@@ -612,7 +612,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 while len(active_jobs_map) >= MAX_QUEUED_ANALYSIS_JOBS:
                     monitor_and_clear_jobs()
                     progress = 5 + int(85 * ((albums_skipped_count + albums_completed_count) / float(total_albums_to_check)))
-                    status_message = f"Launched: {albums_launched_count}. Completed: {albums_completed_count}/{albums_launched_count}. Active: {len(active_jobs_map)}. Skipped: {albums_skipped_count}/{total_albums_to_check}. (Queue full)"
+                    status_message = f"Launched: {albums_launched_count}. Completed: {albums_completed_count}/{albums_launched_count}. Active: {len(active_jobs_map)}. Skipped: {albums_skipped_count}/{total_albums_to_check}. (Throttling)"
                     log_and_update_main_analysis(status_message, progress, details_extra={"checked_album_ids": list(checked_album_ids)})
                     time.sleep(5)
 
