@@ -31,6 +31,7 @@ const statusTaskType = document.getElementById('status-task-type');
 const statusStatus = document.getElementById('status-status');
 const statusProgress = document.getElementById('status-progress');
 const progressBar = document.getElementById('progress-bar');
+const statusLog = document.getElementById('status-log');
 const statusDetails = document.getElementById('status-details');
 
 // Playlists
@@ -288,6 +289,22 @@ function displayTaskStatus(task) {
     if (['SUCCESS', 'FINISHED'].includes(stateUpper) && (task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
         fetchPlaylists(); 
     }
+
+    // Correctly extract the status message
+    let statusMessage = 'N/A';
+    if (task.details) {
+        if (task.details.status_message) {
+            statusMessage = task.details.status_message;
+        } else if (Array.isArray(task.details.log) && task.details.log.length > 0) {
+            // Fallback to the last log entry if status_message is not available.
+            statusMessage = task.details.log[task.details.log.length - 1];
+        } else if (task.details.message) {
+            // Further fallback to the general message field.
+            statusMessage = task.details.message;
+        }
+    }
+    statusLog.textContent = statusMessage;
+
 
     statusDetails.textContent = typeof task.details === 'object' ? JSON.stringify(task.details, null, 2) : task.details;
     statusDetails.scrollTop = statusDetails.scrollHeight;

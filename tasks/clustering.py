@@ -21,24 +21,23 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
                 track_exists, save_track_analysis, get_all_tracks, get_tracks_by_ids, update_playlist_table, JobStatus,
                 TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
                 TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
-                get_child_tasks_from_db) # Import the new function
+                get_child_tasks_from_db)
 from psycopg2.extras import DictCursor
 
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
-from config import (TEMP_DIR, MAX_SONGS_PER_CLUSTER, # MAX_DISTANCE, GMM_COVARIANCE_TYPE etc. moved to helper
+from config import (TEMP_DIR, MAX_SONGS_PER_CLUSTER,
     MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX,
     TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, REDIS_URL, DATABASE_URL,
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME,
     DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, ENABLE_CLUSTERING_EMBEDDINGS,  # type: ignore
-    DB_FETCH_CHUNK_SIZE, STRATIFIED_SAMPLING_TARGET_PERCENTILE) # Score weights, purity/stats/MiniBatch configs etc. moved to helper
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, ENABLE_CLUSTERING_EMBEDDINGS,
+    DB_FETCH_CHUNK_SIZE, STRATIFIED_SAMPLING_TARGET_PERCENTILE)
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
-# from .commons import score_vector # Moved to clustering_helper.py
 from .clustering_helper import (
     _get_stratified_song_subset,
     create_or_update_playlists_on_jellyfin,
@@ -53,12 +52,12 @@ logger = logging.getLogger(__name__)
 
 
 def run_clustering_batch_task(
-    batch_id_str, start_run_idx, num_iterations_in_batch, # Batch control
-    genre_to_lightweight_track_data_map_json, 
-    target_songs_per_genre, 
+    batch_id_str, start_run_idx, num_iterations_in_batch,
+    genre_to_lightweight_track_data_map_json,
+    target_songs_per_genre,
     sampling_percentage_change_per_run,
     clustering_method,
-    active_mood_labels_for_batch, 
+    active_mood_labels_for_batch,
     num_clusters_min_max_tuple,
     dbscan_params_ranges_dict,
     gmm_params_ranges_dict,
@@ -69,14 +68,14 @@ def run_clustering_batch_task(
     score_weight_silhouette_param,
     score_weight_davies_bouldin_param,
     score_weight_calinski_harabasz_param,
-    score_weight_purity_param,                  # Corrected order
-    score_weight_other_feature_diversity_param, # Corrected order
-    score_weight_other_feature_purity_param,    # Corrected order
-    elite_solutions_params_list_json, 
-    exploitation_probability,         
-    mutation_config_json,             
-    initial_subset_track_ids_json,    
-    enable_clustering_embeddings_param 
+    score_weight_purity_param,
+    score_weight_other_feature_diversity_param,
+    score_weight_other_feature_purity_param,
+    elite_solutions_params_list_json,
+    exploitation_probability,
+    mutation_config_json,
+    initial_subset_track_ids_json,
+    enable_clustering_embeddings_param
     ):
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
@@ -96,10 +95,10 @@ def run_clustering_batch_task(
         current_task_logs_batch = initial_details["log"]
         log_prefix_for_iter = f"[Batch-{current_task_id}]"
 
-        def log_and_update_batch_task(message, progress, details_extra=None, task_state=TASK_STATUS_PROGRESS, print_console=True): 
+        def log_and_update_batch_task(message, progress, details_extra=None, task_state=TASK_STATUS_PROGRESS, print_console=True):
             nonlocal current_progress_batch, current_task_logs_batch
             current_progress_batch = progress
-            if print_console: 
+            if print_console:
                 logger.info("[ClusteringBatchTask-%s] %s", current_task_id, message)
 
             db_details_batch = {"batch_id": batch_id_str, "start_run_idx": start_run_idx, "num_iterations_in_batch": num_iterations_in_batch}
@@ -159,14 +158,14 @@ def run_clustering_batch_task(
 
             best_result_in_this_batch = None
             best_score_in_this_batch = -1.0
-            iterations_actually_completed = 0            
+            iterations_actually_completed = 0
 
             for i in range(num_iterations_in_batch):
                 current_run_global_idx = start_run_idx + i
                 # Revocation check
                 if current_job:
-                    with app.app_context(): # type: ignore
-                        task_db_info_iter_check = get_task_info_from_db(current_task_id) 
+                    with app.app_context():
+                        task_db_info_iter_check = get_task_info_from_db(current_task_id)
                         parent_task_db_info_iter_check = get_task_info_from_db(parent_task_id) if parent_task_id else None
                         is_self_revoked_iter = task_db_info_iter_check and task_db_info_iter_check.get('status') == TASK_STATUS_REVOKED
                         is_parent_failed_or_revoked_iter = parent_task_db_info_iter_check and parent_task_db_info_iter_check.get('status') in [TASK_STATUS_REVOKED, TASK_STATUS_FAILURE]
@@ -174,7 +173,7 @@ def run_clustering_batch_task(
                             revocation_reason_iter = "self was REVOKED" if is_self_revoked_iter else f"parent task {parent_task_id} status is {parent_task_db_info_iter_check.get('status') if parent_task_db_info_iter_check else 'N/A'}"
                             log_and_update_batch_task(f"🛑 Batch task {batch_id_str} stopping mid-batch (before iter {current_run_global_idx}) because {revocation_reason_iter}.", current_progress_batch, task_state=TASK_STATUS_REVOKED)
                             return {"status": "REVOKED", "message": "Batch task revoked mid-process.", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch}
-                
+
                 # Determine track IDs for this iteration using stratified sampling
                 # For the first iteration (i=0), current_sampled_track_ids_in_batch is from initial_subset_track_ids_json
                 # For subsequent iterations, it's the result of the previous _get_stratified_song_subset call
@@ -182,7 +181,7 @@ def run_clustering_batch_task(
                 current_subset_lightweight_data = _get_stratified_song_subset(
                     genre_to_lightweight_track_data_map,
                     target_songs_per_genre,
-                    previous_subset_track_ids=current_sampled_track_ids_in_batch, 
+                    previous_subset_track_ids=current_sampled_track_ids_in_batch,
                     percentage_change=percentage_change_for_this_iter
                 )
                 item_ids_for_this_iteration = [t['item_id'] for t in current_subset_lightweight_data]
@@ -202,14 +201,14 @@ def run_clustering_batch_task(
                     mutation_config=(mutation_config_for_iter if mutation_config_for_iter else {}),
                     score_weight_diversity_override=score_weight_diversity_param,
                     score_weight_silhouette_override=score_weight_silhouette_param,
-                    score_weight_davies_bouldin_override=score_weight_davies_bouldin_param,       
-                    score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param, 
+                    score_weight_davies_bouldin_override=score_weight_davies_bouldin_param,
+                    score_weight_calinski_harabasz_override=score_weight_calinski_harabasz_param,
                     score_weight_purity_override=score_weight_purity_param,
                     score_weight_other_feature_diversity_override=score_weight_other_feature_diversity_param,
                     score_weight_other_feature_purity_override=score_weight_other_feature_purity_param,
                     enable_clustering_embeddings_param=enable_clustering_embeddings_param # Pass this through
-                ) 
-                iterations_actually_completed += 1 
+                )
+                iterations_actually_completed += 1
                 if iteration_result and iteration_result.get("diversity_score", -1.0) > best_score_in_this_batch:
                     best_score_in_this_batch = iteration_result["diversity_score"]
                     best_result_in_this_batch = iteration_result
@@ -220,7 +219,7 @@ def run_clustering_batch_task(
                 "best_score_in_batch": best_score_in_this_batch,
                 "iterations_completed_in_batch": iterations_actually_completed,
                 "full_best_result_from_batch": best_result_in_this_batch,
-                "final_subset_track_ids": current_sampled_track_ids_in_batch 
+                "final_subset_track_ids": current_sampled_track_ids_in_batch
             }
             log_and_update_batch_task(f"Batch {batch_id_str} complete. Best score in batch: {best_score_in_this_batch:.2f}", 100, details_extra=final_batch_summary, task_state=TASK_STATUS_SUCCESS)
             return {"status": "SUCCESS", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": best_result_in_this_batch, "final_subset_track_ids": current_sampled_track_ids_in_batch}
@@ -234,29 +233,33 @@ def run_clustering_batch_task(
                 current_progress_batch,
                 details_extra=failure_details,
                 task_state=TASK_STATUS_FAILURE,
-                print_console=False # The detailed error is already printed above
+                print_console=False
             )
             return {"status": "FAILURE", "iterations_completed_in_batch": iterations_actually_completed, "best_result_from_batch": None, "final_subset_track_ids": current_sampled_track_ids_in_batch}
 
 
 def run_clustering_task(
     clustering_method, num_clusters_min, num_clusters_max,
-    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max, 
-    pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster, # type: ignore
-    gmm_n_components_min, gmm_n_components_max, 
-    min_songs_per_genre_for_stratification_param, # Added
-    stratified_sampling_target_percentile_param,  # Added
-    score_weight_diversity_param, score_weight_silhouette_param, 
-    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, 
-    score_weight_purity_param, 
-    score_weight_other_feature_diversity_param, 
-    score_weight_other_feature_purity_param,    
-    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param, 
+    dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max,
+    pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster_val, # Renamed to max_songs_per_cluster_val
+    gmm_n_components_min, gmm_n_components_max,
+    min_songs_per_genre_for_stratification_param,
+    stratified_sampling_target_percentile_param,
+    score_weight_diversity_param, score_weight_silhouette_param,
+    score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param,
+    score_weight_purity_param,
+    score_weight_other_feature_diversity_param,
+    score_weight_other_feature_purity_param,
+    ai_model_provider_param, ollama_server_url_param, ollama_model_name_param,
     gemini_api_key_param, gemini_model_name_param, top_n_moods_for_clustering_param,
-    enable_clustering_embeddings_param): # type: ignore
+    enable_clustering_embeddings_param):
     current_job = get_current_job(redis_conn)
-    current_task_id = current_job.id if current_job else str(uuid.uuid4()) 
+    current_task_id = current_job.id if current_job else str(uuid.uuid4())
     logger.info(f"Starting main clustering task {current_task_id} from queue: {current_job.origin if current_job else 'N/A'}")
+
+    # Initialize variables for safe access in log messages
+    final_max_songs_per_cluster = max_songs_per_cluster_val
+    best_clustering_results = None
 
     with app.app_context():
         # IDEMPOTENCY CHECK: If task is already in a terminal state, don't run again.
@@ -283,19 +286,36 @@ def run_clustering_task(
             "active_runs_count": 0,
             "best_score": -1.0,
             "clustering_run_job_ids": [],
+            "clustering_method": clustering_method,
+            "num_clusters_min": num_clusters_min,
+            "num_clusters_max": num_clusters_max,
+            "dbscan_eps_min": dbscan_eps_min,
+            "dbscan_eps_max": dbscan_eps_max,
+            "dbscan_min_samples_min": dbscan_min_samples_min,
+            "dbscan_min_samples_max": dbscan_min_samples_max,
+            "gmm_n_components_min": gmm_n_components_min,
+            "gmm_n_components_max": gmm_n_components_max,
+            "pca_components_min": pca_components_min,
+            "pca_components_max": pca_components_max,
+            "max_songs_per_cluster": max_songs_per_cluster_val,
+            "min_songs_per_genre_for_stratification": min_songs_per_genre_for_stratification_param,
+            "stratified_sampling_target_percentile": stratified_sampling_target_percentile_param,
             "score_weight_diversity_for_run": score_weight_diversity_param,
             "score_weight_silhouette_for_run": score_weight_silhouette_param,
-            "score_weight_davies_bouldin_for_run": score_weight_davies_bouldin_param,     
-            "score_weight_calinski_harabasz_for_run": score_weight_calinski_harabasz_param, 
-            "score_weight_purity_for_run": score_weight_purity_param, 
-            "score_weight_other_feature_diversity_for_run": score_weight_other_feature_diversity_param, 
-            "score_weight_other_feature_purity_for_run": score_weight_other_feature_purity_param, 
+            "score_weight_davies_bouldin_for_run": score_weight_davies_bouldin_param,
+            "score_weight_calinski_harabasz_for_run": score_weight_calinski_harabasz_param,
+            "score_weight_purity_for_run": score_weight_purity_param,
+            "score_weight_other_feature_diversity_for_run": score_weight_other_feature_diversity_param,
+            "score_weight_other_feature_purity_for_run": score_weight_other_feature_purity_param,
             "ai_model_provider_for_run": ai_model_provider_param,
+            "ollama_server_url_for_run": ollama_server_url_param,
             "ollama_model_name_for_run": ollama_model_name_param,
             "gemini_model_name_for_run": gemini_model_name_param,
-            "embeddings_enabled_for_clustering": enable_clustering_embeddings_param 
-        } # Add the new param here for logging
-        
+            "gemini_api_key_for_run": "<API_KEY_HIDDEN>", # Do not log actual API key
+            "top_n_moods_for_clustering": top_n_moods_for_clustering_param,
+            "embeddings_enabled_for_clustering": enable_clustering_embeddings_param
+        }
+
         # Define current_progress before the helper function that uses it
         current_progress = 0
 
@@ -311,6 +331,9 @@ def run_clustering_task(
             if task_state == TASK_STATUS_SUCCESS:
                 _main_task_accumulated_details["log"] = [f"Task completed successfully. Final status: {message}"]
                 _main_task_accumulated_details.pop('log_storage_info', None)
+                # Remove specific keys for SUCCESS state
+                _main_task_accumulated_details.pop('best_params', None)
+                _main_task_accumulated_details.pop('clustering_run_job_ids', None)
             elif task_state in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
                 current_log_list.append(log_entry)
                 _main_task_accumulated_details["log"] = current_log_list
@@ -321,29 +344,46 @@ def run_clustering_task(
                 _main_task_accumulated_details["log"] = current_log_list
             meta_details = {"status_message": message}
             for key in ["runs_completed", "total_runs", "best_score", "best_params",
-                        "clustering_run_job_ids", "batch_jobs_launched", "total_batch_jobs", "active_runs_count"]:
+                        "clustering_run_job_ids", "batch_jobs_launched", "total_batch_jobs", "active_runs_count",
+                        "clustering_method", "num_clusters_min", "num_clusters_max", "dbscan_eps_min",
+                        "dbscan_eps_max", "dbscan_min_samples_min", "dbscan_min_samples_max",
+                        "gmm_n_components_min", "gmm_n_components_max", "pca_components_min",
+                        "pca_components_max", "max_songs_per_cluster",
+                        "min_songs_per_genre_for_stratification", "stratified_sampling_target_percentile",
+                        "score_weight_diversity_for_run", "score_weight_silhouette_for_run",
+                        "score_weight_davies_bouldin_for_run", "score_weight_calinski_harabasz_for_run",
+                        "score_weight_purity_for_run", "score_weight_other_feature_diversity_for_run",
+                        "score_weight_other_feature_purity_for_run", "ai_model_provider_for_run",
+                        "ollama_server_url_for_run", "ollama_model_name_for_run",
+                        "gemini_model_name_for_run", "top_n_moods_for_clustering", "embeddings_enabled_for_clustering"]:
                 if key in _main_task_accumulated_details and _main_task_accumulated_details[key] is not None:
-                    meta_details[key] = _main_task_accumulated_details[key]
+                    # Skip sensitive info for meta details if not explicitly needed
+                    if key == "gemini_api_key_for_run":
+                         meta_details[key] = "<API_KEY_HIDDEN>"
+                    else:
+                        meta_details[key] = _main_task_accumulated_details[key]
             if current_job:
                 current_job.meta['progress'] = progress
                 current_job.meta['status_message'] = message
                 current_job.meta['details'] = meta_details
                 current_job.save_meta()
             save_task_status(current_task_id, "main_clustering", task_state, progress=progress, details=_main_task_accumulated_details)
-        
+
         # --- STATE RECOVERY BLOCK ---
         log_and_update_main_clustering("Checking for existing state (recovering)...", 2, print_console=False)
-        
+
         active_jobs_map = {}
         elite_solutions_list = []
+
+        # Track if this task is recovering from a previous run
+        is_recovering = False
         best_diversity_score = _main_task_accumulated_details.get("best_score", -1.0)
-        best_clustering_results = None
         batches_completed_count = 0
         total_iterations_completed_count = 0
         last_subset_track_ids_for_batch_chaining = []
-        
+
         child_tasks_from_db = get_child_tasks_from_db(current_task_id)
-        
+
         batch_index_to_task_map = {}
         if child_tasks_from_db:
             for child_row in child_tasks_from_db:
@@ -356,6 +396,7 @@ def run_clustering_task(
                         logger.warning(f"Could not parse batch index from sub_type_identifier: {batch_id_str}")
 
         max_processed_batch_idx = -1
+
         if batch_index_to_task_map:
             sorted_batch_indices = sorted(batch_index_to_task_map.keys())
             for batch_idx in sorted_batch_indices:
@@ -370,12 +411,13 @@ def run_clustering_task(
                         active_jobs_map[child_id] = job_instance
                     except NoSuchJobError:
                         logger.warning(f"Job {child_id} was active in DB but not found in RQ. It will be ignored.")
-                
+
+
                 elif child_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
                     logger.info(f"Recovering from failed/revoked batch job {child_id} (Batch_{batch_idx}).")
                     batches_completed_count += 1
                     max_processed_batch_idx = batch_idx
-                
+
                 elif child_status == TASK_STATUS_SUCCESS:
                     logger.info(f"Recovering from successful batch job {child_id} (Batch_{batch_idx}).")
                     batch_job_result = get_job_result_safely(child_id, current_task_id, f"clustering_batch (recovery)")
@@ -383,7 +425,7 @@ def run_clustering_task(
                         iterations_from_batch = batch_job_result.get("iterations_completed_in_batch", 0)
                         total_iterations_completed_count += iterations_from_batch
                         best_from_batch = batch_job_result.get("best_result_from_batch")
-                        
+
                         if "final_subset_track_ids" in batch_job_result and batch_job_result["final_subset_track_ids"] is not None:
                             last_subset_track_ids_for_batch_chaining = batch_job_result["final_subset_track_ids"]
 
@@ -402,17 +444,32 @@ def run_clustering_task(
         elite_solutions_list.sort(key=lambda x: x["score"], reverse=True)
         elite_solutions_list = elite_solutions_list[:TOP_N_ELITES]
         next_batch_job_idx_to_launch = max_processed_batch_idx + 1
-        
+
         logger.info(f"State recovery complete. Resuming. Batches completed: {batches_completed_count}, Iterations completed: {total_iterations_completed_count}, Next batch to launch: {next_batch_job_idx_to_launch}, Best score so far: {best_diversity_score:.2f}")
         # --- END OF STATE RECOVERY BLOCK ---
+
+        if batches_completed_count > 0:
+            is_recovering = True
+
+        if is_recovering:
+            log_and_update_main_clustering(
+                f"Resuming clustering with existing state: {num_clustering_runs} total runs, {batches_completed_count} batches previously completed, next batch to launch: {next_batch_job_idx_to_launch}.",
+                2, print_console=True
+            )
+        else:
+             log_and_update_main_clustering(
+                f"Starting fresh clustering with {num_clustering_runs} runs.",
+                2, print_console=True
+            )
 
         save_task_status(current_task_id, "main_clustering", TASK_STATUS_STARTED, progress=0, details=_main_task_accumulated_details)
 
         try:
             ai_model_provider_for_run = ai_model_provider_param
             ollama_server_url_for_run = ollama_server_url_param
-            ollama_model_name_for_run = ollama_model_name_param 
-            gemini_api_key_for_run = gemini_api_key_param # type: ignore
+            ollama_model_name_for_run = ollama_model_name_param
+            gemini_api_key_for_run = gemini_api_key_param
+
             gemini_model_name_for_run = gemini_model_name_param
 
             log_and_update_main_clustering("📊 Starting main clustering process...", 0)
@@ -430,11 +487,11 @@ def run_clustering_task(
                 cur.execute("SELECT item_id, author, mood_vector FROM score WHERE mood_vector IS NOT NULL AND mood_vector != ''")
             lightweight_rows = cur.fetchall()
             cur.close()
-            log_and_update_main_clustering(f"Retrieved {len(lightweight_rows)} lightweight track records from database.", 2, print_console=False) # type: ignore
+            log_and_update_main_clustering(f"Retrieved {len(lightweight_rows)} lightweight track records from database.", 2, print_console=False)
 
             min_tracks_for_kmeans = num_clusters_min if clustering_method == "kmeans" else 2
             min_tracks_for_gmm = gmm_n_components_min if clustering_method == "gmm" else 2
-            log_and_update_main_clustering(f"Calculated min_req_overall based on method '{clustering_method}' and PCA settings.", 2, print_console=False) 
+            log_and_update_main_clustering(f"Calculated min_req_overall based on method '{clustering_method}' and PCA settings.", 2, print_console=False)
             min_req_pca = (pca_components_min + 1) if pca_components_min > 0 else 2
             min_req_overall = max(2, min_tracks_for_kmeans, min_tracks_for_gmm, min_req_pca)
             if len(lightweight_rows) < min_req_overall:
@@ -449,7 +506,7 @@ def run_clustering_task(
             log_and_update_main_clustering(f"Active mood labels for clustering: {active_mood_labels}", 4, print_console=False)
             log_and_update_main_clustering("Starting stratified sampling preparation...", 4, print_console=False)
             genre_to_lightweight_track_data_map = defaultdict(list)
-            for row in lightweight_rows: 
+            for row in lightweight_rows:
                 if 'mood_vector' in row and row['mood_vector']:
                     mood_scores = {}
                     for pair in row['mood_vector'].split(','):
@@ -462,35 +519,35 @@ def run_clustering_task(
                         if genre in mood_scores and mood_scores[genre] > max_score:
                             max_score = mood_scores[genre]
                             top_stratified_genre = genre
-                    minimal_track_info = {'item_id': row['item_id'], 'mood_vector': row['mood_vector']} 
+                    minimal_track_info = {'item_id': row['item_id'], 'mood_vector': row['mood_vector']}
                     if top_stratified_genre:
                         genre_to_lightweight_track_data_map[top_stratified_genre].append(minimal_track_info)
                     else:
                         genre_to_lightweight_track_data_map['__other__'].append(minimal_track_info)
-                else: # Should not happen due to WHERE clause, but defensive
-                    genre_to_lightweight_track_data_map['__other__'].append({'item_id': row['item_id'], 'mood_vector': ''}) # type: ignore
+                else:
+                    genre_to_lightweight_track_data_map['__other__'].append({'item_id': row['item_id'], 'mood_vector': ''})
 
 
             songs_counts_for_stratified_genres = []
             for genre in STRATIFIED_GENRES:
                 if genre in genre_to_lightweight_track_data_map:
-                    songs_counts_for_stratified_genres.append(len(genre_to_lightweight_track_data_map[genre])) # type: ignore
+                    songs_counts_for_stratified_genres.append(len(genre_to_lightweight_track_data_map[genre]))
             calculated_target_based_on_percentile = 0
             if songs_counts_for_stratified_genres:
-                percentile_to_use = np.clip(stratified_sampling_target_percentile_param, 0, 100) # Use passed param
-                calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use) 
+                percentile_to_use = np.clip(stratified_sampling_target_percentile_param, 0, 100)
+                calculated_target_based_on_percentile = np.percentile(songs_counts_for_stratified_genres, percentile_to_use)
                 log_and_update_main_clustering(
                     f"{percentile_to_use}th percentile of songs per stratified genre: {calculated_target_based_on_percentile:.2f}",
                     current_progress, print_console=False
                 )
             else:
                 log_and_update_main_clustering("No songs found for any stratified genres. Defaulting target.", current_progress, print_console=False)
-            target_songs_per_genre = max(min_songs_per_genre_for_stratification_param, int(np.floor(calculated_target_based_on_percentile))) # Use passed param
+            target_songs_per_genre = max(min_songs_per_genre_for_stratification_param, int(np.floor(calculated_target_based_on_percentile)))
             if target_songs_per_genre == 0 and len(lightweight_rows) > 0: target_songs_per_genre = 1
             log_and_update_main_clustering(f"Determined target songs per genre for stratification: {target_songs_per_genre}", 7)
-            genre_to_lightweight_track_data_map_json = json.dumps(genre_to_lightweight_track_data_map) # Already dicts
+            genre_to_lightweight_track_data_map_json = json.dumps(genre_to_lightweight_track_data_map)
             log_and_update_main_clustering("Stratified sampling preparation complete.", 6, print_console=False)
-            
+
             # If we are not recovering state, set the initial subset. Otherwise, recovery has already set it.
             if not last_subset_track_ids_for_batch_chaining:
                 initial_subset_lightweight = _get_stratified_song_subset(
@@ -511,7 +568,7 @@ def run_clustering_task(
             all_launched_child_jobs_instances = []
             from app import rq_queue_default
             num_total_batch_jobs = (num_clustering_runs + ITERATIONS_PER_BATCH_JOB - 1) // ITERATIONS_PER_BATCH_JOB
-            _main_task_accumulated_details["total_batch_jobs"] = num_total_batch_jobs 
+            _main_task_accumulated_details["total_batch_jobs"] = num_total_batch_jobs
             data_source_for_clustering_log = "embeddings" if enable_clustering_embeddings_param else "score vectors"
             log_and_update_main_clustering(f"Processing {len(lightweight_rows)} tracks using {data_source_for_clustering_log}. Preparing {num_clustering_runs} runs in {num_total_batch_jobs} batches.", 8)
 
@@ -545,7 +602,7 @@ def run_clustering_task(
                         else:
                             db_status_for_log = db_task_info_child.get('status') if db_task_info_child else "UNKNOWN (not in DB)"
                             logger.warning("[MainClusteringTask-%s] Warning: Active batch job %s missing from RQ, DB status '%s' is not terminal. Treating as completed (abnormally) to prevent stall.", current_task_id, job_id, db_status_for_log)
-                            is_child_truly_completed_this_cycle = True 
+                            is_child_truly_completed_this_cycle = True
                     except Exception as e_monitor_child_active:
                         logger.error("[MainClusteringTask-%s] ERROR monitoring active batch job %s: %s. Treating as completed.", current_task_id, job_id, e_monitor_child_active, exc_info=True)
                         is_child_truly_completed_this_cycle = True
@@ -570,11 +627,11 @@ def run_clustering_task(
                                 batch_best_score = best_from_batch.get("diversity_score", -1.0)
                                 batch_best_params = best_from_batch.get("parameters")
                                 if batch_best_score > -1.0 and batch_best_params:
-                                    newly_completed_elite_candidates.append({"score": batch_best_score, "params": batch_best_params})
+                                    elite_solutions_list.append({"score": batch_best_score, "params": batch_best_params})
                                 if batch_best_score > best_diversity_score:
                                     best_diversity_score = batch_best_score
                                     _main_task_accumulated_details["best_score"] = best_diversity_score
-                                    best_clustering_results = best_from_batch 
+                                    best_clustering_results = best_from_batch
                                     logger.info("[MainClusteringTask-%s] Intermediate new best score: %.2f from batch job %s", current_task_id, best_diversity_score, job_id_just_completed)
                         else:
                             logger.warning("[MainClusteringTask-%s] Warning: Batch job %s completed but no result.", current_task_id, job_id_just_completed)
@@ -587,7 +644,7 @@ def run_clustering_task(
                     num_slots_to_fill = MAX_CONCURRENT_BATCH_JOBS - len(active_jobs_map)
                     for _ in range(num_slots_to_fill):
                         if next_batch_job_idx_to_launch >= num_total_batch_jobs: break
-                        
+
                         # IDEMPOTENCY: Use a deterministic job ID for batch tasks
                         batch_job_task_id = f"{current_task_id}_batch_{next_batch_job_idx_to_launch}"
 
@@ -595,7 +652,7 @@ def run_clustering_task(
                         num_iterations_for_this_batch = min(ITERATIONS_PER_BATCH_JOB, num_clustering_runs - current_batch_start_run_idx)
                         if num_iterations_for_this_batch <= 0:
                             logger.warning("[MainClusteringTask-%s] Warning: Calculated 0 iterations for batch %s. Skipping.", current_task_id, next_batch_job_idx_to_launch)
-                            next_batch_job_idx_to_launch +=1 
+                            next_batch_job_idx_to_launch +=1
                             continue
                         batch_id_for_logging = f"Batch_{next_batch_job_idx_to_launch}"
                         save_task_status(batch_job_task_id, "clustering_batch", "PENDING", parent_task_id=current_task_id, sub_type_identifier=batch_id_for_logging,
@@ -610,20 +667,20 @@ def run_clustering_task(
                         log_and_update_main_clustering(f"Preparing to enqueue batch job {batch_id_for_logging} (runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1}). Initial subset IDs for this batch: {'Provided' if last_subset_track_ids_for_batch_chaining else 'None'}", current_progress, print_console=False)
                         initial_subset_for_this_batch_json = json.dumps(last_subset_track_ids_for_batch_chaining) if last_subset_track_ids_for_batch_chaining else "[]"
 
-                        new_job = rq_queue_default.enqueue( # Enqueue sub-task on the DEFAULT priority queue
+                        new_job = rq_queue_default.enqueue(
                             run_clustering_batch_task,
                             args=(
                                 batch_id_for_logging, current_batch_start_run_idx, num_iterations_for_this_batch,
-                                genre_to_lightweight_track_data_map_json, 
+                                genre_to_lightweight_track_data_map_json,
                                 target_songs_per_genre,
                                 SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
                                 clustering_method, active_mood_labels,
                                 num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
                                 gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
-                                max_songs_per_cluster, current_task_id,
-                                score_weight_diversity_param, score_weight_silhouette_param, 
-                                score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param, 
-                                score_weight_purity_param, 
+                                max_songs_per_cluster_val, current_task_id,
+                                score_weight_diversity_param, score_weight_silhouette_param,
+                                score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param,
+                                score_weight_purity_param,
                                 score_weight_other_feature_diversity_param, score_weight_other_feature_purity_param,
                                 current_elite_params_for_batch_json,
                                 exploitation_prob_for_this_batch,
@@ -633,9 +690,9 @@ def run_clustering_task(
                             ),
                             job_id=batch_job_task_id,
                             description=f"Clustering Batch {next_batch_job_idx_to_launch} (Runs {current_batch_start_run_idx}-{current_batch_start_run_idx + num_iterations_for_this_batch -1})",
-                            job_timeout=3600 * (ITERATIONS_PER_BATCH_JOB / 2), # Updated to reflect longer iters per batch
+                            job_timeout=3600 * (ITERATIONS_PER_BATCH_JOB / 2),
                             meta={'parent_task_id': current_task_id},
-                            retry=Retry(max=3) # RETRY: Add retry mechanism for batch tasks
+                            retry=Retry(max=3)
                         )
                         active_jobs_map[new_job.id] = new_job
                         all_launched_child_jobs_instances.append(new_job)
@@ -665,22 +722,82 @@ def run_clustering_task(
                 if batches_completed_count >= num_total_batch_jobs and not active_jobs_map:
                     log_and_update_main_clustering(f"All {num_total_batch_jobs} batches completed and no active jobs. Exiting main loop.", current_progress, print_console=False)
                     break
-                log_and_update_main_clustering(f"Waiting for 3 seconds before next cycle. Active jobs: {len(active_jobs_map)}", current_progress, print_console=False) 
                 time.sleep(3)
 
             log_and_update_main_clustering("All clustering batch jobs completed. Finalizing best result...", 90,
                                            details_to_add_or_update={"best_score": best_diversity_score})
             if not best_clustering_results or best_diversity_score < 0:
-                log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE) # type: ignore
+                log_and_update_main_clustering("No valid clustering solution found after all runs.", 100, details_to_add_or_update={"error": "No suitable clustering found", "best_score": best_diversity_score}, task_state=TASK_STATUS_FAILURE)
                 logger.error("No valid clustering solution found. Best score: %s", best_diversity_score)
                 return {"status": "FAILURE", "message": "No valid clusters found after multiple runs."}
             current_progress = 92
+
+            # Log final best parameters right before playlist creation
+            best_params_log_string = (
+                f"Final Best Parameters: "
+                f"Method={best_clustering_results['parameters']['clustering_method_config']['method']}, "
+                f"Runs={num_clustering_runs}, "
+                f"MaxPerCluster={final_max_songs_per_cluster}, "
+            )
+
+            clustering_method_conf = best_clustering_results['parameters']['clustering_method_config']
+
+            if clustering_method_conf['method'] == 'kmeans':
+                best_params_log_string += f"K={clustering_method_conf['params']['n_clusters']}, "
+            elif clustering_method_conf['method'] == 'dbscan':
+                dbscan_params = clustering_method_conf['params']
+                best_params_log_string += f"Eps={dbscan_params['eps']}, MinSamples={dbscan_params['min_samples']}, "
+            elif clustering_method_conf['method'] == 'gmm':
+                best_params_log_string += f"Components={clustering_method_conf['params']['n_components']}, "
+
+            pca_conf = best_clustering_results['parameters']['pca_config']
+            best_params_log_string += f"PCA={pca_conf['enabled']}"
+            if pca_conf['enabled']:
+                best_params_log_string += f"({pca_conf['components']})"
+
+            enable_embeddings_log_val = enable_clustering_embeddings_param if enable_clustering_embeddings_param is not None else False
+
+            log_and_update_main_clustering(
+                f"Best clustering parameters: {best_params_log_string}. Diversity score: {best_diversity_score:.2f}. Using Embeddings: {enable_embeddings_log_val}",
+                91,  # Slightly before playlist creation
+                details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")},
+                print_console=True
+            )
+
+            log_and_update_main_clustering(
+            f"Score Weights: Diversity={score_weight_diversity_param:.2f}, Silhouette={score_weight_silhouette_param:.2f}, "
+            f"DaviesBouldin={score_weight_davies_bouldin_param:.2f}, CalinskiHarabasz={score_weight_calinski_harabasz_param:.2f}, "
+            f"Purity={score_weight_purity_param:.2f}, OtherDiv={score_weight_other_feature_diversity_param:.2f}, "
+            f"OtherPur={score_weight_other_feature_purity_param:.2f}",
+            91,
+            details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")},
+            print_console=True
+        )
+
+            log_and_update_main_clustering(
+                f"Configuration Parameters - Stratification: MinSongsPerGenre={min_songs_per_genre_for_stratification_param}, "
+                f"TargetPercentile={stratified_sampling_target_percentile_param}, "
+                f"AI Naming: Provider={ai_model_provider_param}, TopMoods={top_n_moods_for_clustering_param}, "
+                f"MaxSongsPerPlaylist={max_songs_per_cluster_val}",
+                91,  # Just before playlist creation
+                details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")},
+                print_console=True
+            )
+
+            log_and_update_main_clustering(
+            f"Ollama Settings: Server={ollama_server_url_param}, Model={ollama_model_name_param}. "
+            f"Gemini Settings: Model={gemini_model_name_param}", # API Key not shown for security
+            91,  # Just before playlist creation
+            details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")},
+            print_console=True
+        )
+
             log_and_update_main_clustering(f"Best clustering found with diversity score: {best_diversity_score:.2f}. Preparing to create playlists.", current_progress, details_to_add_or_update={"best_score": best_diversity_score, "best_params": best_clustering_results.get("parameters")})
             final_named_playlists = best_clustering_results["named_playlists"]
             final_playlist_centroids = best_clustering_results["playlist_centroids"]
             final_max_songs_per_cluster = best_clustering_results["parameters"]["max_songs_per_cluster"]
-            final_pca_model_details = best_clustering_results["pca_model_details"] 
-            final_scaler_details = best_clustering_results["scaler_details"]     
+            final_pca_model_details = best_clustering_results["pca_model_details"]
+            final_scaler_details = best_clustering_results["scaler_details"]
             log_prefix_main_task_ai = f"[MainClusteringTask-{current_task_id} AI Naming]"
             if ai_model_provider_for_run in ["OLLAMA", "GEMINI"]:
                 logger.info("%s AI Naming block entered. Attempting to import 'ai' module.", log_prefix_main_task_ai)
@@ -690,9 +807,9 @@ def run_clustering_task(
                 current_progress = ai_naming_start_progress
                 log_and_update_main_clustering(f"Preparing for AI Naming...", current_progress, print_console=True)
                 try:
-                    ai_renamed_playlists_final = {} # Changed from defaultdict(list)
-                    ai_renamed_centroids_final = {} # Changed from regular dict
-                    ai_base_name_generation_count = defaultdict(int) # To track AI base name collisions
+                    ai_renamed_playlists_final = {}
+                    ai_renamed_centroids_final = {}
+                    ai_base_name_generation_count = defaultdict(int)
                     total_playlists_to_name = len(final_named_playlists)
                     playlists_named_count = 0
                     for original_name, songs_in_playlist in final_named_playlists.items():
@@ -702,9 +819,9 @@ def run_clustering_task(
                                 ai_renamed_centroids_final[original_name] = final_playlist_centroids[original_name]
                             continue
                         song_list_for_ai = [{'title': s_title, 'author': s_author} for _, s_title, s_author in songs_in_playlist]
-                        
+
                         feature1_for_ai, feature2_for_ai, feature3_for_ai = "Unknown", "General", "Music"
-                        
+
                         if enable_clustering_embeddings_param:
                             # If embeddings were used for clustering, use generic tags for the AI prompt
                             feature1_for_ai = "Vibe"
@@ -718,41 +835,41 @@ def run_clustering_task(
                             if len(name_parts) >= 2: feature2_for_ai = name_parts[1]
                             if len(name_parts) >= 3 and name_parts[2].lower() not in ["slow", "medium", "fast"]:
                                 feature3_for_ai = name_parts[2]
-                            elif len(name_parts) >= 2 and name_parts[1].lower() not in ["slow", "medium", "fast"]: # Check second part if third is tempo
+                            elif len(name_parts) >= 2 and name_parts[1].lower() not in ["slow", "medium", "fast"]:
                                 feature3_for_ai = name_parts[1]
                         logger.info("%s Generating AI name for '%s' (%s songs) using provider '%s'. Tags for AI: F1: '%s', F2: '%s', F3: '%s'.", log_prefix_main_task_ai, original_name, len(song_list_for_ai), ai_model_provider_for_run, feature1_for_ai, feature2_for_ai, feature3_for_ai)
                         centroid_features_for_ai = final_playlist_centroids.get(original_name, {})
                         ai_generated_name_str = get_ai_playlist_name(
                             ai_model_provider_for_run,
                             ollama_server_url_for_run, ollama_model_name_for_run,
-                            gemini_api_key_for_run, gemini_model_name_for_run, 
+                            gemini_api_key_for_run, gemini_model_name_for_run,
                             creative_prompt_template,
-                            feature1_for_ai, feature2_for_ai, feature3_for_ai, # Pass the potentially generic tags
+                            feature1_for_ai, feature2_for_ai, feature3_for_ai,
                             song_list_for_ai,
                             centroid_features_for_ai)
                         logger.info("%s Raw AI output for '%s': '%s'", log_prefix_main_task_ai, original_name, ai_generated_name_str)
                         current_playlist_final_name = original_name
-                        ai_generated_base_name = original_name # This will be the name before disambiguation
+                        ai_generated_base_name = original_name
 
                         if ai_generated_name_str and not ai_generated_name_str.startswith("Error") and not ai_generated_name_str.startswith("AI Naming Skipped"):
                              clean_ai_name = ai_generated_name_str.strip().replace("\n", " ")
                              if clean_ai_name:
                                  if clean_ai_name.lower() != original_name.lower().strip().replace("_", " "):
                                       logger.info("%s AI: '%s' -> '%s'", log_prefix_main_task_ai, original_name, clean_ai_name)
-                                      ai_generated_base_name = clean_ai_name # This is the name AI produced
+                                      ai_generated_base_name = clean_ai_name
                                  else:
-                                      ai_generated_base_name = original_name # No change, effectively
+                                      ai_generated_base_name = original_name
                              else:
                                  logger.warning("%s AI for '%s' returned empty after cleaning. Raw: '%s'. Using original.", log_prefix_main_task_ai, original_name, ai_generated_name_str)
                                  ai_generated_base_name = original_name
                         else:
                             logger.warning("%s AI naming for '%s' failed or returned error/skip message: '%s'. Using original.", log_prefix_main_task_ai, original_name, ai_generated_name_str)
                             ai_generated_base_name = original_name
-                        
+
                         # Disambiguate playlist names if the AI generates the same name for different clusters.
                         ai_base_name_generation_count[ai_generated_base_name] += 1
                         current_playlist_final_name = ai_generated_base_name
-                        
+
                         # If this is not the first time we've seen this base name, it's a collision.
                         if ai_base_name_generation_count[ai_generated_base_name] > 1:
                             # Append a number, e.g., "Chill Vibes (2)"
@@ -765,8 +882,8 @@ def run_clustering_task(
                             ai_base_name_generation_count[ai_generated_base_name] += 1
                             suffix = ai_base_name_generation_count[ai_generated_base_name]
                             current_playlist_final_name = f"{ai_generated_base_name} ({suffix})"
-                        
-                        ai_renamed_playlists_final[current_playlist_final_name] = songs_in_playlist # Assign directly
+
+                        ai_renamed_playlists_final[current_playlist_final_name] = songs_in_playlist
                         if original_name in final_playlist_centroids:
                             ai_renamed_centroids_final[current_playlist_final_name] = final_playlist_centroids[original_name]
                         playlists_named_count += 1
@@ -812,7 +929,7 @@ def run_clustering_task(
                                                     active_mood_labels, final_max_songs_per_cluster)
             final_db_summary = {
                 "best_score": best_diversity_score,
-                "best_params": best_clustering_results.get("parameters"),
+                # "best_params": best_clustering_results.get("parameters"), # Removed
                 "num_playlists_created": len(playlists_to_create_on_jellyfin)
             }
             current_progress = 100
@@ -831,5 +948,5 @@ def run_clustering_task(
                     current_progress,
                     details_to_add_or_update={"error_message": "An unexpected error occurred. Check server logs for details."},
                     task_state=TASK_STATUS_FAILURE,
-                    print_console=False # The detailed error is already printed above
+                    print_console=False
                 )
