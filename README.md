@@ -29,7 +29,7 @@ Addional important information on this project can also be found here:
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Instant Chat Deep Dive](#instant-chat-deep-dive)
-- [Playlist from Similar song - Deep dive](#playlist-from-similar-song-deep-dive)
+- [Playlist from Similar song - Deep dive](#playlist-from-similar-song---deep-dive)
 - [Screenshots](#screenshots)
 - [Key Technologies](#key-technologies)
 - [Additional Documentation](#additional-documentation)
