@@ -37,7 +37,7 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, # type: ignore
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, REBUILD_INDEX_BATCH_SIZE, # type: ignore
     MAX_QUEUED_ANALYSIS_JOBS, # New config for limiting queued analysis jobs
     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
     LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
@@ -577,6 +577,10 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             albums_skipped_count = 0
             albums_launched_count = 0
             albums_completed_count = 0
+            
+            # --- Incremental Index Rebuild Configuration ---
+            last_rebuild_at_album_count = 0
+
 
             def get_existing_track_ids(track_ids):
                 if not track_ids: return set()
@@ -596,6 +600,8 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
 
             def monitor_and_clear_jobs():
                 nonlocal albums_completed_count
+                nonlocal last_rebuild_at_album_count
+
                 completed_in_cycle = []
                 # Iterate over a copy of the keys to allow modification during the loop
                 for job_id in list(active_jobs_map.keys()):
@@ -625,6 +631,27 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     if job_id in active_jobs_map:
                         del active_jobs_map[job_id]
                         albums_completed_count += 1
+                
+                # --- Incremental Index Rebuild Logic ---
+                if albums_completed_count > last_rebuild_at_album_count and \
+                   (albums_completed_count - last_rebuild_at_album_count) >= REBUILD_INDEX_BATCH_SIZE:
+                    
+                    progress_for_rebuild = 5 + int(85 * ((albums_skipped_count + albums_completed_count) / float(total_albums_to_check)))
+                    log_and_update_main_analysis(
+                        f"Batch of {albums_completed_count - last_rebuild_at_album_count} albums complete. Rebuilding index...",
+                        progress_for_rebuild
+                    )
+                    
+                    try:
+                        db_conn_rebuild = get_db()
+                        build_and_store_annoy_index(db_conn_rebuild)
+                        redis_conn.publish('index-updates', 'reload')
+                        logger.info(f"Incremental index rebuild complete after {albums_completed_count} albums.")
+                        # IMPORTANT: Update the counter to prevent immediate re-rebuilds
+                        last_rebuild_at_album_count = albums_completed_count
+                    except Exception as e_rebuild:
+                        logger.error(f"Failed to perform incremental index rebuild: {e_rebuild}", exc_info=True)
+                        # We don't stop the main task, just log the error and continue.
 
             # Main Dispatch and Monitoring Loop
             for idx, album in enumerate(all_albums):
@@ -708,8 +735,8 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     failed_albums += 1
             
             # --- Annoy Index Creation ---
-            # This now runs every time the analysis task completes, ensuring the index is always rebuilt.
-            log_and_update_main_analysis("Rebuilding nearest neighbor index...", 95)
+            # Perform a final rebuild to include any remaining albums that didn't form a full batch.
+            log_and_update_main_analysis("Performing final index rebuild to include all tracks...", 95)
             db_conn = get_db()
             build_and_store_annoy_index(db_conn)
             
