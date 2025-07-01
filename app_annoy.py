@@ -72,7 +72,7 @@ def get_similar_tracks_endpoint(item_id):
         # This function now returns a list of dicts with {'item_id': id, 'distance': dist}
         neighbor_results = find_nearest_neighbors_by_id(item_id, n=num_neighbors)
         if not neighbor_results:
-            return jsonify({"error": "Target track not found in index or no neighbors found."}), 404
+            return jsonify({"error": "Target track not found in index or no similar tracks found."}), 404
 
         # Import the DB utility function locally to avoid circular import with app.py
         from app import get_score_data_by_ids
@@ -126,10 +126,7 @@ def create_jellyfin_playlist():
                 type: array
                 items:
                   type: string
-                description: A list of Jellyfin Item IDs to add to the playlist.
-              seed_track_id:
-                type: string
-                description: The original track ID used for the similarity search, to be added as the first track.
+                description: A list of Jellyfin Item IDs to add to the playlist, including the original and similar tracks.
     responses:
       201:
         description: Playlist created successfully.
@@ -143,22 +140,28 @@ def create_jellyfin_playlist():
         return jsonify({"error": "Invalid JSON payload"}), 400
 
     playlist_name = data.get('playlist_name')
-    track_ids = data.get('track_ids')
-    seed_track_id = data.get('seed_track_id') # Get the seed track ID
+    # The incoming track_ids list is the source of truth, containing the seed and similar tracks.
+    track_ids_raw = data.get('track_ids', []) 
 
-    if not playlist_name or not track_ids:
-        return jsonify({"error": "Missing 'playlist_name' or 'track_ids'"}), 400
+    if not playlist_name:
+        return jsonify({"error": "Missing 'playlist_name'"}), 400
 
-    # Make a mutable copy of the track IDs
-    final_track_ids = list(track_ids)
+    # Process the incoming list to handle different formats and remove duplicates.
+    final_track_ids = []
+    if isinstance(track_ids_raw, list):
+        for item in track_ids_raw:
+            item_id = None
+            if isinstance(item, str):
+                item_id = item
+            elif isinstance(item, dict) and 'item_id' in item:
+                item_id = item['item_id']
+            
+            # Add the track ID if it's valid and not already in the list
+            if item_id and item_id not in final_track_ids:
+                final_track_ids.append(item_id)
 
-    # If a seed track ID is provided, ensure it's the first item in the list
-    if seed_track_id:
-        # Remove it from the list if it exists, to avoid duplicates
-        if seed_track_id in final_track_ids:
-            final_track_ids.remove(seed_track_id)
-        # Add the seed track to the beginning of the list
-        final_track_ids.insert(0, seed_track_id)
+    if not final_track_ids:
+        return jsonify({"error": "No valid track IDs were provided to create the playlist"}), 400
 
     try:
         # === REAL JELLYFIN CLIENT LOGIC ===

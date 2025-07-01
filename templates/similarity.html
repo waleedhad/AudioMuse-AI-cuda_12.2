@@ -3,143 +3,295 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Find Similar Tracks</title>
+    <title>AudioMuse-AI - Playlist from Similar Song</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 2em; background-color: #f4f4f9; color: #333; }
-        h1 { color: #444; }
-        form { background: #fff; padding: 2em; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        label { font-weight: bold; display: block; margin-bottom: 0.5em; }
-        input[type="text"], input[type="number"] { width: calc(100% - 22px); padding: 10px; margin-bottom: 1em; border: 1px solid #ccc; border-radius: 4px; }
-        button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; }
-        button:hover { background-color: #0056b3; }
-        #results-container { margin-top: 2em; background: #fff; padding: 2em; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { border-bottom: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f8f8f8; }
-        tr:nth-child(even) { background-color: #f2f2f2; }
-        .success { color: #28a745; font-weight: bold; }
-        .error { color: #d9534f; font-weight: bold; }
-        #status { margin-bottom: 1em; }
+        /* --- Base & Typography (Light Mode) --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            margin: 0;
+            background-color: #F9FAFB; /* Light mode background */
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* --- Minimal Tailwind CSS Utilities (Replaces CDN) - Light Mode Colors Applied --- */
+        /* Layout & Box Model */
+        .w-full { width: 100%; }
+        .max-w-2xl { max-width: 42rem; }
+        .mx-auto { margin-left: auto; margin-right: auto; }
+        .p-4 { padding: 1rem; }
+        .p-6 { padding: 1.5rem; }
+        .p-8 { padding: 2rem; }
+        .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .pb-6 { padding-bottom: 1.5rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mb-6 { margin-bottom: 1.5rem; }
+        .mt-2 { margin-top: 0.5rem; }
+        .mt-6 { margin-top: 1.5rem; }
+        .mt-8 { margin-top: 2rem; }
+        .min-h-screen { min-height: 100vh; }
+
+        /* Flexbox */
+        .flex { display: flex; }
+        .items-start { align-items: flex-start; }
+        .justify-center { justify-content: center; }
+        
+        /* Typography */
+        .text-sm { font-size: 0.875rem; }
+        .text-lg { font-size: 1.125rem; }
+        .text-xl { font-size: 1.25rem; }
+        .text-2xl { font-size: 1.5rem; }
+        .text-3xl { font-size: 1.875rem; }
+        .font-bold { font-weight: 700; }
+        .font-medium { font-weight: 500; }
+        .font-semibold { font-weight: 600; }
+        .text-center { text-align: center; }
+        .italic { font-style: italic; }
+        
+        /* Colors (Light Mode Palette) */
+        .bg-gray-50 { background-color: #F9FAFB; }
+        .bg-white { background-color: #FFFFFF; }
+        .bg-gray-100 { background-color: #F3F4F6; }
+        .text-gray-800 { color: #1F2937; }
+        .text-gray-900 { color: #111827; }
+        .text-gray-700 { color: #374151; }
+        .text-gray-600 { color: #4B5563; }
+        .text-gray-500 { color: #6B7280; }
+        .text-red-600 { color: #DC2626; }
+        .text-green-600 { color: #16A34A; }
+        .bg-blue-600 { background-color: #2563EB; }
+        .hover\:bg-blue-700:hover { background-color: #1D4ED8; }
+        .bg-green-600 { background-color: #16A34A; }
+        .hover\:bg-green-700:hover { background-color: #15803D; }
+        .text-white { color: #FFFFFF; }
+
+        /* Borders (Light Mode Palette) */
+        .border-b { border-bottom-width: 1px; }
+        .border-gray-200 { border-color: #E5E7EB; }
+        .border-gray-300 { border-color: #D1D5DB; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .rounded-2xl { border-radius: 1rem; }
+        .rounded-md { border-radius: 0.375rem; }
+        .border { border-width: 1px; }
+
+        /* Effects & Transitions */
+        .shadow-sm { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
+        .shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        .transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+        
+        /* Form & Interaction (Light Mode) */
+        .form-input {
+            background-color: #fff;
+            border: 1px solid #D1D5DB;
+            color: #111827;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            box-sizing: border-box; /* Ensures padding doesn't add to width */
+        }
+        .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
+        .focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+        .focus\:ring-2:focus { --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color); --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000); }
+        .focus\:ring-offset-2:focus { --tw-ring-offset-width: 2px; }
+        .focus\:ring-blue-500:focus { --tw-ring-color: #3B82F6; }
+        
+        /* Custom Styles */
+        .hidden { display: none; }
+        
+        /* Table Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        th {
+            background-color: #F9FAFB;
+            font-weight: 600;
+            color: #374151;
+        }
+        tbody tr:last-child td {
+            border-bottom: 0;
+        }
     </style>
 </head>
-<body>
-    <h1>Find Similar Tracks</h1>
-    <form id="similarity-form">
-        <label for="item_id">Track Item ID:</label>
-        <input type="text" id="item_id" name="item_id" placeholder="e.g., 3a6d..." required>
-        
-        <label for="n">Number of results:</label>
-        <input type="number" id="n" name="n" value="10" min="1" max="100">
-        <br><br>
-        <button type="submit">Find Similar Tracks</button>
-    </form>
+<body class="bg-gray-50 text-gray-800 flex items-start justify-center min-h-screen p-4 sm:p-6">
 
-    <div id="results-container">
-        <h2>Results</h2>
-        <div id="status"></div>
-        <div id="results-table"></div>
-    </div>
+    <main class="bg-white w-full max-w-2xl mx-auto p-6 sm:p-8 rounded-2xl shadow-lg">
+        <!-- Header Section -->
+        <header class="text-center border-b border-gray-200 pb-6 mb-6">
+            <h1 class="text-3xl font-bold text-gray-900">AudioMuse-AI - Playlist from Similar Song</h1>
+            <p class="mt-2 text-gray-600">Find tracks similar to a given song and create a playlist.</p>
+        </header>
 
-    <div id="playlist-creator" style="display: none; margin-top: 2em; background: #fff; padding: 2em; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        <h2>Create a Playlist from Results</h2>
-        <form id="playlist-form">
-            <label for="playlist_name">Playlist Name:</label>
-            <input type="text" id="playlist_name" name="playlist_name" required placeholder="e.g., My Awesome Mix">
-            <br><br>
-            <button type="submit">Create Playlist in Jellyfin</button>
+        <!-- Main Form -->
+        <form id="similarity-form">
+            <div class="mb-4">
+                <label for="item_id" class="block text-sm font-medium text-gray-700 mb-2">Track Item ID:</label>
+                <input type="text" id="item_id" name="item_id" class="form-input" placeholder="e.g., 3a6d..." required>
+            </div>
+            <div class="mb-6">
+                <label for="n" class="block text-sm font-medium text-gray-700 mb-2">Number of results:</label>
+                <input type="number" id="n" name="n" value="10" min="1" max="100" class="form-input">
+            </div>
+            <button type="submit" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+                Find Similar Tracks
+            </button>
         </form>
-        <div id="playlist-status" style="margin-top: 1em;"></div>
-    </div>
+
+        <!-- Results Section -->
+        <section id="results-container" class="mt-8 hidden">
+            <h2 class="text-2xl font-bold text-gray-900 border-b border-gray-200 pb-3 mb-4">Results</h2>
+            <div id="status" class="mb-4 text-gray-600 italic"></div>
+            <div id="results-table-wrapper" class="bg-gray-100 p-4 rounded-lg">
+                <!-- Table will be inserted here -->
+            </div>
+        </section>
+
+        <!-- Playlist Creation Section -->
+        <section id="playlist-creator" class="mt-6 hidden">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">Create a Playlist from Results</h3>
+            <form id="playlist-form">
+                <div class="mb-4">
+                    <label for="playlist_name" class="block text-sm font-medium text-gray-700 mb-2">Playlist Name:</label>
+                    <input type="text" id="playlist_name" name="playlist_name" class="form-input" required placeholder="e.g., My Awesome Mix">
+                </div>
+                <button type="submit" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors">
+                    Create Playlist in Jellyfin
+                </button>
+            </form>
+            <div id="playlist-status" class="mt-3 text-sm"></div>
+        </section>
+
+    </main>
 
     <script>
-        let currentTrackIds = []; // To store the IDs from the latest search
+        (() => {
+            let currentTrackIds = []; // To store the IDs from the latest search
 
-        document.getElementById('similarity-form').addEventListener('submit', async function (event) {
-            event.preventDefault();
-
-            const itemId = document.getElementById('item_id').value;
-            const n = document.getElementById('n').value;
-            const statusDiv = document.getElementById('status');
-            const resultsTableDiv = document.getElementById('results-table');
+            const similarityForm = document.getElementById('similarity-form');
+            const playlistForm = document.getElementById('playlist-form');
             const resultsContainer = document.getElementById('results-container');
             const playlistCreator = document.getElementById('playlist-creator');
+            const statusDiv = document.getElementById('status');
+            const resultsTableWrapper = document.getElementById('results-table-wrapper');
+            const playlistStatusDiv = document.getElementById('playlist-status');
 
-            resultsContainer.style.display = 'block';
-            statusDiv.textContent = 'Searching...';
-            statusDiv.className = '';
-            resultsTableDiv.innerHTML = '';
+            similarityForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
 
-            try {
-                const response = await fetch(`/api/similar_tracks/${itemId}?n=${n}`);
-                const data = await response.json();
+                const itemId = document.getElementById('item_id').value;
+                const n = document.getElementById('n').value;
 
-                if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
-                if (data.length === 0) {
-                    playlistCreator.style.display = 'none';
-                    statusDiv.textContent = 'No similar tracks found.';
+                resultsContainer.classList.remove('hidden');
+                playlistCreator.classList.add('hidden');
+                statusDiv.textContent = 'Searching...';
+                statusDiv.className = 'mb-4 text-gray-600 italic';
+                resultsTableWrapper.innerHTML = '';
+
+                try {
+                    // NOTE: The API endpoint is assumed to be `/api/similar_tracks/`.
+                    // You might need to adjust this based on your actual backend routing.
+                    const response = await fetch(`/api/similar_tracks/${itemId}?n=${n}`);
+                    const data = await response.json();
+
+                    if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                    
+                    if (data.length === 0) {
+                        statusDiv.textContent = 'No similar tracks found.';
+                        return;
+                    }
+
+                    // Store track IDs for playlist creation, adding the original track at the beginning
+                    currentTrackIds = [itemId, ...data.map(track => track.item_id)];
+
+                    statusDiv.textContent = `Found ${data.length} similar tracks.`;
+                    const tableHTML = `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Artist</th>
+                                    <th>Distance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.map(track => `
+                                    <tr>
+                                        <td>${track.title || 'N/A'}</td>
+                                        <td>${track.author || 'N/A'}</td>
+                                        <td>${track.distance.toFixed(4)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>`;
+                    resultsTableWrapper.innerHTML = tableHTML;
+                    playlistCreator.classList.remove('hidden');
+                    playlistStatusDiv.textContent = '';
+                    document.getElementById('playlist_name').value = `Similar to ${data[0].title}`;
+
+
+                } catch (error) {
+                    statusDiv.textContent = `Error: ${error.message}`;
+                    statusDiv.className = 'mb-4 text-red-600 font-semibold';
+                    console.error('Fetch error:', error);
+                }
+            });
+
+            playlistForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+
+                const playlistName = document.getElementById('playlist_name').value;
+
+                if (!playlistName) {
+                    playlistStatusDiv.textContent = 'Please enter a playlist name.';
+                    playlistStatusDiv.className = 'mt-3 text-sm text-red-600';
                     return;
                 }
 
-                // Store track IDs for playlist creation
-                currentTrackIds = data.map(track => track.item_id);
+                if (currentTrackIds.length === 0) {
+                    playlistStatusDiv.textContent = 'No tracks to add. Please perform a search first.';
+                    playlistStatusDiv.className = 'mt-3 text-sm text-red-600';
+                    return;
+                }
 
-                statusDiv.textContent = '';
-                const tableHTML = `<table><thead><tr><th>Title</th><th>Author</th><th>Distance</th><th>Item ID</th></tr></thead><tbody>${data.map(track => `<tr><td>${track.title}</td><td>${track.author}</td><td>${track.distance.toFixed(4)}</td><td>${track.item_id}</td></tr>`).join('')}</tbody></table>`;
-                resultsTableDiv.innerHTML = tableHTML;
-                playlistCreator.style.display = 'block';
-                document.getElementById('playlist-status').textContent = '';
-            } catch (error) {
-                statusDiv.textContent = `Error: ${error.message}`;
-                statusDiv.className = 'error';
-                console.error('Fetch error:', error);
-            }
-        });
+                playlistStatusDiv.textContent = 'Creating playlist...';
+                playlistStatusDiv.className = 'mt-3 text-sm text-gray-600';
 
-        document.getElementById('playlist-form').addEventListener('submit', async function (event) {
-            event.preventDefault();
+                try {
+                    // NOTE: The API endpoint is assumed to be `/api/create_playlist`.
+                    // You might need to adjust this based on your actual backend routing.
+                    const response = await fetch('/api/create_playlist', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            playlist_name: playlistName,
+                            track_ids: currentTrackIds
+                        }),
+                    });
 
-            const playlistName = document.getElementById('playlist_name').value;
-            const playlistStatusDiv = document.getElementById('playlist-status');
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || `HTTP error! status: ${response.status}`);
 
-            if (!playlistName) {
-                playlistStatusDiv.textContent = 'Please enter a playlist name.';
-                playlistStatusDiv.className = 'error';
-                return;
-            }
-
-            if (currentTrackIds.length === 0) {
-                playlistStatusDiv.textContent = 'No tracks to add. Please perform a search first.';
-                playlistStatusDiv.className = 'error';
-                return;
-            }
-
-            playlistStatusDiv.textContent = 'Creating playlist...';
-            playlistStatusDiv.className = '';
-
-            try {
-                const response = await fetch('/api/create_playlist', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        playlist_name: playlistName,
-                        track_ids: currentTrackIds
-                    }),
-                });
-
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.error || `HTTP error! status: ${response.status}`);
-
-                playlistStatusDiv.textContent = result.message;
-                playlistStatusDiv.className = 'success';
-                document.getElementById('playlist-form').reset();
-            } catch (error) {
-                playlistStatusDiv.textContent = `Error: ${error.message}`;
-                playlistStatusDiv.className = 'error';
-                console.error('Playlist creation error:', error);
-            }
-        });
+                    playlistStatusDiv.textContent = result.message;
+                    playlistStatusDiv.className = 'mt-3 text-sm text-green-600';
+                    // Do not reset the form, user might want to create another playlist with a different name
+                    // playlistForm.reset(); 
+                } catch (error) {
+                    playlistStatusDiv.textContent = `Error: ${error.message}`;
+                    playlistStatusDiv.className = 'mt-3 text-sm text-red-600';
+                    console.error('Playlist creation error:', error);
+                }
+            });
+        })();
     </script>
 </body>
 </html>
