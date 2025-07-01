@@ -648,7 +648,7 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ### Similar Song Playlist
 
-![Screenshot of AudioMuse AI's web interface showing the Similarity web interface.](screenshot/simlarity.png "Similarity Playlist interface")
+![Screenshot of AudioMuse AI's web interface showing the Similarity web interface.](screenshot/similarity.png "Similarity Playlist interface")
 
 
 
