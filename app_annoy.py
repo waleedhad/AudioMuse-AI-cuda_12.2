@@ -2,8 +2,13 @@
 from flask import Blueprint, jsonify, request, render_template
 import logging
 
-# Import the new playlist creation function
-from tasks.annoy_manager import find_nearest_neighbors_by_id, create_jellyfin_playlist_from_ids
+# Import the new and existing functions from the manager
+from tasks.annoy_manager import (
+    find_nearest_neighbors_by_id, 
+    create_jellyfin_playlist_from_ids,
+    search_tracks_by_title_and_artist,
+    get_item_id_by_title_and_artist
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +22,80 @@ def similarity_page():
     """
     return render_template('similarity.html')
 
-@annoy_bp.route('/api/similar_tracks/<item_id>', methods=['GET'])
-def get_similar_tracks_endpoint(item_id):
+@annoy_bp.route('/api/search_tracks', methods=['GET'])
+def search_tracks_endpoint():
     """
-    Find similar tracks for a given track ID.
-    This endpoint uses the pre-loaded Annoy index for fast lookups.
+    Provides autocomplete suggestions for tracks based on title and artist.
+    ---
+    tags:
+      - Similarity
+    parameters:
+      - name: title
+        in: query
+        description: Partial or full title of the track.
+        schema:
+          type: string
+      - name: artist
+        in: query
+        description: Partial or full name of the artist.
+        schema:
+          type: string
+    responses:
+      200:
+        description: A list of matching tracks.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  item_id:
+                    type: string
+                  title:
+                    type: string
+                  author:
+                    type: string
+    """
+    title_query = request.args.get('title', '', type=str)
+    artist_query = request.args.get('artist', '', type=str)
+
+    # Require at least one query param and a minimum length to avoid overly broad searches
+    if not title_query and not artist_query:
+        return jsonify([]) # Return empty list if no query
+
+    if len(title_query) < 3 and len(artist_query) < 3:
+        return jsonify([]) # Avoid searching for very short strings
+
+    try:
+        results = search_tracks_by_title_and_artist(title_query, artist_query)
+        return jsonify(results)
+    except Exception as e:
+        logger.error(f"Error during track search: {e}", exc_info=True)
+        return jsonify({"error": "An error occurred during search."}), 500
+
+
+@annoy_bp.route('/api/similar_tracks', methods=['GET'])
+def get_similar_tracks_endpoint():
+    """
+    Find similar tracks for a given track, identified either by item_id or title/artist.
     ---
     tags:
       - Similarity
     parameters:
       - name: item_id
-        in: path
-        required: true
-        description: The Jellyfin Item ID of the track to find neighbors for.
+        in: query
+        description: The Jellyfin Item ID of the track. Use this OR title/artist.
+        schema:
+          type: string
+      - name: title
+        in: query
+        description: The title of the track. Must be used with 'artist'.
+        schema:
+          type: string
+      - name: artist
+        in: query
+        description: The artist of the track. Must be used with 'title'.
         schema:
           type: string
       - name: n
@@ -41,51 +107,44 @@ def get_similar_tracks_endpoint(item_id):
     responses:
       200:
         description: A list of similar tracks with their details.
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                $ref: '#/components/schemas/SimilarTrack'
+      400:
+        description: Bad request, missing required parameters.
       404:
-        description: Target track not found in the index or no similar tracks found.
+        description: Target track not found.
       500:
-        description: Server error, e.g., Annoy index not loaded.
-    components:
-      schemas:
-        SimilarTrack:
-          type: object
-          properties:
-            item_id:
-              type: string
-            title:
-              type: string
-            author:
-              type: string
-            distance:
-              type: number
-              format: float
-              description: The similarity distance (lower is more similar).
+        description: Server error.
     """
+    item_id = request.args.get('item_id')
+    title = request.args.get('title')
+    artist = request.args.get('artist')
     num_neighbors = request.args.get('n', 10, type=int)
+
+    target_item_id = None
+
+    if item_id:
+        target_item_id = item_id
+    elif title and artist:
+        # If no ID is provided, try to find it using title and artist
+        resolved_id = get_item_id_by_title_and_artist(title, artist)
+        if not resolved_id:
+            return jsonify({"error": f"Track '{title}' by '{artist}' not found in the database."}), 404
+        target_item_id = resolved_id
+    else:
+        return jsonify({"error": "Request must include either 'item_id' or both 'title' and 'artist'."}), 400
+
     try:
-        # This function now returns a list of dicts with {'item_id': id, 'distance': dist}
-        neighbor_results = find_nearest_neighbors_by_id(item_id, n=num_neighbors)
+        neighbor_results = find_nearest_neighbors_by_id(target_item_id, n=num_neighbors)
         if not neighbor_results:
             return jsonify({"error": "Target track not found in index or no similar tracks found."}), 404
 
-        # Import the DB utility function locally to avoid circular import with app.py
         from app import get_score_data_by_ids
 
-        # Get the full track details for the neighbors
         neighbor_ids = [n['item_id'] for n in neighbor_results]
         neighbor_details = get_score_data_by_ids(neighbor_ids)
 
-        # Create a map for easy lookup
         details_map = {d['item_id']: d for d in neighbor_details}
         distance_map = {n['item_id']: n['distance'] for n in neighbor_results}
 
-        # Combine details with distance, preserving the order from Annoy
         final_results = []
         for neighbor_id in neighbor_ids:
             if neighbor_id in details_map:
@@ -99,54 +158,27 @@ def get_similar_tracks_endpoint(item_id):
 
         return jsonify(final_results)
     except RuntimeError as e:
-        logger.error(f"Runtime error finding neighbors for {item_id}: {e}")
+        logger.error(f"Runtime error finding neighbors for {target_item_id}: {e}")
         return jsonify({"error": str(e)}), 500
     except Exception as e:
-        logger.error(f"Unexpected error finding neighbors for {item_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error finding neighbors for {target_item_id}: {e}", exc_info=True)
         return jsonify({"error": "An unexpected error occurred."}), 500
 
 @annoy_bp.route('/api/create_playlist', methods=['POST'])
 def create_jellyfin_playlist():
     """
     Creates a new playlist in Jellyfin with the provided tracks.
-    ---
-    tags:
-      - Similarity
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            properties:
-              playlist_name:
-                type: string
-                description: The name for the new playlist.
-              track_ids:
-                type: array
-                items:
-                  type: string
-                description: A list of Jellyfin Item IDs to add to the playlist, including the original and similar tracks.
-    responses:
-      201:
-        description: Playlist created successfully.
-      400:
-        description: Bad request, missing playlist name or track IDs.
-      500:
-        description: Failed to create playlist in Jellyfin.
     """
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid JSON payload"}), 400
 
     playlist_name = data.get('playlist_name')
-    # The incoming track_ids list is the source of truth, containing the seed and similar tracks.
     track_ids_raw = data.get('track_ids', []) 
 
     if not playlist_name:
         return jsonify({"error": "Missing 'playlist_name'"}), 400
 
-    # Process the incoming list to handle different formats and remove duplicates.
     final_track_ids = []
     if isinstance(track_ids_raw, list):
         for item in track_ids_raw:
@@ -156,7 +188,6 @@ def create_jellyfin_playlist():
             elif isinstance(item, dict) and 'item_id' in item:
                 item_id = item['item_id']
             
-            # Add the track ID if it's valid and not already in the list
             if item_id and item_id not in final_track_ids:
                 final_track_ids.append(item_id)
 
@@ -164,8 +195,6 @@ def create_jellyfin_playlist():
         return jsonify({"error": "No valid track IDs were provided to create the playlist"}), 400
 
     try:
-        # === REAL JELLYFIN CLIENT LOGIC ===
-        # Call the helper function from annoy_manager with the final, ordered list of track IDs
         new_playlist_id = create_jellyfin_playlist_from_ids(playlist_name, final_track_ids)
         
         logger.info(f"Successfully created playlist '{playlist_name}' with ID {new_playlist_id}.")

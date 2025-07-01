@@ -9,19 +9,19 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
             margin: 0;
-            background-color: #F9FAFB; /* Light mode background */
+            background-color: #F9FAFB;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
 
-        /* --- Minimal Tailwind CSS Utilities (Replaces CDN) - Light Mode Colors Applied --- */
-        /* Layout & Box Model */
+        /* --- Minimal Tailwind CSS Utilities (Replaces CDN) --- */
         .w-full { width: 100%; }
         .max-w-2xl { max-width: 42rem; }
         .mx-auto { margin-left: auto; margin-right: auto; }
         .p-4 { padding: 1rem; }
         .p-6 { padding: 1.5rem; }
         .p-8 { padding: 2rem; }
+        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
         .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
         .px-4 { padding-left: 1rem; padding-right: 1rem; }
         .pb-6 { padding-bottom: 1.5rem; }
@@ -31,16 +31,11 @@
         .mt-6 { margin-top: 1.5rem; }
         .mt-8 { margin-top: 2rem; }
         .min-h-screen { min-height: 100vh; }
-
-        /* Flexbox */
         .flex { display: flex; }
         .items-start { align-items: flex-start; }
         .justify-center { justify-content: center; }
-        
-        /* Typography */
         .text-sm { font-size: 0.875rem; }
         .text-lg { font-size: 1.125rem; }
-        .text-xl { font-size: 1.25rem; }
         .text-2xl { font-size: 1.5rem; }
         .text-3xl { font-size: 1.875rem; }
         .font-bold { font-weight: 700; }
@@ -48,8 +43,6 @@
         .font-semibold { font-weight: 600; }
         .text-center { text-align: center; }
         .italic { font-style: italic; }
-        
-        /* Colors (Light Mode Palette) */
         .bg-gray-50 { background-color: #F9FAFB; }
         .bg-white { background-color: #FFFFFF; }
         .bg-gray-100 { background-color: #F3F4F6; }
@@ -65,8 +58,6 @@
         .bg-green-600 { background-color: #16A34A; }
         .hover\:bg-green-700:hover { background-color: #15803D; }
         .text-white { color: #FFFFFF; }
-
-        /* Borders (Light Mode Palette) */
         .border-b { border-bottom-width: 1px; }
         .border-gray-200 { border-color: #E5E7EB; }
         .border-gray-300 { border-color: #D1D5DB; }
@@ -74,13 +65,9 @@
         .rounded-2xl { border-radius: 1rem; }
         .rounded-md { border-radius: 0.375rem; }
         .border { border-width: 1px; }
-
-        /* Effects & Transitions */
         .shadow-sm { box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
         .shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
         .transition-colors { transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
-        
-        /* Form & Interaction (Light Mode) */
         .form-input {
             background-color: #fff;
             border: 1px solid #D1D5DB;
@@ -89,53 +76,78 @@
             width: 100%;
             padding: 0.5rem 0.75rem;
             border-radius: 0.375rem;
-            box-sizing: border-box; /* Ensures padding doesn't add to width */
+            box-sizing: border-box;
         }
         .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
         .focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
         .focus\:ring-2:focus { --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color); --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000); }
         .focus\:ring-offset-2:focus { --tw-ring-offset-width: 2px; }
         .focus\:ring-blue-500:focus { --tw-ring-color: #3B82F6; }
-        
-        /* Custom Styles */
         .hidden { display: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #E5E7EB; }
+        th { background-color: #F9FAFB; font-weight: 600; color: #374151; }
+        tbody tr:last-child td { border-bottom: 0; }
         
-        /* Table Styles */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
+        /* --- Autocomplete Styles --- */
+        .autocomplete-container {
+            position: relative;
         }
-        th, td {
-            text-align: left;
+        .autocomplete-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background-color: white;
+            border: 1px solid #D1D5DB;
+            border-top: none;
+            border-radius: 0 0 0.5rem 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 10;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .autocomplete-item {
             padding: 0.75rem 1rem;
-            border-bottom: 1px solid #E5E7EB;
+            cursor: pointer;
         }
-        th {
-            background-color: #F9FAFB;
+        .autocomplete-item:hover, .autocomplete-item.active {
+            background-color: #F3F4F6;
+        }
+        .autocomplete-item .title {
             font-weight: 600;
-            color: #374151;
+            color: #111827;
         }
-        tbody tr:last-child td {
-            border-bottom: 0;
+        .autocomplete-item .artist {
+            font-size: 0.875rem;
+            color: #4B5563;
         }
+
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 flex items-start justify-center min-h-screen p-4 sm:p-6">
 
     <main class="bg-white w-full max-w-2xl mx-auto p-6 sm:p-8 rounded-2xl shadow-lg">
-        <!-- Header Section -->
         <header class="text-center border-b border-gray-200 pb-6 mb-6">
             <h1 class="text-3xl font-bold text-gray-900">AudioMuse-AI - Playlist from Similar Song</h1>
             <p class="mt-2 text-gray-600">Find tracks similar to a given song and create a playlist.</p>
         </header>
 
-        <!-- Main Form -->
         <form id="similarity-form">
-            <div class="mb-4">
-                <label for="item_id" class="block text-sm font-medium text-gray-700 mb-2">Track Item ID:</label>
-                <input type="text" id="item_id" name="item_id" class="form-input" placeholder="e.g., 3a6d..." required>
+            <!-- Hidden input to store the selected track's ID -->
+            <input type="hidden" id="selected_item_id" name="item_id">
+
+            <div class="mb-4 autocomplete-container">
+                <label for="artist_search" class="block text-sm font-medium text-gray-700 mb-2">Artist:</label>
+                <input type="text" id="artist_search" name="artist_search" class="form-input" placeholder="Start typing artist name..." autocomplete="off">
             </div>
+
+            <div class="mb-4 autocomplete-container">
+                <label for="title_search" class="block text-sm font-medium text-gray-700 mb-2">Track Title:</label>
+                <input type="text" id="title_search" name="title_search" class="form-input" placeholder="Start typing track title..." autocomplete="off">
+                <div id="autocomplete-results" class="autocomplete-results hidden"></div>
+            </div>
+
             <div class="mb-6">
                 <label for="n" class="block text-sm font-medium text-gray-700 mb-2">Number of results:</label>
                 <input type="number" id="n" name="n" value="10" min="1" max="100" class="form-input">
@@ -145,16 +157,12 @@
             </button>
         </form>
 
-        <!-- Results Section -->
         <section id="results-container" class="mt-8 hidden">
             <h2 class="text-2xl font-bold text-gray-900 border-b border-gray-200 pb-3 mb-4">Results</h2>
             <div id="status" class="mb-4 text-gray-600 italic"></div>
-            <div id="results-table-wrapper" class="bg-gray-100 p-4 rounded-lg">
-                <!-- Table will be inserted here -->
-            </div>
+            <div id="results-table-wrapper" class="bg-gray-100 p-4 rounded-lg"></div>
         </section>
 
-        <!-- Playlist Creation Section -->
         <section id="playlist-creator" class="mt-6 hidden">
             <h3 class="text-lg font-semibold text-gray-800 mb-3">Create a Playlist from Results</h3>
             <form id="playlist-form">
@@ -173,21 +181,95 @@
 
     <script>
         (() => {
-            let currentTrackIds = []; // To store the IDs from the latest search
+            let currentTrackIds = [];
+            let searchTimeout;
 
             const similarityForm = document.getElementById('similarity-form');
             const playlistForm = document.getElementById('playlist-form');
+            const artistInput = document.getElementById('artist_search');
+            const titleInput = document.getElementById('title_search');
+            const selectedItemIdInput = document.getElementById('selected_item_id');
+            const autocompleteResults = document.getElementById('autocomplete-results');
             const resultsContainer = document.getElementById('results-container');
             const playlistCreator = document.getElementById('playlist-creator');
             const statusDiv = document.getElementById('status');
             const resultsTableWrapper = document.getElementById('results-table-wrapper');
             const playlistStatusDiv = document.getElementById('playlist-status');
 
+            // --- Autocomplete Logic ---
+            const handleSearchInput = () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(async () => {
+                    const artistQuery = artistInput.value.trim();
+                    const titleQuery = titleInput.value.trim();
+
+                    if (artistQuery.length < 3 && titleQuery.length < 3) {
+                        hideAutocomplete();
+                        return;
+                    }
+
+                    try {
+                        const params = new URLSearchParams({ artist: artistQuery, title: titleQuery });
+                        const response = await fetch(`/api/search_tracks?${params}`);
+                        const tracks = await response.json();
+                        showAutocomplete(tracks);
+                    } catch (error) {
+                        console.error('Autocomplete search error:', error);
+                        hideAutocomplete();
+                    }
+                }, 300); // Debounce requests by 300ms
+            };
+            
+            const showAutocomplete = (tracks) => {
+                autocompleteResults.innerHTML = '';
+                if (tracks.length === 0) {
+                    autocompleteResults.innerHTML = '<div class="autocomplete-item"><em>No results found</em></div>';
+                } else {
+                    tracks.forEach(track => {
+                        const itemDiv = document.createElement('div');
+                        itemDiv.className = 'autocomplete-item';
+                        itemDiv.innerHTML = `<div class="title">${track.title}</div><div class="artist">${track.author}</div>`;
+                        itemDiv.addEventListener('click', () => selectTrack(track));
+                        autocompleteResults.appendChild(itemDiv);
+                    });
+                }
+                autocompleteResults.classList.remove('hidden');
+            };
+
+            const hideAutocomplete = () => {
+                autocompleteResults.classList.add('hidden');
+            };
+
+            const selectTrack = (track) => {
+                artistInput.value = track.author;
+                titleInput.value = track.title;
+                selectedItemIdInput.value = track.item_id;
+                hideAutocomplete();
+            };
+
+            artistInput.addEventListener('input', handleSearchInput);
+            titleInput.addEventListener('input', handleSearchInput);
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.autocomplete-container')) {
+                    hideAutocomplete();
+                }
+            });
+
+            // --- Main Form Submission ---
             similarityForm.addEventListener('submit', async function (event) {
                 event.preventDefault();
 
-                const itemId = document.getElementById('item_id').value;
+                const itemId = selectedItemIdInput.value;
                 const n = document.getElementById('n').value;
+
+                if (!itemId) {
+                    statusDiv.textContent = 'Please select a track from the autocomplete suggestions.';
+                    statusDiv.className = 'mb-4 text-red-600 font-semibold';
+                    resultsContainer.classList.remove('hidden');
+                    playlistCreator.classList.add('hidden');
+                    resultsTableWrapper.innerHTML = '';
+                    return;
+                }
 
                 resultsContainer.classList.remove('hidden');
                 playlistCreator.classList.add('hidden');
@@ -196,9 +278,8 @@
                 resultsTableWrapper.innerHTML = '';
 
                 try {
-                    // NOTE: The API endpoint is assumed to be `/api/similar_tracks/`.
-                    // You might need to adjust this based on your actual backend routing.
-                    const response = await fetch(`/api/similar_tracks/${itemId}?n=${n}`);
+                    const params = new URLSearchParams({ item_id: itemId, n: n });
+                    const response = await fetch(`/api/similar_tracks?${params}`);
                     const data = await response.json();
 
                     if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
@@ -208,18 +289,13 @@
                         return;
                     }
 
-                    // Store track IDs for playlist creation, adding the original track at the beginning
                     currentTrackIds = [itemId, ...data.map(track => track.item_id)];
 
                     statusDiv.textContent = `Found ${data.length} similar tracks.`;
                     const tableHTML = `
                         <table>
                             <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Artist</th>
-                                    <th>Distance</th>
-                                </tr>
+                                <tr><th>Title</th><th>Artist</th><th>Distance</th></tr>
                             </thead>
                             <tbody>
                                 ${data.map(track => `
@@ -234,8 +310,7 @@
                     resultsTableWrapper.innerHTML = tableHTML;
                     playlistCreator.classList.remove('hidden');
                     playlistStatusDiv.textContent = '';
-                    document.getElementById('playlist_name').value = `Similar to ${data[0].title}`;
-
+                    document.getElementById('playlist_name').value = `Similar to ${titleInput.value}`;
 
                 } catch (error) {
                     statusDiv.textContent = `Error: ${error.message}`;
@@ -244,47 +319,35 @@
                 }
             });
 
+            // --- Playlist Creation ---
             playlistForm.addEventListener('submit', async function (event) {
                 event.preventDefault();
-
                 const playlistName = document.getElementById('playlist_name').value;
-
                 if (!playlistName) {
                     playlistStatusDiv.textContent = 'Please enter a playlist name.';
                     playlistStatusDiv.className = 'mt-3 text-sm text-red-600';
                     return;
                 }
-
                 if (currentTrackIds.length === 0) {
                     playlistStatusDiv.textContent = 'No tracks to add. Please perform a search first.';
                     playlistStatusDiv.className = 'mt-3 text-sm text-red-600';
                     return;
                 }
-
                 playlistStatusDiv.textContent = 'Creating playlist...';
                 playlistStatusDiv.className = 'mt-3 text-sm text-gray-600';
-
                 try {
-                    // NOTE: The API endpoint is assumed to be `/api/create_playlist`.
-                    // You might need to adjust this based on your actual backend routing.
                     const response = await fetch('/api/create_playlist', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             playlist_name: playlistName,
                             track_ids: currentTrackIds
                         }),
                     });
-
                     const result = await response.json();
                     if (!response.ok) throw new Error(result.error || `HTTP error! status: ${response.status}`);
-
                     playlistStatusDiv.textContent = result.message;
                     playlistStatusDiv.className = 'mt-3 text-sm text-green-600';
-                    // Do not reset the form, user might want to create another playlist with a different name
-                    // playlistForm.reset(); 
                 } catch (error) {
                     playlistStatusDiv.textContent = `Error: ${error.message}`;
                     playlistStatusDiv.className = 'mt-3 text-sm text-red-600';

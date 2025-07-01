@@ -6,6 +6,7 @@ import numpy as np
 import time
 from annoy import AnnoyIndex # type: ignore
 import psycopg2
+from psycopg2.extras import DictCursor
 import requests # Added for Jellyfin interaction
 
 from config import EMBEDDING_DIMENSION, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # Use a central config for this
@@ -66,29 +67,21 @@ def build_and_store_annoy_index(db_conn):
         logger.info(f"Building index with {annoy_item_index} items and {NUM_TREES} trees...")
         annoy_index.build(NUM_TREES)
 
-        # Use a robust temporary file pattern to ensure data is written and read correctly.
-        # The Annoy library needs a file path to save to. This pattern avoids potential
-        # file handle buffering issues by separating the file creation, writing, and reading.
         temp_file_path = None
         try:
-            # Create a temporary file, getting its path. It is not deleted on close.
             with tempfile.NamedTemporaryFile(delete=False, suffix=".ann") as tmp:
                 temp_file_path = tmp.name
             
-            # Save the Annoy index to the now-closed file's path.
             annoy_index.save(temp_file_path)
 
-            # Re-open the file in binary read mode to get the data.
             with open(temp_file_path, 'rb') as f:
                 index_binary_data = f.read()
         finally:
-            # Manually and reliably clean up the temporary file.
             if temp_file_path and os.path.exists(temp_file_path):
                 os.remove(temp_file_path)
 
         logger.info(f"Annoy index binary data size to be stored: {len(index_binary_data)} bytes.")
 
-        # Safeguard to prevent writing an empty index to the database
         if not index_binary_data:
             logger.error("CRITICAL: Generated Annoy index file is empty. Aborting database storage.")
             return
@@ -118,9 +111,8 @@ def build_and_store_annoy_index(db_conn):
 def load_annoy_index_for_querying(force_reload=False):
     """
     Loads the Annoy index from the database into the global in-memory cache.
-    This is called on web server startup and can be called to force a reload.
     """
-    global annoy_index, id_map # Declare we are modifying the global variables
+    global annoy_index, id_map
 
     if annoy_index is not None and not force_reload:
         logger.info("Annoy index is already loaded in memory. Skipping reload.")
@@ -137,19 +129,19 @@ def load_annoy_index_for_querying(force_reload=False):
 
         if not record:
             logger.warning(f"Annoy index '{INDEX_NAME}' not found in the database. Cache will be empty.")
-            annoy_index, id_map = None, None # Ensure cache is cleared
+            annoy_index, id_map = None, None
             return
         
         index_binary_data, id_map_json, db_embedding_dim = record
 
         if not index_binary_data:
             logger.error(f"Annoy index '{INDEX_NAME}' data in database is empty.")
-            annoy_index, id_map = None, None # Ensure cache is cleared
+            annoy_index, id_map = None, None
             return
 
         if db_embedding_dim != EMBEDDING_DIMENSION:
             logger.error(f"FATAL: Annoy index dimension mismatch! DB has {db_embedding_dim}, config expects {EMBEDDING_DIMENSION}.")
-            annoy_index, id_map = None, None # Ensure cache is cleared
+            annoy_index, id_map = None, None
             return
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ann") as tmp:
@@ -161,7 +153,6 @@ def load_annoy_index_for_querying(force_reload=False):
         loaded_index.load(temp_file_path)
         os.remove(temp_file_path)
 
-        # Update the global variables
         annoy_index = loaded_index
         id_map = {int(k): v for k, v in json.loads(id_map_json).items()}
 
@@ -169,7 +160,7 @@ def load_annoy_index_for_querying(force_reload=False):
 
     except Exception as e:
         logger.error("Failed to load Annoy index from database: %s", e, exc_info=True)
-        annoy_index, id_map = None, None # Clear cache on error
+        annoy_index, id_map = None, None
     finally:
         cur.close()
 
@@ -198,19 +189,83 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
 
     return results[:n]
 
+def get_item_id_by_title_and_artist(title: str, artist: str):
+    """
+    Finds the item_id for an exact title and artist match.
+    Returns the item_id string or None if not found.
+    """
+    from app import get_db
+    conn = get_db()
+    # Use DictCursor to get column names
+    cur = conn.cursor(cursor_factory=DictCursor)
+    try:
+        # CORRECTED TABLE NAME: Changed 'score_data' to 'score'
+        query = "SELECT item_id FROM score WHERE title = %s AND author = %s LIMIT 1"
+        cur.execute(query, (title, artist))
+        result = cur.fetchone()
+        if result:
+            return result['item_id']
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching item_id for '{title}' by '{artist}': {e}", exc_info=True)
+        return None
+    finally:
+        cur.close()
+
+def search_tracks_by_title_and_artist(title_query: str, artist_query: str, limit: int = 15):
+    """
+    Searches for tracks using partial title and artist names for autocomplete.
+    """
+    from app import get_db
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    results = []
+    try:
+        # Build the query dynamically based on which fields are provided
+        query_parts = []
+        params = []
+        
+        if artist_query:
+            query_parts.append("author ILIKE %s")
+            params.append(f"%{artist_query}%")
+            
+        if title_query:
+            query_parts.append("title ILIKE %s")
+            params.append(f"%{title_query}%")
+
+        if not query_parts:
+            return [] # Don't run a query if no search terms are provided
+
+        # Combine the query parts
+        where_clause = " AND ".join(query_parts)
+        
+        # CORRECTED TABLE NAME: Changed 'score_data' to 'score'
+        # We only need fields relevant for the autocomplete dropdown
+        query = f"""
+            SELECT item_id, title, author 
+            FROM score 
+            WHERE {where_clause}
+            ORDER BY author, title 
+            LIMIT %s
+        """
+        params.append(limit)
+        
+        cur.execute(query, tuple(params))
+        
+        # Convert rows to a list of dictionaries
+        results = [dict(row) for row in cur.fetchall()]
+
+    except Exception as e:
+        logger.error(f"Error searching tracks with query '{title_query}', '{artist_query}': {e}", exc_info=True)
+    finally:
+        cur.close()
+    
+    return results
+
+
 def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
     """
     Creates a new playlist in Jellyfin with the provided name and track IDs.
-
-    Args:
-        playlist_name: The desired name for the playlist.
-        track_ids: A list of Jellyfin Item IDs to include in the playlist.
-
-    Returns:
-        The ID of the newly created playlist.
-
-    Raises:
-        Exception: If the playlist creation fails.
     """
     if not all([JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN]):
         raise ValueError("Jellyfin server URL, User ID, or Token is not configured.")
@@ -228,7 +283,7 @@ def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
     
     try:
         response = requests.post(url, headers=headers, json=body, timeout=60)
-        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status()
         
         playlist_data = response.json()
         playlist_id = playlist_data.get('Id')
@@ -241,7 +296,6 @@ def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
 
     except requests.exceptions.RequestException as e:
         logger.error(f"Error creating Jellyfin playlist '{playlist_name}': {e}", exc_info=True)
-        # Re-raise as a generic exception to be caught by the API endpoint
         raise Exception(f"Failed to communicate with Jellyfin: {e}") from e
     except Exception as e:
         logger.error(f"An unexpected error occurred during playlist creation for '{playlist_name}': {e}", exc_info=True)
