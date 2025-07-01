@@ -14,6 +14,7 @@ Addional important information on this project can also be found here:
 - [Quick Start Deployment on K3S](#quick-start-deployment-on-k3s)
 - [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
 - [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
+- [Playlist from Similar song (via similarity Interface)](#playlist-from-similar-song-via-similarity-interface)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
 - [Configuration Parameters](#configuration-parameters)
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
@@ -196,6 +197,23 @@ For a quick and interactive way to generate playlists without running the full e
 *   "Give me some tranding songs of the radio of 2025"
 
 **Note:** The quality and relevance of the **Instant Playlist** heavily depend on the capabilities of the configured AI model and the detail of your request. The underlying music data must have been previously analyzed using the "Analysis Task" for this feature to find songs.
+
+## **Playlist from Similar song (via similarity Interface)**
+
+**IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
+
+This new functionality enable you to search the top N similar song that are similar to another one. Basically during the analysis task an Approximate Nearest Neighbors (Annoy) index is made. Then with the new similarity interface you can just search for similar song.
+
+**How to Use:**
+1.  **Access the Chat Interface:**
+    *   Navigate to `http://<EXTERNAL-IP>:8000/similarity` (or `http://localhost:8000//similarity` for local Docker Compose deployments).
+2.  **Input Your Song**
+    *   Start writing the first 3+ letter of your favourite artist, at the third letter a search will be made helping you in finding correct Artist and song
+3.  **Run the similarity search**
+    *   Ask the front-end to find the similar track, it will show to you in the table
+4.  **Review and Create:**
+    *   Input a name for the playlist and ask the interface to create it directly on jellyfin. That's it!
+
 
 ## **Kubernetes Deployment (K3S Example)**
 
