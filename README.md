@@ -29,6 +29,7 @@ Addional important information on this project can also be found here:
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Instant Chat Deep Dive](#instant-chat-deep-dive)
+- [Playlist from Similar song - Deep dive](#playlist-from-similar-song-deep-dive)
 - [Screenshots](#screenshots)
 - [Key Technologies](#key-technologies)
 - [Additional Documentation](#additional-documentation)
@@ -602,7 +603,33 @@ The "Instant Playlist" feature, accessible via `chat.html`, provides a direct wa
     *   The results (list of songs: `item_id`, `title`, `author`) or any errors are sent back to `chat.html`.
     *   The frontend displays the AI's textual response (including the generated SQL and any processing messages) and the list of songs.
     *   If songs are returned, a form appears allowing the user to name the playlist. Submitting this form calls another endpoint (`/api/createJellyfinPlaylist`) in `app_chat.py` which uses the Jellyfin API to create the playlist with the chosen name (appended with `_instant`) and the retrieved song IDs.
-    
+
+## Playlist from Similar song - Deep dive
+
+The "Playlist from Similar Song" feature provides an interactive way to discover music by finding tracks that are sonically similar to a chosen song. This process relies on a powerful combination of pre-computed audio embeddings and a specialized high-speed search index.
+
+**Core Workflow:**
+
+1. **Index Creation (During Analysis Task):**  
+   * The foundation of this feature is an **Approximate Nearest Neighbors (ANN) index**, which is built using Spotify's **Annoy** library.  
+   * During the main "Analysis Task," after the 200-dimensional MusiCNN embedding has been generated for each track, a dedicated function (build\_and\_store\_annoy\_index) is triggered.  
+   * This function gathers all embeddings from the database and uses them to build the Annoy index. It uses an 'angular' distance metric, which is highly effective for comparing the "direction" of high-dimensional vectors like audio embeddings, thus capturing sonic similarity well.  
+   * The completed index, which is a highly optimized data structure for fast lookups, is then saved to the PostgreSQL database. This ensures it persists and only needs to be rebuilt when new music is analyzed.  
+2. **User Interface (similarity.html):**  
+   * The user navigates to the /similarity page.  
+   * An autocomplete search box allows the user to easily find a specific "seed" song by typing its title and/or artist. This search is powered by the /api/search\_tracks endpoint.  
+3. **High-Speed Similarity Search (/api/similar\_tracks):**  
+   * Once the user selects a seed song and initiates the search, the frontend calls this API endpoint with the song's unique item\_id.  
+   * For maximum performance, the backend loads the Annoy index from the database into memory upon starting up (load\_annoy\_index\_for\_querying). This in-memory cache allows for near-instantaneous lookups.  
+   * The core function find\_nearest\_neighbors\_by\_id takes the seed song's ID, finds its corresponding vector within the Annoy index, and instantly retrieves the *N* closest vectors (the most similar songs) based on the pre-calculated angular distances.  
+   * The backend then fetches the metadata (title, artist) for these resulting song IDs from the main score table.  
+4. **Playlist Creation (/api/create\_playlist):**  
+   * The list of similar tracks, along with their distance from the seed song, is displayed to the user.  
+   * The user can then enter a desired playlist name and click a button.  
+   * This action calls the /api/create\_playlist endpoint, which takes the list of similar track IDs and the new name, and then uses the Jellyfin API to create the playlist directly on the server.
+
+This entire workflow provides a fast and intuitive method for music discovery, moving beyond simple genre or tag-based recommendations to find songs that truly *sound* alike.
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
