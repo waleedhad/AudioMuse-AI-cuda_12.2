@@ -644,7 +644,11 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ### Instant Playlist
 
-![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/Instant_playlist.png "Instant Playlist interface")
+![Screenshot of AudioMuse AI's web interface showing the Instant Playlist web interface.](screenshot/Instant_playlist.png "Instant Playlist interface")
+
+### Similar Song Playlist
+
+![Screenshot of AudioMuse AI's web interface showing the Similarity web interface.](screenshot/simlarity.png "Similarity Playlist interface")
 
 
 
