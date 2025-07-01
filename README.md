@@ -651,6 +651,7 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
+* [**annoy**](https://github.com/spotify/annoy) Approximate Nearest Neighbors used for the /similarity interface
 * [**PostgreSQL:**](https://www.postgresql.org/) A powerful, open-source relational database used for persisting:  
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  
