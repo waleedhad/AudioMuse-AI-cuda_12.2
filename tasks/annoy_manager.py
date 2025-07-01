@@ -6,9 +6,9 @@ import numpy as np
 import time
 from annoy import AnnoyIndex # type: ignore
 import psycopg2
-from datetime import timezone
+import requests # Added for Jellyfin interaction
 
-from config import EMBEDDING_DIMENSION # Use a central config for this
+from config import EMBEDDING_DIMENSION, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # Use a central config for this
 
 logger = logging.getLogger(__name__)
 
@@ -197,3 +197,52 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
                 results.append({"item_id": item_id, "distance": dist})
 
     return results[:n]
+
+def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
+    """
+    Creates a new playlist in Jellyfin with the provided name and track IDs.
+
+    Args:
+        playlist_name: The desired name for the playlist.
+        track_ids: A list of Jellyfin Item IDs to include in the playlist.
+
+    Returns:
+        The ID of the newly created playlist.
+
+    Raises:
+        Exception: If the playlist creation fails.
+    """
+    if not all([JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN]):
+        raise ValueError("Jellyfin server URL, User ID, or Token is not configured.")
+
+    headers = {"X-Emby-Token": JELLYFIN_TOKEN}
+    body = {
+        "Name": playlist_name,
+        "Ids": track_ids,
+        "UserId": JELLYFIN_USER_ID
+    }
+    
+    url = f"{JELLYFIN_URL}/Playlists"
+    
+    logger.info(f"Attempting to create playlist '{playlist_name}' with {len(track_ids)} tracks on Jellyfin.")
+    
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=60)
+        response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
+        
+        playlist_data = response.json()
+        playlist_id = playlist_data.get('Id')
+        
+        if not playlist_id:
+            raise Exception("Jellyfin API response did not include a playlist ID.")
+            
+        logger.info(f"✅ Successfully created playlist '{playlist_name}' with ID: {playlist_id}")
+        return playlist_id
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error creating Jellyfin playlist '{playlist_name}': {e}", exc_info=True)
+        # Re-raise as a generic exception to be caught by the API endpoint
+        raise Exception(f"Failed to communicate with Jellyfin: {e}") from e
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during playlist creation for '{playlist_name}': {e}", exc_info=True)
+        raise
