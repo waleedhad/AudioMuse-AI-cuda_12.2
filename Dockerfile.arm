@@ -1,8 +1,7 @@
-# STAGE 1: Build Essentia from source for the target architecture 
+# STAGE 1: Build Essentia from source for the target architecture
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia.
-# The waf build tool is included in the essentia source, so we don't need to install it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -19,8 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and extract the Essentia source code
+# Download and install the TensorFlow C library for ARM64, a required dependency.
 WORKDIR /
+RUN wget -qO libtensorflow.tar.gz https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.10.0.tar.gz && \
+    tar -C /usr/local -xzf libtensorflow.tar.gz && \
+    rm libtensorflow.tar.gz && \
+    ldconfig
+
+# Download and extract the Essentia source code
 RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
     tar -xzf essentia.tar.gz && \
     rm essentia.tar.gz
@@ -28,8 +33,10 @@ RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v
 # Set the working directory to the extracted source folder.
 WORKDIR /essentia-2.1_beta5
 
-# Build and install using the Waf build system, which is included in the source.
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
+# Build and install using the Waf build system.
+# The --with-tensorflow flag is removed because it's not valid for this version.
+# Waf will automatically detect the TensorFlow C library we installed in the previous step.
+RUN python3 ./waf configure --build-static --with-python && \
     python3 ./waf && \
     python3 ./waf install
 
