@@ -173,6 +173,11 @@ EMBEDDING_MODEL_PATH = "/app/model/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/model/msd-msd-musicnn-1.pb"
 EMBEDDING_DIMENSION = 200 # *** ADDED THIS LINE ***
 
+# --- Annoy Index Constants ---
+INDEX_NAME = os.environ.get("ANNOY_INDEX_NAME", "music_library") # The primary key for our index in the DB
+NUM_TREES = int(os.environ.get("ANNOY_NUM_TREES", "50")) # More trees = higher accuracy, larger index, longer build time
+
+
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)
 DANCEABILITY_MODEL_PATH = os.environ.get("DANCEABILITY_MODEL_PATH", "/app/model/danceability-msd-musicnn-1.pb") # Example, adjust if different

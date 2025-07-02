@@ -9,12 +9,12 @@ import psycopg2
 from psycopg2.extras import DictCursor
 import requests # Added for Jellyfin interaction
 
-from config import EMBEDDING_DIMENSION, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # Use a central config for this
+from config import (
+    EMBEDDING_DIMENSION, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN,
+    INDEX_NAME, NUM_TREES
+) # Use a central config for this
 
 logger = logging.getLogger(__name__)
-
-INDEX_NAME = "music_library" # The primary key for our index in the DB
-NUM_TREES = 50 # More trees = higher accuracy, larger index, longer build time
 
 # --- Global cache for the loaded Annoy index ---
 # This will hold the index in memory for the web server process to prevent
