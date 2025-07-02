@@ -20,16 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and extract Essentia source tarball instead of cloning
-WORKDIR /
-RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
+# Download, extract, build, and install in a single RUN command to ensure correct pathing.
+RUN cd / && \
+    wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
     tar -xzf essentia.tar.gz && \
-    rm essentia.tar.gz
-
-# Configure and build Essentia with TensorFlow wrappers
-# CORRECTED: The directory created by tar is essentia-2.1_beta5
-WORKDIR /essentia-2.1_beta5
-RUN mkdir build && cd build && \
+    rm essentia.tar.gz && \
+    cd essentia-2.1_beta5 && \
+    mkdir build && \
+    cd build && \
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
         -DESSENTIA_TENSORFLOW=ON \
