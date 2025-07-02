@@ -1,4 +1,4 @@
-name: Build, Test, and Push AudioMuse AI Docker Image (ARM)
+name: Build, Test, and Push AudioMuse AI Docker Image  (ARM)
 
 on:
   push:
