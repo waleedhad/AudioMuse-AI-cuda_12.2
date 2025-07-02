@@ -4,7 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'    # Trigger for version tags like v1.0.0
-  workflow_dispatch: {} # Allows manual triggering of the workflow
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'The git tag to build (e.g., v0.4.0)'
+        required: true
+        type: string
 
 jobs:
   build-and-test-arm:
@@ -17,6 +22,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Checkout the specific tag from the manual input, or the tag from the push event
+          ref: ${{ github.event.inputs.version_tag || github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,18 +42,20 @@ jobs:
           REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           ALL_TAGS=""
 
-          # For manual runs, the ref is the branch/tag selected in the UI
-          # For tag pushes, it's the tag that was pushed
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
+          # Determine the reference to check (either from the manual input or the push event)
+          REF_TO_CHECK="${{ github.event.inputs.version_tag || github.ref }}"
+
+          # Check if the reference is a version tag (e.g., v1.2.3 or refs/tags/v1.2.3)
+          if [[ "$REF_TO_CHECK" == refs/tags/v* ]] || [[ "$REF_TO_CHECK" == v*.*.* ]]; then
+            # Normalize the version string by removing potential prefixes
+            VERSION_TAG=$(echo "$REF_TO_CHECK" | sed -e 's|refs/tags/v||g' -e 's|v||g')
+            
             # Append -ARM to the version tag
             VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}-ARM"
             ALL_TAGS="$VERSIONED_TAG"
             echo "Building ARM-specific versioned tag: $VERSIONED_TAG"
           else
-            echo "This workflow is configured to only build on version tags (e.g., v1.2.3)."
-            echo "If running manually, please ensure you are targeting a tag."
-            # You could optionally add logic here for branches if needed
+            echo "The reference '$REF_TO_CHECK' is not a valid version tag. No image will be pushed."
           fi
 
           # Export the tags for subsequent steps
