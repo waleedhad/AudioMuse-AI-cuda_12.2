@@ -2,8 +2,10 @@ name: Build, Test, and Push AudioMuse AI Docker Image (ARM)
 
 on:
   push:
+    branches:
+      - main
     tags:
-      - 'v*.*.*'    # Trigger for version tags like v1.0.0
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version_tag:
@@ -28,7 +30,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Checkout the specific tag from the manual input, or the tag from the push event
+          # For manual runs, checkout the specific tag from the input. Otherwise, use the event ref.
           ref: ${{ github.event.inputs.version_tag || github.ref }}
 
       # Set up QEMU to enable building for multiple architectures on a standard runner
@@ -51,20 +53,33 @@ jobs:
           REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           ALL_TAGS=""
 
-          # Determine the reference to check (either from the manual input or the push event)
-          REF_TO_CHECK="${{ github.event.inputs.version_tag || github.ref }}"
+          # Case 1: Manual dispatch with a version tag input
+          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
+              REF_TO_CHECK="${{ github.event.inputs.version_tag }}"
+              VERSION_TAG=$(echo "$REF_TO_CHECK" | sed -e 's|refs/tags/v||g' -e 's|^v||g')
+              if [[ "$VERSION_TAG" =~ ^[0-9]+\.[0-9]+\..* ]]; then
+                  VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}-ARM"
+                  ALL_TAGS="$VERSIONED_TAG"
+                  echo "Building manual ARM-specific versioned tag: $VERSIONED_TAG"
+              else
+                  echo "Manual run error: Input '$REF_TO_CHECK' is not a valid version tag."
+              fi
 
-          # Normalize the version string by removing potential prefixes like 'refs/tags/v' or just 'v'
-          NORMALIZED_TAG=$(echo "$REF_TO_CHECK" | sed -e 's|refs/tags/v||g' -e 's|^v||g')
+          # Case 2: Push to main branch
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+              ARM_TAG="ghcr.io/$REPO_NAME_LOWER:latest-ARM"
+              ALL_TAGS="$ARM_TAG"
+              echo "Building latest-ARM tag: $ARM_TAG"
 
-          # Check if the normalized tag looks like a version number (e.g., 0.4.0-beta)
-          if [[ "$NORMALIZED_TAG" =~ ^[0-9]+\.[0-9]+\..* ]]; then
-            # Append -ARM to the version tag
-            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${NORMALIZED_TAG}-ARM"
-            ALL_TAGS="$VERSIONED_TAG"
-            echo "Building ARM-specific versioned tag: $VERSIONED_TAG"
+          # Case 3: Push with a version tag
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+              VERSION_TAG=$(echo "${{ github.ref }}" | sed -e 's|refs/tags/v||g')
+              VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}-ARM"
+              ALL_TAGS="$VERSIONED_TAG"
+              echo "Building ARM-specific versioned tag from push: $VERSIONED_TAG"
+
           else
-            echo "The reference '$REF_TO_CHECK' does not look like a valid version tag. No image will be pushed."
+              echo "This trigger ('${{ github.ref }}') does not produce a build."
           fi
 
           # Export the tags for subsequent steps
