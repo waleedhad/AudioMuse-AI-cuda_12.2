@@ -2,7 +2,7 @@
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia.
-# Added libavresample-dev and libchromaprint-dev to satisfy Python extension build requirements.
+# Removed libavresample-dev as it is deprecated in Ubuntu 22.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavformat-dev \
     libavutil-dev \
     libswresample-dev \
-    libavresample-dev \
     libchromaprint-dev \
     libyaml-dev \
     libtag1-dev \
