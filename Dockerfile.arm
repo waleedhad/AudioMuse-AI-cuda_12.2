@@ -1,4 +1,4 @@
-# STAGE 1: Build Essentia from source for the target architecture
+# STAGE 1: Build Essentia from source for the target architecture 
 # Use Ubuntu 20.04 (Focal) as the base, which uses Python 3.8, compatible with older NumPy.
 FROM ubuntu:20.04 AS builder
 
