@@ -270,16 +270,22 @@ def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
     if not all([JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN]):
         raise ValueError("Jellyfin server URL, User ID, or Token is not configured.")
 
+    if not playlist_name or not playlist_name.strip():
+        raise ValueError("Playlist name must be a non-empty string.")
+    
+    # Append _instant to the playlist name
+    jellyfin_playlist_name = f"{playlist_name.strip()}_instant"
+    
     headers = {"X-Emby-Token": JELLYFIN_TOKEN}
     body = {
-        "Name": playlist_name,
+        "Name": jellyfin_playlist_name,
         "Ids": track_ids,
         "UserId": JELLYFIN_USER_ID
     }
     
     url = f"{JELLYFIN_URL}/Playlists"
     
-    logger.info(f"Attempting to create playlist '{playlist_name}' with {len(track_ids)} tracks on Jellyfin.")
+    logger.info(f"Attempting to create playlist '{jellyfin_playlist_name}' with {len(track_ids)} tracks on Jellyfin.")
     
     try:
         response = requests.post(url, headers=headers, json=body, timeout=60)
@@ -291,12 +297,12 @@ def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
         if not playlist_id:
             raise Exception("Jellyfin API response did not include a playlist ID.")
             
-        logger.info(f"✅ Successfully created playlist '{playlist_name}' with ID: {playlist_id}")
+        logger.info(f"✅ Successfully created playlist '{jellyfin_playlist_name}' with ID: {playlist_id}")
         return playlist_id
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error creating Jellyfin playlist '{playlist_name}': {e}", exc_info=True)
+        logger.error(f"Error creating Jellyfin playlist '{jellyfin_playlist_name}': {e}", exc_info=True)
         raise Exception(f"Failed to communicate with Jellyfin: {e}") from e
     except Exception as e:
-        logger.error(f"An unexpected error occurred during playlist creation for '{playlist_name}': {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred during playlist creation for '{jellyfin_playlist_name}': {e}", exc_info=True)
         raise
