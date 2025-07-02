@@ -1,9 +1,10 @@
-name: Build, Test, and Push AudioMuse AI Docker Image  (ARM)
+name: Build, Test, and Push AudioMuse AI Docker Image (ARM)
 
 on:
   push:
     tags:
       - 'v*.*.*'    # Trigger for version tags like v1.0.0
+  workflow_dispatch: {} # Allows manual triggering of the workflow
 
 jobs:
   build-and-test-arm:
@@ -33,12 +34,18 @@ jobs:
           REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           ALL_TAGS=""
 
+          # For manual runs, the ref is the branch/tag selected in the UI
+          # For tag pushes, it's the tag that was pushed
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
             # Append -ARM to the version tag
             VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}-ARM"
             ALL_TAGS="$VERSIONED_TAG"
             echo "Building ARM-specific versioned tag: $VERSIONED_TAG"
+          else
+            echo "This workflow is configured to only build on version tags (e.g., v1.2.3)."
+            echo "If running manually, please ensure you are targeting a tag."
+            # You could optionally add logic here for branches if needed
           fi
 
           # Export the tags for subsequent steps
@@ -198,7 +205,7 @@ jobs:
           docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true # Remove the temporary image
 
       - name: Build and Push AudioMuse AI Image (Final Push - ARM)
-        if: success()
+        if: success() && steps.docker_tags.outputs.docker_tags != ''
         uses: docker/build-push-action@v5
         with:
           context: .
