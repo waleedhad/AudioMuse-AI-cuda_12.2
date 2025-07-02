@@ -2,12 +2,13 @@
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia.
-# Removed libavresample-dev as it is deprecated in Ubuntu 22.04
+# Added libyaml-cpp-dev, which is required for C++ projects with Python bindings.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     wget \
     python3-pip \
+    pkg-config \
     libfftw3-dev \
     libavcodec-dev \
     libavformat-dev \
@@ -15,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswresample-dev \
     libchromaprint-dev \
     libyaml-dev \
+    libyaml-cpp-dev \
     libtag1-dev \
     libsamplerate0-dev \
     python3-dev \
@@ -32,6 +34,10 @@ RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v
 
 # Set the working directory to the extracted source folder.
 WORKDIR /essentia-2.1_beta5
+
+# Set the PKG_CONFIG_PATH to help the build script find the Python development files.
+# This is the key fix inspired by the GitHub issue you found.
+ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/
 
 # Build and install using the Waf build system.
 # Waf will automatically detect the TensorFlow library installed by the pip package.
