@@ -1,12 +1,13 @@
 # STAGE 1: Build Essentia from source for the target architecture
 FROM ubuntu:22.04 AS builder
 
-# Install build dependencies for Essentia, including ca-certificates for git
+# Install build dependencies for Essentia, including ca-certificates.
+# Replaced git with wget to download the source tarball directly.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     cmake \
-    git \
+    wget \
     libfftw3-dev \
     libavcodec-dev \
     libavformat-dev \
@@ -19,13 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone Essentia repository
+# Download and extract Essentia source tarball instead of cloning
 WORKDIR /
-# We clone a specific, stable version of Essentia to ensure reproducibility
-RUN git clone --branch v2.1_beta5 --depth 1 https://github.com/MTG/essentia.git
+RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
+    tar -xzf essentia.tar.gz && \
+    rm essentia.tar.gz
 
 # Configure and build Essentia with TensorFlow wrappers
-WORKDIR /essentia
+# CORRECTED: The directory created by tar is essentia-2.1_beta5
+WORKDIR /essentia-2.1_beta5
 RUN mkdir build && cd build && \
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
