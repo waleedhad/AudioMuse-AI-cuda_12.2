@@ -1,7 +1,8 @@
 # STAGE 1: Build Essentia from source for the target architecture
 FROM ubuntu:22.04 AS builder
 
-# Install build dependencies for Essentia, including python3-waf
+# Install build dependencies for Essentia.
+# The waf build tool is included in the essentia source, so we don't need to install it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -16,7 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsamplerate0-dev \
     python3-dev \
     python3-numpy \
-    python3-waf \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and extract the Essentia source code
@@ -28,7 +28,7 @@ RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v
 # Set the working directory to the extracted source folder.
 WORKDIR /essentia-2.1_beta5
 
-# Build and install using the Waf build system, not cmake.
+# Build and install using the Waf build system, which is included in the source.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
     python3 ./waf && \
     python3 ./waf install
