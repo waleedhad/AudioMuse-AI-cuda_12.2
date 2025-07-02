@@ -11,6 +11,11 @@ on:
         required: true
         type: string
 
+# Concurrency group to ensure only one run at a time and cancel older runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test-arm:
     runs-on: ubuntu-latest # Use a standard runner
@@ -68,11 +73,10 @@ jobs:
           echo "test_tag=audiomuse-ai-temp-arm:latest" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image (for testing)
-        id: docker_build_test
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.arm # Use the ARM-specific Dockerfile
           push: false # Do not push yet, just build
           # Specify the platform to build for testing
           platforms: linux/arm64
@@ -225,7 +229,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile.arm # Use the ARM-specific Dockerfile
           push: true
           # This build will be for the emulated architecture
           platforms: linux/arm64
