@@ -1,4 +1,4 @@
-# STAGE 1: Build Essentia from source for the target architecture 
+# STAGE 1: Build Essentia from source for the target architecture
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia, including ca-certificates.
@@ -28,7 +28,8 @@ RUN cd / && \
     cd essentia-2.1_beta5 && \
     mkdir build && \
     cd build && \
-    cmake .. \
+    # Use an absolute path to the source directory for cmake to avoid ambiguity
+    cmake /essentia-2.1_beta5 \
         -DCMAKE_BUILD_TYPE=Release \
         -DESSENTIA_TENSORFLOW=ON \
         -DESSENTIA_PYTHON_VERSION=3 && \
