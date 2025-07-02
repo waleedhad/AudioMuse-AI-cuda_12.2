@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version_tag:
-        description: 'The git tag to build (e.g., v0.4.0)'
+        description: 'The git tag to build (e.g., v0.4.0 or 0.4.0)'
         required: true
         type: string
 
@@ -45,17 +45,17 @@ jobs:
           # Determine the reference to check (either from the manual input or the push event)
           REF_TO_CHECK="${{ github.event.inputs.version_tag || github.ref }}"
 
-          # Check if the reference is a version tag (e.g., v1.2.3 or refs/tags/v1.2.3)
-          if [[ "$REF_TO_CHECK" == refs/tags/v* ]] || [[ "$REF_TO_CHECK" == v*.*.* ]]; then
-            # Normalize the version string by removing potential prefixes
-            VERSION_TAG=$(echo "$REF_TO_CHECK" | sed -e 's|refs/tags/v||g' -e 's|v||g')
-            
+          # Normalize the version string by removing potential prefixes like 'refs/tags/v' or just 'v'
+          NORMALIZED_TAG=$(echo "$REF_TO_CHECK" | sed -e 's|refs/tags/v||g' -e 's|^v||g')
+
+          # Check if the normalized tag looks like a version number (e.g., 0.4.0-beta)
+          if [[ "$NORMALIZED_TAG" =~ ^[0-9]+\.[0-9]+\..* ]]; then
             # Append -ARM to the version tag
-            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}-ARM"
+            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${NORMALIZED_TAG}-ARM"
             ALL_TAGS="$VERSIONED_TAG"
             echo "Building ARM-specific versioned tag: $VERSIONED_TAG"
           else
-            echo "The reference '$REF_TO_CHECK' is not a valid version tag. No image will be pushed."
+            echo "The reference '$REF_TO_CHECK' does not look like a valid version tag. No image will be pushed."
           fi
 
           # Export the tags for subsequent steps
