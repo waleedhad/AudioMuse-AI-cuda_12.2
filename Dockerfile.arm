@@ -1,8 +1,7 @@
 # STAGE 1: Build Essentia from source for the target architecture
 FROM ubuntu:22.04 AS builder
 
-# Install build dependencies for Essentia, including ca-certificates.
-# Replaced git with wget to download the source tarball directly.
+# Install build dependencies for Essentia
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -20,16 +19,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
-# Download, extract, build, and install in a single RUN command to ensure correct pathing.
+# Download, extract, build, and install Essentia
 RUN cd / && \
     wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
     tar -xzf essentia.tar.gz && \
     rm essentia.tar.gz && \
-    cd essentia-2.1_beta5 && \
+    ESSENTIA_SRC_DIR=$(find . -maxdepth 1 -type d -name "essentia*" | head -n 1) && \
+    cd "$ESSENTIA_SRC_DIR" && \
     mkdir build && \
     cd build && \
-    # Use an absolute path to the source directory for cmake to avoid ambiguity
-    cmake /essentia-2.1_beta5 \
+    cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
         -DESSENTIA_TENSORFLOW=ON \
         -DESSENTIA_PYTHON_VERSION=3 && \
@@ -37,7 +36,6 @@ RUN cd / && \
     make install
 
 # --- End of builder stage ---
-
 
 # STAGE 2: Final application image
 FROM ubuntu:22.04
@@ -61,17 +59,14 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     iputils-ping \
     libopenblas-dev \
     liblapack-dev \
-    # Added dependencies for psycopg2-binary
     libpq-dev \
     gcc \
     g++ \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/* && apt-get clean
 
-# Install numpy first as it's a common dependency
+# Install Python packages
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
-# Install the rest of the Python packages from PyPI
 RUN pip3 install --no-cache-dir \
     Flask \
     Flask-Cors \
@@ -88,16 +83,14 @@ RUN pip3 install --no-cache-dir \
     sqlglot \
     google-generativeai
 
-# --- THE FIX ---
-# Copy the pre-compiled essentia library and its Python wrappers from the builder stage
-# This replaces 'RUN pip3 install essentia-tensorflow'
+# Copy pre-built Essentia libraries and Python bindings from builder
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
-# Create the model directory
+# Create model directory
 RUN mkdir -p /app/model
 
-# Download models from the GitHub release
+# Download models
 RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
@@ -115,10 +108,10 @@ RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
 
-# Copy the application code
+# Copy application code
 COPY . /app
 
-# Copy the supervisor configuration
+# Copy Supervisor config
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
