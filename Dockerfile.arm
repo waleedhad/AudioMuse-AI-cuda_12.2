@@ -35,15 +35,12 @@ RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v
 # Set the working directory to the extracted source folder.
 WORKDIR /essentia-2.1_beta5
 
-# Set environment variables to help the compiler find the TensorFlow C++ headers and libraries
-# that were installed by pip in a non-standard location. This is the key fix.
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
-ENV CFLAGS="-I${TF_DIR}/include"
-ENV CXXFLAGS="-I${TF_DIR}/include"
-ENV LDFLAGS="-L${TF_DIR} -ltensorflow_framework"
+# THE FINAL FIX:
+# Directly edit the wscript to force it to find the Python libraries correctly.
+# This is a robust solution for older build scripts on newer systems.
+RUN sed -i "s/conf.check_python_headers(mandatory=True)/conf.check_python_headers(mandatory=True)\n    conf.env.append_value('CPPPATH', conf.env.PYTHON_INCLUDES.split())/" wscript
 
 # Build and install using the Waf build system.
-# Waf will now use the environment variables to find TensorFlow and build the Python extensions.
 RUN python3 ./waf configure --build-static --with-python && \
     python3 ./waf && \
     python3 ./waf install
