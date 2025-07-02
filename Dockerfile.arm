@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     wget \
+    python3-pip \
     libfftw3-dev \
     libavcodec-dev \
     libavformat-dev \
@@ -18,14 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and install the TensorFlow C library for ARM64, a required dependency.
-WORKDIR /
-RUN wget -qO libtensorflow.tar.gz https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.10.0.tar.gz && \
-    tar -C /usr/local -xzf libtensorflow.tar.gz && \
-    rm libtensorflow.tar.gz && \
-    ldconfig
+# Install TensorFlow for ARM64 using pip. This provides the necessary C libraries and headers.
+# This replaces the manual download of libtensorflow.
+RUN pip3 install tensorflow-aarch64==2.16.1
 
 # Download and extract the Essentia source code
+WORKDIR /
 RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
     tar -xzf essentia.tar.gz && \
     rm essentia.tar.gz
@@ -34,8 +33,7 @@ RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v
 WORKDIR /essentia-2.1_beta5
 
 # Build and install using the Waf build system.
-# The --with-tensorflow flag is removed because it's not valid for this version.
-# Waf will automatically detect the TensorFlow C library we installed in the previous step.
+# Waf will automatically detect the TensorFlow library installed by the pip package.
 RUN python3 ./waf configure --build-static --with-python && \
     python3 ./waf && \
     python3 ./waf install
