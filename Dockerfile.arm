@@ -86,7 +86,7 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
 
 # Install Python packages for the final image.
 # We can use a modern numpy here as it's separate from the build environment.
-RUN pip3 install --no-cache-dir numpy==1.26.4
+RUN pip3 install --no-cache-dir numpy==1.19.5
 
 RUN pip3 install --no-cache-dir \
     Flask \
