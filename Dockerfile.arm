@@ -2,7 +2,6 @@
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia.
-# Added python3-setuptools, a core requirement for building Python extensions.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -36,11 +35,15 @@ RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v
 # Set the working directory to the extracted source folder.
 WORKDIR /essentia-2.1_beta5
 
-# Set the PKG_CONFIG_PATH to help the build script find the Python development files.
-ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/
+# Set environment variables to help the compiler find the TensorFlow C++ headers and libraries
+# that were installed by pip in a non-standard location. This is the key fix.
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
+ENV CFLAGS="-I${TF_DIR}/include"
+ENV CXXFLAGS="-I${TF_DIR}/include"
+ENV LDFLAGS="-L${TF_DIR} -ltensorflow_framework"
 
 # Build and install using the Waf build system.
-# Waf will automatically detect the TensorFlow library installed by the pip package.
+# Waf will now use the environment variables to find TensorFlow and build the Python extensions.
 RUN python3 ./waf configure --build-static --with-python && \
     python3 ./waf && \
     python3 ./waf install
