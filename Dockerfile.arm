@@ -1,4 +1,4 @@
-# STAGE 1: Build Essentia from source for the target architecture 
+# STAGE 1: Build Essentia from source for the target architecture
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia
@@ -19,14 +19,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 
-# Download, extract, build, and install Essentia
-RUN cd / && \
-    wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
+# Download and extract the Essentia source code
+WORKDIR /
+RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
     tar -xzf essentia.tar.gz && \
-    rm essentia.tar.gz && \
-    ESSENTIA_SRC_DIR=$(find . -maxdepth 1 -type d -name "essentia*" | head -n 1) && \
-    cd "$ESSENTIA_SRC_DIR" && \
-    mkdir build && \
+    rm essentia.tar.gz
+
+# Set the working directory to the extracted source folder.
+# This ensures the next RUN command executes in the correct context.
+WORKDIR /essentia-2.1_beta5
+
+# Create a build directory, change into it, and then run cmake/make.
+# This is the standard, most reliable way to build cmake projects.
+RUN mkdir build && \
     cd build && \
     cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
@@ -36,6 +41,7 @@ RUN cd / && \
     make install
 
 # --- End of builder stage ---
+
 
 # STAGE 2: Final application image
 FROM ubuntu:22.04
@@ -59,10 +65,12 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     iputils-ping \
     libopenblas-dev \
     liblapack-dev \
+    # Added dependencies for psycopg2-binary
     libpq-dev \
     gcc \
     g++ \
-    && rm -rf /var/lib/apt/lists/* && apt-get clean
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Install Python packages
 RUN pip3 install --no-cache-dir numpy==1.26.4
