@@ -13,7 +13,7 @@ on:
 
 jobs:
   build-and-test-arm:
-    runs-on: ARM64 # Use a native ARM runner
+    runs-on: ubuntu-latest # Use a standard runner
 
     permissions:
       contents: read # Allow checkout to read repository contents
@@ -25,6 +25,10 @@ jobs:
         with:
           # Checkout the specific tag from the manual input, or the tag from the push event
           ref: ${{ github.event.inputs.version_tag || github.ref }}
+
+      # Set up QEMU to enable building for multiple architectures on a standard runner
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -70,6 +74,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false # Do not push yet, just build
+          # Specify the platform to build for testing
+          platforms: linux/arm64
           tags: ${{ steps.docker_tags.outputs.test_tag }}
           load: true # Load image into Docker daemon for immediate use
 
@@ -221,6 +227,6 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          # This build will be for the native architecture of the runner (ARM64)
+          # This build will be for the emulated architecture
           platforms: linux/arm64
           tags: ${{ steps.docker_tags.outputs.docker_tags }}
