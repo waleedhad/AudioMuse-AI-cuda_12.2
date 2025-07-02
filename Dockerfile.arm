@@ -1,4 +1,4 @@
-# STAGE 1: Build Essentia from source for the target architecture
+# STAGE 1: Build Essentia from source for the target architecture 
 FROM ubuntu:22.04 AS builder
 
 # Install build dependencies for Essentia.
