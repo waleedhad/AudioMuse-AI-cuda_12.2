@@ -1,0 +1,126 @@
+# STAGE 1: Build Essentia from source for the target architecture
+FROM ubuntu:22.04 AS builder
+
+# Install build dependencies for Essentia
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    libfftw3-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libyaml-dev \
+    libtag1-dev \
+    libsamplerate0-dev \
+    python3-dev \
+    python3-numpy \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone Essentia repository
+WORKDIR /
+# We clone a specific, stable version of Essentia to ensure reproducibility
+RUN git clone --branch v2.1_beta5 --depth 1 https://github.com/MTG/essentia.git
+
+# Configure and build Essentia with TensorFlow wrappers
+WORKDIR /essentia
+RUN mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DESSENTIA_TENSORFLOW=ON \
+        -DESSENTIA_PYTHON_VERSION=3 && \
+    make -j$(nproc) && \
+    make install
+
+# --- End of builder stage ---
+
+
+# STAGE 2: Final application image
+FROM ubuntu:22.04
+
+ENV LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
+    apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev \
+    libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
+    ffmpeg wget git vim \
+    redis-tools curl \
+    supervisor \
+    strace \
+    procps \
+    iputils-ping \
+    libopenblas-dev \
+    liblapack-dev \
+    # Added dependencies for psycopg2-binary
+    libpq-dev \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Install numpy first as it's a common dependency
+RUN pip3 install --no-cache-dir numpy==1.26.4
+
+# Install the rest of the Python packages from PyPI
+RUN pip3 install --no-cache-dir \
+    Flask \
+    Flask-Cors \
+    redis \
+    requests \
+    scikit-learn \
+    rq \
+    pyyaml \
+    six \
+    annoy \
+    psycopg2-binary \
+    ftfy \
+    flasgger \
+    sqlglot \
+    google-generativeai
+
+# --- THE FIX ---
+# Copy the pre-compiled essentia library and its Python wrappers from the builder stage
+# This replaces 'RUN pip3 install essentia-tensorflow'
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
+COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
+
+# Create the model directory
+RUN mkdir -p /app/model
+
+# Download models from the GitHub release
+RUN wget -q -P /app/model \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_sad-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_sad-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
+
+# Copy the application code
+COPY . /app
+
+# Copy the supervisor configuration
+COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+ENV PYTHONPATH=/usr/local/lib/python3/dist-packages:/app
+
+EXPOSE 8000
+
+WORKDIR /workspace
+CMD ["bash", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then echo 'Starting worker processes via supervisord...' && /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf; else echo 'Starting web service...' && python3 /app/app.py; fi"]
