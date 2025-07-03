@@ -4,8 +4,6 @@
 FROM ubuntu:22.04 AS builder
 
 # Install all necessary build dependencies using apt.
-# - Using --no-install-recommends keeps the layer size smaller.
-# - The various lib...-dev packages are required by Essentia's algorithms.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -40,21 +38,17 @@ RUN git clone https://github.com/NeptuneHub/essentia.git
 # Set the working directory to the cloned source folder.
 WORKDIR /essentia
 
-# CRITICAL FIX 1: Set up TensorFlow linking.
-# This script inspects the installed TensorFlow Python package and creates the necessary
-# symbolic links and a pkg-config file (`tensorflow.pc`).
+# Set up TensorFlow linking using Essentia's helper script.
+# This creates the necessary symbolic links and pkg-config file.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
 # Set PKG_CONFIG_PATH so the build system can find the configuration files for
 # both the system's Python and the TensorFlow libraries we just set up.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
-# CRITICAL FIX 2: Set CXXFLAGS for modern NumPy.
-# This environment variable passes a flag to the C++ compiler, telling it to use
-# the modern NumPy C-API.
-ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
-
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
+# The CXXFLAGS for the deprecated NumPy API is no longer needed because you have
+# updated the Essentia source code to be compatible with modern NumPy.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
 RUN python3 ./waf install
@@ -115,7 +109,6 @@ COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
 # Copy the actual TensorFlow shared libraries from the builder's Python package directory.
-# This is crucial for the final image to have the required runtime libraries for TensorFlow.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/_pywrap_tensorflow_internal.so /usr/local/lib/
 
