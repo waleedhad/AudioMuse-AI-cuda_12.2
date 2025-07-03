@@ -46,12 +46,9 @@ RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 # both the system's Python and the TensorFlow libraries we just set up.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
-# CRITICAL FIX: Add CXXFLAGS to use the modern NumPy C-API.
-# This is required because we are calling `waf` directly, which does not use `setup.py`.
-# This flag resolves the "Could not build python extensions" error.
-ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
-
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
+# The CXXFLAGS for the deprecated NumPy API is no longer needed because you have
+# updated the Essentia source code to be compatible with modern NumPy.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
 RUN python3 ./waf install
@@ -71,9 +68,10 @@ ENV LANG=C.UTF-8 \
 WORKDIR /app
 
 # Install only the necessary runtime dependencies.
+# Added python3-dev, which is required to compile the 'annoy' package from source.
 RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
-    python3 python3-pip \
+    python3 python3-pip python3-dev \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
@@ -107,13 +105,13 @@ RUN pip3 install --no-cache-dir \
     google-generativeai
 
 # Copy pre-built Essentia libraries and Python bindings from the builder stage.
+# The paths are specific to Python 3.10 on Ubuntu 22.04.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
-# CRITICAL FIX: Copy the actual TensorFlow shared libraries from the correct path.
-# The `setup_tensorflow.py` script found them inside the `tensorflow_core` directory.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
+# Copy the actual TensorFlow shared libraries from the builder's Python package directory.
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/_pywrap_tensorflow_internal.so /usr/local/lib/
 
 # Update the dynamic linker's cache to recognize the newly copied shared libraries.
 RUN ldconfig
