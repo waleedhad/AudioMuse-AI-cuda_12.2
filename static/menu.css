@@ -88,6 +88,7 @@
     width: 100%;
     padding: 4rem 1.5rem 1.5rem;
     transition: margin-left 0.3s ease-in-out;
+    box-sizing: border-box; /* Prevents padding from adding to the width and causing overflow */
 }
 
 /* When the .sidebar-open class is added by JS, push the content over */
