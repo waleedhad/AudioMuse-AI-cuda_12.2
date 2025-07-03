@@ -1,4 +1,4 @@
-# STAGE 1: Build Essentia from your modernized repository on a modern base image
+# STAGE 1: Build Essentia from your modernized repository on a modern base image 
 FROM ubuntu:22.04 AS builder
 
 # Install modern build dependencies.
