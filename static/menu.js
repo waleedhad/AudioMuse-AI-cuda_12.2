@@ -4,6 +4,41 @@ document.addEventListener('DOMContentLoaded', function() {
     const mainContent = document.querySelector('.main-content');
     const currentPath = window.location.pathname;
 
+    // The menu is now positioned off-screen by default via CSS.
+    // This script just handles the open/close classes.
+
+    // Function to open the menu
+    const openMenu = () => {
+        sidebar.classList.add('open');
+        mainContent.classList.add('sidebar-open');
+    };
+
+    // Function to close the menu
+    const closeMenu = () => {
+        sidebar.classList.remove('open');
+        mainContent.classList.remove('sidebar-open');
+    };
+
+    // Event listener for the menu toggle button
+    if (menuToggle) {
+        menuToggle.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent this click from being caught by the document listener
+            if (sidebar.classList.contains('open')) {
+                closeMenu();
+            } else {
+                openMenu();
+            }
+        });
+    }
+
+    // Close menu when clicking outside of it
+    document.addEventListener('click', (e) => {
+        // If the sidebar is open and the click is not the toggle button or inside the sidebar
+        if (sidebar.classList.contains('open') && !menuToggle.contains(e.target) && !sidebar.contains(e.target)) {
+            closeMenu();
+        }
+    });
+
     // Define menu items
     const menuItems = [
         { href: '/', text: 'Home Page' },
@@ -21,32 +56,38 @@ document.addEventListener('DOMContentLoaded', function() {
         link.href = item.href;
         link.textContent = item.text;
 
-        // Check for active page, handling trailing slashes and the root path correctly.
+        // Check for active page
         const linkPath = item.href;
+        let isActive = false;
         if (linkPath === '/') {
-            // Special case for the home page to match '/' or '/index.html'
             if (currentPath === '/' || currentPath.endsWith('/index.html')) {
-                link.classList.add('active');
+                isActive = true;
             }
         } else {
-            // For other pages, check for an exact match or a match with a trailing slash.
             if (currentPath === linkPath || currentPath === linkPath + '/') {
-                link.classList.add('active');
+                isActive = true;
             }
         }
+
+        if (isActive) {
+            link.classList.add('active');
+        }
+
+        // Add event listener to auto-close menu on link click
+        link.addEventListener('click', (e) => {
+            if (!sidebar.classList.contains('open')) {
+                return; 
+            }
+            e.preventDefault();
+            closeMenu();
+            if (!isActive) {
+                setTimeout(() => {
+                    window.location.href = link.href;
+                }, 300); // Match CSS transition
+            }
+        });
 
         listItem.appendChild(link);
         navList.appendChild(listItem);
     });
-
-    // Function to toggle the menu
-    const toggleMenu = () => {
-        sidebar.classList.toggle('closed');
-        mainContent.classList.toggle('full-width');
-    };
-
-    // Event listener for the menu toggle button
-    if (menuToggle) {
-        menuToggle.addEventListener('click', toggleMenu);
-    }
 });

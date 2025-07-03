@@ -1,7 +1,6 @@
 /* --- Sidebar Menu Styles --- */
 .page-container {
     display: flex;
-    transition: margin-left 0.3s;
 }
 
 .sidebar {
@@ -13,14 +12,15 @@
     position: fixed;
     top: 0;
     left: 0;
-    transition: width 0.3s, padding 0.3s;
-    overflow: hidden;
+    transition: transform 0.3s ease-in-out;
     z-index: 1000;
+    /* Start off-screen by default */
+    transform: translateX(-100%);
 }
 
-.sidebar.closed {
-    width: 0;
-    padding: 1.5rem 0;
+/* When the .open class is added by JS, slide the menu in */
+.sidebar.open {
+    transform: translateX(0);
 }
 
 .sidebar-header {
@@ -39,27 +39,25 @@
 .menu-toggle {
     background: none;
     border: none;
-    /* Color when sidebar is OPEN (over dark background) */
-    color: white;
+    color: #1F2937; /* Default color is dark, for when menu is closed */
     font-size: 1.5rem;
     cursor: pointer;
     position: fixed;
     top: 1.5rem;
     left: 1.5rem; /* Always on the left */
     z-index: 1001;
-    transition: color 0.3s; /* Animate color change */
+    transition: color 0.3s;
 }
 
-/* When the sidebar is closed (main-content has .full-width), make the button dark */
-.main-content.full-width .menu-toggle {
-    color: #1F2937;
+/* When the sidebar is open, make the button light */
+.sidebar.open + .main-content .menu-toggle {
+    color: white;
 }
 
 .sidebar-nav {
     list-style: none;
     padding: 0;
     margin: 0;
-    /* Add margin to push the links down below the fixed menu button */
     margin-top: 4rem;
 }
 
@@ -85,14 +83,14 @@
 }
 
 .main-content {
-    margin-left: 250px;
-    /* Add more top padding to prevent content from overlapping the fixed menu button */
-    padding: 4rem 1.5rem 1.5rem;
-    width: calc(100% - 250px);
-    transition: margin-left 0.3s, width 0.3s;
-}
-
-.main-content.full-width {
+    /* Default state: full width */
     margin-left: 0;
     width: 100%;
+    padding: 4rem 1.5rem 1.5rem;
+    transition: margin-left 0.3s ease-in-out;
+}
+
+/* When the .sidebar-open class is added by JS, push the content over */
+.main-content.sidebar-open {
+    margin-left: 250px;
 }
