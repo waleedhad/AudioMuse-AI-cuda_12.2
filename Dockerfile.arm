@@ -42,13 +42,13 @@ WORKDIR /essentia
 # This creates the necessary symbolic links and pkg-config file.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set PKG_CONFIG_PATH so the build system can find the configuration files for
-# both the system's Python and the TensorFlow libraries we just set up.
+# Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
+# This is the definitive fix for the linking errors.
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow_core
+ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
-# The CXXFLAGS for the deprecated NumPy API is no longer needed because you have
-# updated the Essentia source code to be compatible with modern NumPy.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
 RUN python3 ./waf install
@@ -110,8 +110,8 @@ COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
 # Copy the actual TensorFlow shared libraries from the builder's Python package directory.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/_pywrap_tensorflow_internal.so /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
 
 # Update the dynamic linker's cache to recognize the newly copied shared libraries.
 RUN ldconfig
