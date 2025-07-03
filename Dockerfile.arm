@@ -30,17 +30,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir numpy==1.26.4
 RUN pip3 install tensorflow-aarch64==2.16.1
 
-# THE FINAL FIX: Create a symbolic link to the TensorFlow C++ library in a standard system path
-# This allows the essentia build script to find it correctly.
-RUN ln -s /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/libtensorflow_framework.so && \
-    ldconfig
-
 # Clone your updated Essentia repository
 WORKDIR /
 RUN git clone https://github.com/NeptuneHub/essentia.git
 
 # Set the working directory to the cloned source folder.
 WORKDIR /essentia
+
+# THE FINAL FIX: Use Essentia's own helper script to set up TensorFlow.
+# This is more robust than setting environment variables manually.
+RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
+
+# Add the new pkg-config path created by the setup script.
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
 # Build and install using the Waf build system.
 # The updated source code should now compile correctly in this modern environment.
@@ -102,9 +104,9 @@ RUN pip3 install --no-cache-dir \
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
-# Also copy the TensorFlow library we used for the build
-COPY --from=builder /usr/local/lib/libtensorflow_framework.so /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
+# Also copy the TensorFlow C library we used for the build
+COPY --from=builder /usr/local/lib/libtensorflow.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/libtensorflow_framework.so.2 /usr/local/lib/
 
 # Create model directory
 RUN mkdir -p /app/model
