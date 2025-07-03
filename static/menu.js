@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Define menu items
     const menuItems = [
-        { href: '/', text: 'Home Page' },
+        { href: '/', text: 'Analysis and Clustering' },
         { href: '/chat', text: 'Instant Playlist' },
         { href: '/similarity', text: 'Playlist from Similar Song' }
     ];
