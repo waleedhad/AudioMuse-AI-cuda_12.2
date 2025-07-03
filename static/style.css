@@ -1,4 +1,4 @@
-/* --- Base & Typography (Inspired by chat.html) --- */
+/* --- Base & Typography --- */
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
     margin: 0;
@@ -14,6 +14,7 @@ body {
     max-width: 960px;
     margin-left: auto;
     margin-right: auto;
+    padding: 0 1rem; /* Add horizontal padding for smaller screens */
 }
 
 /* --- Headers --- */
@@ -56,35 +57,30 @@ section {
     border: 1px solid #E5E7EB;
 }
 
-/* --- Configuration Header & View Switcher --- */
+/* --- Configuration Header & View Switcher (for index.html) --- */
 #config-header {
     display: flex;
-    flex-direction: column; /* Stack title group and switcher vertically */
-    gap: 1.5rem;            /* Add space between the two groups */
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    justify-content: space-between;
+    align-items: center;
+    gap: 1.5rem;
     margin-bottom: 1.5rem;
     padding-bottom: 1.5rem;
     border-bottom: 1px solid #E5E7EB;
 }
 
 .config-title-group {
-    text-align: center; /* Center the title and subtitle text */
+    flex-grow: 1;
 }
 
 .config-title-group .subtitle {
-    margin-top: 0.5rem; /* Increased space, similar to chat.html's mt-2 */
+    margin-top: 0.5rem;
     color: #4B5563;
 }
 
-/* The config header now contains an H1, ensure it has no extra borders or padding */
 #config-header h1 {
     border: none;
     padding: 0;
-}
-
-.view-switcher {
-    /* This ensures the container for the buttons is full-width and aligns the buttons to the right. */
-    width: 100%;
-    text-align: right;
 }
 
 .view-switcher button {
@@ -108,7 +104,6 @@ section {
     background-color: #F9FAFB;
 }
 
-
 /* --- Form Styling --- */
 form {
     color: #374151;
@@ -131,14 +126,14 @@ legend {
 .param-group {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 1.5rem; /* Increased gap */
+    gap: 1.5rem;
 }
 
 label {
     display: block;
     font-size: 0.875rem;
-    color: #4B5563; /* Softer label color */
-    margin-bottom: 0.5rem; /* More space */
+    color: #4B5563;
+    margin-bottom: 0.5rem;
     font-weight: 500;
 }
 
@@ -156,6 +151,7 @@ textarea {
     box-sizing: border-box;
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
     transition: border-color 0.2s, box-shadow 0.2s;
+    font-size: 1rem; /* Ensure consistent font size */
 }
 
 input[type="text"]:focus,
@@ -168,6 +164,10 @@ textarea:focus {
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
 }
 
+textarea {
+    min-height: 120px;
+    resize: vertical;
+}
 
 /* --- AI Provider Specific Config Groups --- */
 #ollama-config-group,
@@ -188,7 +188,11 @@ textarea:focus {
 }
 
 .task-buttons button,
-#cancel-task-btn {
+#cancel-task-btn,
+#playlistForm button,
+#similarity-form button,
+#playlist-form button,
+#createPlaylistForm button {
     flex-grow: 1;
     color: white;
     font-weight: 700;
@@ -198,19 +202,33 @@ textarea:focus {
     cursor: pointer;
     transition: background-color 0.2s;
     width: 100%;
+    font-size: 1rem;
+    margin-top: 1rem; /* Add space above buttons */
 }
 
 #start-analysis-btn,
 #start-clustering-btn,
-#fetch-playlists-btn {
+#fetch-playlists-btn,
+#playlistForm button,
+#similarity-form button {
     background-color: #2563EB;
 }
 
 #start-analysis-btn:hover,
 #start-clustering-btn:hover,
-#fetch-playlists-btn:hover {
+#fetch-playlists-btn:hover,
+#playlistForm button:hover,
+#similarity-form button:hover {
     background-color: #1D4ED8;
 }
+
+#createPlaylistForm button {
+    background-color: #16A34A; /* Green */
+}
+#createPlaylistForm button:hover {
+    background-color: #15803D;
+}
+
 
 #cancel-task-btn {
     background-color: #DC2626;
@@ -221,12 +239,12 @@ textarea:focus {
 
 button:disabled,
 #cancel-task-btn:disabled {
-    background-color: #93C5FD; /* Lighter blue for disabled */
-    cursor: not-allowed;
-    opacity: 1; /* Override default opacity */
+    background-color: #93C5FD !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important;
 }
 #cancel-task-btn:disabled {
-    background-color: #FCA5A5; /* Lighter red for disabled cancel */
+    background-color: #FCA5A5 !important;
 }
 
 
@@ -240,6 +258,7 @@ button:disabled,
 #task-status-display p {
     margin: 0.5rem 0;
     color: #4B5563;
+    word-break: break-all;
 }
 
 #task-status-display .status-label {
@@ -278,7 +297,7 @@ button:disabled,
     border-radius: 9999px;
     height: 0.625rem;
     margin-top: 0.5rem;
-    overflow: hidden; /* Ensure progress bar stays within bounds */
+    overflow: hidden;
 }
 
 #progress-bar {
@@ -323,6 +342,7 @@ button:disabled,
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .playlist-name {
@@ -354,54 +374,196 @@ button:disabled,
     color: #4B5563;
 }
 
-/* --- Loading Spinner --- */
-#loading-spinner {
-    display: none;
-    justify-content: center;
-    align-items: center;
-    padding: 4rem 0;
-    flex-direction: column;
-}
-
-#loading-spinner div {
-    height: 4rem;
-    width: 4rem;
-    border-radius: 9999px;
-    border: 4px solid #93C5FD;
-    border-top-color: #2563EB;
-    animation: spin 1s linear infinite;
-}
-
-#loading-spinner p {
-    margin-top: 1.5rem;
-    color: #4B5563;
-    font-size: 1.125rem;
-    font-weight: 500;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
 /* --- Utility --- */
 .hidden {
     display: none !important;
 }
 
+/* --- Styles for Chat & Similarity Pages --- */
+
+/* General page header for chat/similarity */
+.page-header {
+    text-align: center;
+    padding-bottom: 1.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.page-header h1 {
+    margin-bottom: 0.5rem;
+}
+
+.page-header p {
+    color: #4B5563;
+    margin-top: 0;
+}
+
+/* Chat page specific */
+#responseArea {
+    background-color: #F3F4F6;
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    min-height: 100px;
+    color: #374151;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-top: 1rem;
+}
+
+#responseArea .italic {
+    color: #6B7280;
+    font-style: italic;
+}
+
+#responseArea .text-red-600 {
+    color: #DC2626;
+    font-weight: 600;
+}
+
+#createPlaylistSection {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    background-color: #F9FAFB;
+}
+
+/* Similarity page specific */
+.autocomplete-container {
+    position: relative;
+}
+
+.autocomplete-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: white;
+    border: 1px solid #D1D5DB;
+    border-top: none;
+    border-radius: 0 0 0.5rem 0.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+.autocomplete-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+}
+
+.autocomplete-item:hover, .autocomplete-item.active {
+    background-color: #F3F4F6;
+}
+
+.autocomplete-item .title {
+    font-weight: 600;
+    color: #111827;
+}
+
+.autocomplete-item .artist {
+    font-size: 0.875rem;
+    color: #4B5563;
+}
+
+#results-table-wrapper {
+    background-color: #F9FAFB;
+    padding: 0; /* Remove padding to let table be full width */
+    border-radius: 0.5rem;
+    overflow-x: auto; /* For responsive tables */
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #E5E7EB;
+    white-space: nowrap; /* Prevent text wrapping */
+}
+
+th {
+    background-color: #F3F4F6;
+    font-weight: 600;
+    color: #374151;
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr:hover {
+    background-color: #f3f4f6;
+}
+
+#playlist-creator {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    background-color: #F9FAFB;
+}
+
+/* Status messages */
+#status, #playlist-status, #jellyfinResponseArea {
+    margin-top: 1rem;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    text-align: center;
+    border-radius: 0.375rem;
+}
+
+#jellyfinResponseArea.text-green-600, .status-success {
+    color: #166534;
+    background-color: #D1FAE5;
+}
+
+#jellyfinResponseArea.text-red-600, .status-error {
+    color: #991B1B;
+    background-color: #FEE2E2;
+}
+
+
 /* --- Responsive Design --- */
+@media (max-width: 768px) {
+    .main-content {
+        padding-top: 5rem; /* More space for fixed menu button */
+    }
+}
+
 @media (max-width: 640px) {
-    body {
-        padding: 1rem;
+    .container {
+        padding: 0 0.5rem;
     }
     
     section, fieldset {
         padding: 1rem;
     }
 
+    h1 {
+        font-size: 1.5rem;
+    }
+
+    h2 {
+        font-size: 1.25rem;
+    }
+
     #config-header {
         flex-direction: column;
-        align-items: flex-start;
+        align-items: stretch; /* Make items full width */
+        text-align: center;
         gap: 1rem;
+    }
+
+    .view-switcher {
+        display: flex;
+        width: 100%;
+    }
+    .view-switcher button {
+        flex: 1; /* Make buttons take equal space */
     }
 }
