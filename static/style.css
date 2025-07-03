@@ -59,18 +59,14 @@ section {
 
 /* --- Configuration Header & View Switcher (for index.html) --- */
 #config-header {
-    display: flex;
-    flex-wrap: wrap; /* Allow wrapping on small screens */
-    justify-content: space-between;
-    align-items: center;
-    gap: 1.5rem;
     margin-bottom: 1.5rem;
     padding-bottom: 1.5rem;
     border-bottom: 1px solid #E5E7EB;
 }
 
 .config-title-group {
-    flex-grow: 1;
+    text-align: center;
+    margin-bottom: 1.5rem;
 }
 
 .config-title-group .subtitle {
@@ -81,6 +77,11 @@ section {
 #config-header h1 {
     border: none;
     padding: 0;
+}
+
+.header-controls {
+    display: flex;
+    justify-content: flex-end;
 }
 
 .view-switcher button {
@@ -222,11 +223,13 @@ textarea {
     background-color: #1D4ED8;
 }
 
-#createPlaylistForm button {
-    background-color: #16A34A; /* Green */
+#createPlaylistForm button,
+#playlist-form button[style*="background-color: #16A34A"] {
+    background-color: #16A34A !important; /* Green */
 }
-#createPlaylistForm button:hover {
-    background-color: #15803D;
+#createPlaylistForm button:hover,
+#playlist-form button[style*="background-color: #16A34A"]:hover {
+    background-color: #15803D !important;
 }
 
 
@@ -554,16 +557,24 @@ tbody tr:hover {
 
     #config-header {
         flex-direction: column;
-        align-items: stretch; /* Make items full width */
-        text-align: center;
+        align-items: stretch;
         gap: 1rem;
     }
 
-    .view-switcher {
-        display: flex;
-        width: 100%;
+    .config-title-group {
+        text-align: center;
     }
+
+    .header-controls {
+        display: flex;
+        justify-content: center;
+    }
+
+    .view-switcher {
+        display: inline-flex;
+    }
+
     .view-switcher button {
-        flex: 1; /* Make buttons take equal space */
+        flex: 1;
     }
 }
