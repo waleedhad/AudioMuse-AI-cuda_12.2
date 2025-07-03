@@ -2,6 +2,7 @@
 FROM ubuntu:22.04 AS builder
 
 # Install modern build dependencies.
+# Added libeigen3-dev, a required C++ dependency for Essentia.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -9,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     python3-pip \
     pkg-config \
+    libeigen3-dev \
     libfftw3-dev \
     libavcodec-dev \
     libavformat-dev \
