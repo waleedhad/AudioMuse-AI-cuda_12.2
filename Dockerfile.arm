@@ -1,7 +1,13 @@
-# STAGE 1: Build Essentia from your modernized repository on a modern base image
+# STAGE 1: Build Essentia from your modernized repository
+# This stage compiles Essentia and its dependencies for the target ARM64 architecture.
+# It uses a modern Ubuntu base image to ensure compatibility with recent toolchains.
 FROM ubuntu:22.04 AS builder
 
-# Install modern build dependencies.
+# Install all necessary build dependencies using apt.
+# - Using --no-install-recommends keeps the layer size smaller.
+# - build-essential, git, pkg-config, and python3-dev are standard for C++/Python projects.
+# - The various lib...-dev packages are required by Essentia's algorithms.
+# - libeigen3-dev is used for linear algebra operations.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -20,32 +26,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libyaml-cpp-dev \
     libtag1-dev \
     libsamplerate0-dev \
-    libatlas-base-dev \
     python3-dev \
     python3-setuptools \
     && rm -rf /var/lib/apt/lists/*
 
-# Install modern Python dependencies for the build
+# Install the specific Python dependencies required for the build.
+# This ensures that Essentia is compiled against the exact versions of NumPy and TensorFlow
+# that will be used in the final application.
 RUN pip3 install --no-cache-dir numpy==1.26.4
-RUN pip3 install tensorflow-aarch64==2.16.1
+RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
 
-# Clone your updated Essentia repository
+# Clone your updated Essentia repository.
+# Using git clone is preferable to downloading a tarball as it ensures we have
+# all the modifications you've made in your fork.
 WORKDIR /
 RUN git clone https://github.com/NeptuneHub/essentia.git
 
 # Set the working directory to the cloned source folder.
 WORKDIR /essentia
 
-# Use Essentia's own helper script to set up TensorFlow headers and pkg-config.
+# CRITICAL FIX 1: Set up TensorFlow linking.
+# This script inspects the installed TensorFlow Python package and creates the necessary
+# symbolic links and a pkg-config file (`tensorflow.pc`). This is the most robust way
+# to ensure Essentia's build system can find the TensorFlow C++ libraries.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set environment variables to help the compiler and linker find the TensorFlow libraries.
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
-ENV LDFLAGS="-L${TF_DIR} -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
+# Set PKG_CONFIG_PATH so the build system can find the configuration files for
+# both the system's Python and the TensorFlow libraries we just set up.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
-# Build and install using the Waf build system in separate, cacheable layers.
-# This allows for faster debugging if only the final linking/install step fails.
+# CRITICAL FIX 2: Set CXXFLAGS for modern NumPy.
+# This environment variable passes a flag to the C++ compiler, telling it to use
+# the modern NumPy C-API. This resolves the "Could not build python extensions"
+# error encountered during the `waf configure` step.
+ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
+
+# Build and install Essentia using the Waf build system.
+# We use separate RUN commands for each step (configure, build, install) to leverage
+# Docker's layer caching. This makes debugging much faster if a later step fails.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
 RUN python3 ./waf install
@@ -53,7 +71,9 @@ RUN python3 ./waf install
 # --- End of builder stage ---
 
 
-# STAGE 2: Final application image using Ubuntu 22.04
+# STAGE 2: Final application image
+# This stage creates a clean, smaller image containing only the runtime dependencies
+# and the pre-compiled application artifacts.
 FROM ubuntu:22.04
 
 ENV LANG=C.UTF-8 \
@@ -62,10 +82,12 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Install runtime dependencies.
+# Install only the necessary runtime dependencies.
+# We install the shared libraries (e.g., libfftw3-3) but not the -dev packages.
+# We also include tools needed for your application (redis, supervisor, etc.).
 RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-dev \
+    python3 python3-pip \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
@@ -73,14 +95,13 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     strace \
     procps \
     iputils-ping \
-    # Added dependencies for psycopg2-binary
     libpq-dev \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install modern Python packages for the final image.
+# Install Python packages for the final application.
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
 RUN pip3 install --no-cache-dir \
@@ -99,20 +120,21 @@ RUN pip3 install --no-cache-dir \
     sqlglot \
     google-generativeai
 
-# Copy pre-built Essentia libraries and Python bindings from builder
+# Copy pre-built Essentia libraries and Python bindings from the builder stage.
+# The paths are specific to Python 3.10 on Ubuntu 22.04.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
-# Also copy the TensorFlow libraries we used for the build into a standard system path
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/_pywrap_tensorflow_internal.so /usr/local/lib/
-# Update the dynamic linker's cache
+# Copy the actual TensorFlow shared libraries from the builder's Python package directory.
+# This is crucial for the final image to have the required runtime libraries for TensorFlow.
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
+
+# Update the dynamic linker's cache to recognize the newly copied shared libraries.
 RUN ldconfig
 
-# Create model directory
+# Create model directory and download models.
 RUN mkdir -p /app/model
-
-# Download models
 RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
@@ -130,13 +152,11 @@ RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
 
-# Copy application code
+# Copy application code and configuration.
 COPY . /app
-
-# Copy Supervisor config
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Updated paths for Python 3.10
+# Set the PYTHONPATH to include the installed packages.
 ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
 
 EXPOSE 8000
