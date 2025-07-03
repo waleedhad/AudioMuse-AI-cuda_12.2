@@ -5,9 +5,7 @@ FROM ubuntu:22.04 AS builder
 
 # Install all necessary build dependencies using apt.
 # - Using --no-install-recommends keeps the layer size smaller.
-# - build-essential, git, pkg-config, and python3-dev are standard for C++/Python projects.
 # - The various lib...-dev packages are required by Essentia's algorithms.
-# - libeigen3-dev is used for linear algebra operations.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -26,19 +24,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libyaml-cpp-dev \
     libtag1-dev \
     libsamplerate0-dev \
+    libatlas-base-dev \
     python3-dev \
     python3-setuptools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the specific Python dependencies required for the build.
-# This ensures that Essentia is compiled against the exact versions of NumPy and TensorFlow
-# that will be used in the final application.
 RUN pip3 install --no-cache-dir numpy==1.26.4
 RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
 
 # Clone your updated Essentia repository.
-# Using git clone is preferable to downloading a tarball as it ensures we have
-# all the modifications you've made in your fork.
 WORKDIR /
 RUN git clone https://github.com/NeptuneHub/essentia.git
 
@@ -47,8 +42,7 @@ WORKDIR /essentia
 
 # CRITICAL FIX 1: Set up TensorFlow linking.
 # This script inspects the installed TensorFlow Python package and creates the necessary
-# symbolic links and a pkg-config file (`tensorflow.pc`). This is the most robust way
-# to ensure Essentia's build system can find the TensorFlow C++ libraries.
+# symbolic links and a pkg-config file (`tensorflow.pc`).
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
 # Set PKG_CONFIG_PATH so the build system can find the configuration files for
@@ -57,13 +51,10 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfi
 
 # CRITICAL FIX 2: Set CXXFLAGS for modern NumPy.
 # This environment variable passes a flag to the C++ compiler, telling it to use
-# the modern NumPy C-API. This resolves the "Could not build python extensions"
-# error encountered during the `waf configure` step.
+# the modern NumPy C-API.
 ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
 
-# Build and install Essentia using the Waf build system.
-# We use separate RUN commands for each step (configure, build, install) to leverage
-# Docker's layer caching. This makes debugging much faster if a later step fails.
+# Build and install Essentia using the Waf build system in separate, cacheable layers.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
 RUN python3 ./waf install
@@ -83,8 +74,6 @@ ENV LANG=C.UTF-8 \
 WORKDIR /app
 
 # Install only the necessary runtime dependencies.
-# We install the shared libraries (e.g., libfftw3-3) but not the -dev packages.
-# We also include tools needed for your application (redis, supervisor, etc.).
 RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
     python3 python3-pip \
@@ -127,8 +116,8 @@ COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
 # Copy the actual TensorFlow shared libraries from the builder's Python package directory.
 # This is crucial for the final image to have the required runtime libraries for TensorFlow.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/_pywrap_tensorflow_internal.so /usr/local/lib/
 
 # Update the dynamic linker's cache to recognize the newly copied shared libraries.
 RUN ldconfig
