@@ -89,9 +89,8 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install Python packages for the final image.
-# We can use a modern numpy here as it's separate from the build environment.
-RUN pip3 install --no-cache-dir numpy==1.26.4
+# Install a version of NumPy compatible with Python 3.8.
+RUN pip3 install --no-cache-dir numpy==1.21.6
 
 # Install specific versions of grpcio and tools first to avoid conflicts.
 RUN pip3 install --no-cache-dir grpcio==1.46.3 grpcio-tools==1.46.3
