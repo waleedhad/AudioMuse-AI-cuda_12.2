@@ -46,13 +46,10 @@ RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 # both the system's Python and the TensorFlow libraries we just set up.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
-# THE DEFINITIVE FIX: Set CXXFLAGS to use the older NumPy C-API.
-# This resolves the "Could not build python extensions" error when compiling
-# against a modern NumPy version on Ubuntu 22.04.
-ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
-
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow
+# THE DEFINITIVE FIX: Pass the CXXFLAGS directly to the configure command to ensure
+# it is used when compiling the Python extensions. This resolves the NumPy C-API error.
+RUN CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION" python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
 RUN python3 ./waf install
 
