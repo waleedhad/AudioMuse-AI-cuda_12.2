@@ -1,8 +1,7 @@
-# STAGE 1: Build Essentia from your modernized repository on a modern base image 
+# STAGE 1: Build Essentia from your modernized repository on a modern base image
 FROM ubuntu:22.04 AS builder
 
 # Install modern build dependencies.
-# Added libeigen3-dev, a required C++ dependency for Essentia.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -37,15 +36,16 @@ RUN git clone https://github.com/NeptuneHub/essentia.git
 # Set the working directory to the cloned source folder.
 WORKDIR /essentia
 
-# THE FINAL FIX: Use Essentia's own helper script to set up TensorFlow.
-# This is more robust than setting environment variables manually.
+# Use Essentia's own helper script to set up TensorFlow headers and pkg-config.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Add the new pkg-config path created by the setup script.
+# THE FINAL FIX: Explicitly tell the linker where to find the TensorFlow libraries.
+# This works in combination with the setup script.
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
+ENV LDFLAGS="-L${TF_DIR} -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
 # Build and install using the Waf build system.
-# The updated source code should now compile correctly in this modern environment.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
     python3 ./waf && \
     python3 ./waf install
@@ -100,13 +100,14 @@ RUN pip3 install --no-cache-dir \
     google-generativeai
 
 # Copy pre-built Essentia libraries and Python bindings from builder
-# Updated paths for Python 3.10
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
-# Also copy the TensorFlow C library we used for the build
-COPY --from=builder /usr/local/lib/libtensorflow.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/libtensorflow_framework.so.2 /usr/local/lib/
+# Also copy the TensorFlow libraries we used for the build into a standard system path
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/_pywrap_tensorflow_internal.so /usr/local/lib/
+# Update the dynamic linker's cache
+RUN ldconfig
 
 # Create model directory
 RUN mkdir -p /app/model
