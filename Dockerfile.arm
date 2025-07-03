@@ -39,16 +39,16 @@ WORKDIR /essentia
 # Use Essentia's own helper script to set up TensorFlow headers and pkg-config.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# THE FINAL FIX: Explicitly tell the linker where to find the TensorFlow libraries.
-# This works in combination with the setup script.
+# Set environment variables to help the compiler and linker find the TensorFlow libraries.
 ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
 ENV LDFLAGS="-L${TF_DIR} -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
-# Build and install using the Waf build system.
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
-    python3 ./waf && \
-    python3 ./waf install
+# Build and install using the Waf build system in separate, cacheable layers.
+# This allows for faster debugging if only the final linking/install step fails.
+RUN python3 ./waf configure --build-static --with-python --with-tensorflow
+RUN python3 ./waf
+RUN python3 ./waf install
 
 # --- End of builder stage ---
 
