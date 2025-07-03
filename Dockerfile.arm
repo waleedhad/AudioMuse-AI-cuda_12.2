@@ -1,12 +1,11 @@
-# STAGE 1: Build Essentia from source for the target architecture
-# Use Ubuntu 20.04 (Focal) as the base, which uses Python 3.8, compatible with older NumPy.
-FROM ubuntu:20.04 AS builder
+# STAGE 1: Build Essentia from your modernized repository on a modern base image
+FROM ubuntu:22.04 AS builder
 
-# Install build dependencies for Essentia.
-# Replaced libopenblas-dev with libatlas-base-dev for better ARM compatibility.
+# Install modern build dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
+    git \
     wget \
     python3-pip \
     pkg-config \
@@ -25,44 +24,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-setuptools \
     && rm -rf /var/lib/apt/lists/*
 
-# Install an older, compatible version of NumPy for the build process.
-RUN pip3 install numpy==1.19.5
-
-# THE KEY FIX: Install specific versions of grpcio and tools that have pre-compiled ARM64 wheels.
-# This avoids compiling them from source, which takes hours.
-RUN pip3 install grpcio==1.46.3 grpcio-tools==1.46.3
-
-# Install TensorFlow for ARM64 using pip. This provides the necessary C libraries and headers.
+# Install modern Python dependencies for the build
+RUN pip3 install --no-cache-dir numpy==1.26.4
 RUN pip3 install tensorflow-aarch64==2.16.1
 
-# Download and extract the Essentia source code
+# Clone your updated Essentia repository
 WORKDIR /
-RUN wget -qO essentia.tar.gz https://github.com/MTG/essentia/archive/refs/tags/v2.1_beta5.tar.gz && \
-    tar -xzf essentia.tar.gz && \
-    rm essentia.tar.gz
+RUN git clone https://github.com/NeptuneHub/essentia.git
 
-# Set the working directory to the extracted source folder.
-WORKDIR /essentia-2.1_beta5
-
-# Set environment variables to help the compiler find the necessary libraries.
-# Updated paths for Python 3.8
-ENV TF_DIR=/usr/local/lib/python3.8/dist-packages/tensorflow
-ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/
-ENV CFLAGS="-I${TF_DIR}/include"
-ENV CXXFLAGS="-I${TF_DIR}/include"
-ENV LDFLAGS="-L${TF_DIR} -ltensorflow_framework"
+# Set the working directory to the cloned source folder.
+WORKDIR /essentia
 
 # Build and install using the Waf build system.
-RUN python3 ./waf configure --build-static --with-python && \
+# The updated source code should now compile correctly in this modern environment.
+RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
     python3 ./waf && \
     python3 ./waf install
 
 # --- End of builder stage ---
 
 
-# STAGE 2: Final application image
-# Use Ubuntu 20.04 as the final base image to maintain consistency.
-FROM ubuntu:20.04
+# STAGE 2: Final application image using Ubuntu 22.04
+FROM ubuntu:22.04
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
@@ -71,7 +54,6 @@ ENV LANG=C.UTF-8 \
 WORKDIR /app
 
 # Install runtime dependencies.
-# Removed libatlas-base-dev as it's only a build-time dependency.
 RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
@@ -89,11 +71,8 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Install a version of NumPy compatible with Python 3.8.
-RUN pip3 install --no-cache-dir numpy==1.21.6
-
-# Install specific versions of grpcio and tools first to avoid conflicts.
-RUN pip3 install --no-cache-dir grpcio==1.46.3 grpcio-tools==1.46.3
+# Install modern Python packages for the final image.
+RUN pip3 install --no-cache-dir numpy==1.26.4
 
 RUN pip3 install --no-cache-dir \
     Flask \
@@ -112,8 +91,8 @@ RUN pip3 install --no-cache-dir \
     google-generativeai
 
 # Copy pre-built Essentia libraries and Python bindings from builder
-# Updated paths for Python 3.8
-COPY --from=builder /usr/local/lib/python3.8/dist-packages/essentia* /usr/local/lib/python3.8/dist-packages/
+# Updated paths for Python 3.10
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
 
 # Create model directory
@@ -143,8 +122,8 @@ COPY . /app
 # Copy Supervisor config
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Updated paths for Python 3.8
-ENV PYTHONPATH=/usr/local/lib/python3.8/dist-packages:/app
+# Updated paths for Python 3.10
+ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
 
 EXPOSE 8000
 
