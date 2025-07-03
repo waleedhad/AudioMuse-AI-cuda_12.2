@@ -1,0 +1,37 @@
+# .dockerignore
+
+# Git and version control
+.git
+.gitignore
+.gitattributes
+.github
+
+# Docker-specific files that shouldn't be in the image
+.dockerignore
+Dockerfile
+
+# Deployment files
+# These are for deploying the container, not for running the code inside it.
+deployments/
+
+# Python virtual environment and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv
+.venv
+env
+.env*
+
+# IDE and editor configuration
+.vscode/
+.idea/
+
+# Documentation, screenshots, and local test files
+README.md
+docs/
+screenshot/
+.pytest_cache/
+htmlcov/
+*.log

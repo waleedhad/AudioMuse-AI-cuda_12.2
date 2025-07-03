@@ -1082,6 +1082,7 @@ def _perform_single_clustering_iteration(
             f"OtherFeatDiv: {raw_other_features_diversity_score:.2f}/{other_features_diversity_score:.2f}, "
             f"OtherFeatPur: {raw_other_feature_purity_component:.2f}/{other_feature_purity_component:.2f}, "
             f"Sil: {s_score_raw_val_for_log:.2f}/{silhouette_metric_value:.2f}, "
+
             f"DB: {db_score_raw_val_for_log:.2f}/{davies_bouldin_metric_value:.2f}, "
             f"CH: {ch_score_raw_val_for_log:.2f}/{calinski_harabasz_metric_value:.2f}, "
             f"FinalScore: {final_enhanced_score:.2f} "
@@ -1089,6 +1090,7 @@ def _perform_single_clustering_iteration(
             f"OtherFeatDiv={current_score_weight_other_feature_diversity}, OtherFeatPur={current_score_weight_other_feature_purity}, "
             f"Sil={current_score_weight_silhouette}, DB={current_score_weight_davies_bouldin}, CH={current_score_weight_calinski_harabasz})"
         )
+
         logging.info(log_message)
         pca_model_details_to_return = None
         if pca_model_for_this_iteration and pca_config.get("enabled"):

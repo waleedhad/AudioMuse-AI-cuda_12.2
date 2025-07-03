@@ -14,6 +14,7 @@ Addional important information on this project can also be found here:
 - [Quick Start Deployment on K3S](#quick-start-deployment-on-k3s)
 - [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
 - [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
+- [Playlist from Similar song (via similarity Interface)](#playlist-from-similar-song-via-similarity-interface)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
 - [Configuration Parameters](#configuration-parameters)
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
@@ -28,6 +29,7 @@ Addional important information on this project can also be found here:
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Instant Chat Deep Dive](#instant-chat-deep-dive)
+- [Playlist from Similar song - Deep dive](#playlist-from-similar-song---deep-dive)
 - [Screenshots](#screenshots)
 - [Key Technologies](#key-technologies)
 - [Additional Documentation](#additional-documentation)
@@ -197,6 +199,23 @@ For a quick and interactive way to generate playlists without running the full e
 
 **Note:** The quality and relevance of the **Instant Playlist** heavily depend on the capabilities of the configured AI model and the detail of your request. The underlying music data must have been previously analyzed using the "Analysis Task" for this feature to find songs.
 
+## **Playlist from Similar song (via similarity Interface)**
+
+**IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
+
+This new functionality enable you to search the top N similar song that are similar to another one. Basically during the analysis task an Approximate Nearest Neighbors (Annoy) index is made. Then with the new similarity interface you can just search for similar song.
+
+**How to Use:**
+1.  **Access the Chat Interface:**
+    *   Navigate to `http://<EXTERNAL-IP>:8000/similarity` (or `http://localhost:8000//similarity` for local Docker Compose deployments).
+2.  **Input Your Song**
+    *   Start writing the first 3+ letter of your favourite artist, at the third letter a search will be made helping you in finding correct Artist and song
+3.  **Run the similarity search**
+    *   Ask the front-end to find the similar track, it will show to you in the table
+4.  **Review and Create:**
+    *   Input a name for the playlist and ask the interface to create it directly on jellyfin. That's it!
+
+
 ## **Kubernetes Deployment (K3S Example)**
 
 The Quick Start provided in the `playlist` namespace the following resources:
@@ -267,6 +286,9 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
 | `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
+| **Similarity General**    |                                                                              |                                      |
+| `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
+| `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
 | `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `100`                                |
 | `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `5`                                  |
@@ -584,7 +606,33 @@ The "Instant Playlist" feature, accessible via `chat.html`, provides a direct wa
     *   The results (list of songs: `item_id`, `title`, `author`) or any errors are sent back to `chat.html`.
     *   The frontend displays the AI's textual response (including the generated SQL and any processing messages) and the list of songs.
     *   If songs are returned, a form appears allowing the user to name the playlist. Submitting this form calls another endpoint (`/api/createJellyfinPlaylist`) in `app_chat.py` which uses the Jellyfin API to create the playlist with the chosen name (appended with `_instant`) and the retrieved song IDs.
-    
+
+## Playlist from Similar song - Deep dive
+
+The "Playlist from Similar Song" feature provides an interactive way to discover music by finding tracks that are sonically similar to a chosen song. This process relies on a powerful combination of pre-computed audio embeddings and a specialized high-speed search index.
+
+**Core Workflow:**
+
+1. **Index Creation (During Analysis Task):**  
+   * The foundation of this feature is an **Approximate Nearest Neighbors (ANN) index**, which is built using Spotify's **Annoy** library.  
+   * During the main "Analysis Task," after the 200-dimensional MusiCNN embedding has been generated for each track, a dedicated function (build\_and\_store\_annoy\_index) is triggered.  
+   * This function gathers all embeddings from the database and uses them to build the Annoy index. It uses an 'angular' distance metric, which is highly effective for comparing the "direction" of high-dimensional vectors like audio embeddings, thus capturing sonic similarity well.  
+   * The completed index, which is a highly optimized data structure for fast lookups, is then saved to the PostgreSQL database. This ensures it persists and only needs to be rebuilt when new music is analyzed.  
+2. **User Interface (similarity.html):**  
+   * The user navigates to the /similarity page.  
+   * An autocomplete search box allows the user to easily find a specific "seed" song by typing its title and/or artist. This search is powered by the /api/search\_tracks endpoint.  
+3. **High-Speed Similarity Search (/api/similar\_tracks):**  
+   * Once the user selects a seed song and initiates the search, the frontend calls this API endpoint with the song's unique item\_id.  
+   * For maximum performance, the backend loads the Annoy index from the database into memory upon starting up (load\_annoy\_index\_for\_querying). This in-memory cache allows for near-instantaneous lookups.  
+   * The core function find\_nearest\_neighbors\_by\_id takes the seed song's ID, finds its corresponding vector within the Annoy index, and instantly retrieves the *N* closest vectors (the most similar songs) based on the pre-calculated angular distances.  
+   * The backend then fetches the metadata (title, artist) for these resulting song IDs from the main score table.  
+4. **Playlist Creation (/api/create\_playlist):**  
+   * The list of similar tracks, along with their distance from the seed song, is displayed to the user.  
+   * The user can then enter a desired playlist name and click a button.  
+   * This action calls the /api/create\_playlist endpoint, which takes the list of similar track IDs and the new name, and then uses the Jellyfin API to create the playlist directly on the server.
+
+This entire workflow provides a fast and intuitive method for music discovery, moving beyond simple genre or tag-based recommendations to find songs that truly *sound* alike.
+
 ## Screenshots
 
 Here are a few glimpses of AudioMuse AI in action (more can be found in /screnshot):
@@ -599,12 +647,13 @@ Here are a few glimpses of AudioMuse AI in action (more can be found in /scrensh
 
 ### Instant Playlist
 
-![Screenshot of AudioMuse AI's web interface showing the progress of music clustering tasks.](screenshot/Instant_playlist.png "Instant Playlist interface")
-
-
+![Screenshot of AudioMuse AI's web interface showing the Instant Playlist web interface.](screenshot/Instant_playlist.png "Instant Playlist interface")
 
 https://github.com/user-attachments/assets/30ef6fae-ea8b-4d37-ac4c-9c07e9044114
 
+### Similar Song Playlist
+
+![Screenshot of AudioMuse AI's web interface showing the Similarity web interface.](screenshot/similarity.png "Similarity Playlist interface")
 
 
 ## **Key Technologies**
@@ -633,6 +682,7 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
+* [**annoy**](https://github.com/spotify/annoy) Approximate Nearest Neighbors used for the /similarity interface
 * [**PostgreSQL:**](https://www.postgresql.org/) A powerful, open-source relational database used for persisting:  
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  

@@ -24,11 +24,8 @@ from rq import get_current_job, Retry
 from rq.job import Job # Import Job class
 from rq.exceptions import NoSuchJobError, InvalidJobOperation
 
-# Import necessary components from the main app.py file (ensure these are available)
-from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
-                track_exists, save_track_analysis, get_all_tracks, update_playlist_table, JobStatus, # Removed save_track_embedding from top
-                TASK_STATUS_PENDING, TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
-                TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
+# NOTE: Top-level 'from app import ...' has been removed to prevent circular dependencies
+# and moved into the functions that require them.
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
@@ -40,7 +37,7 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     SCORE_WEIGHT_DIVERSITY, SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY,
     MUTATION_KMEANS_COORD_FRACTION, MUTATION_INT_ABS_DELTA, MUTATION_FLOAT_ABS_DELTA,
     TOP_N_ELITES, EXPLOITATION_START_FRACTION, EXPLOITATION_PROBABILITY_CONFIG, TOP_N_MOODS, TOP_N_OTHER_FEATURES,
-    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, # type: ignore
+    STRATIFIED_GENRES, MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, SAMPLING_PERCENTAGE_CHANGE_PER_RUN, ITERATIONS_PER_BATCH_JOB, MAX_CONCURRENT_BATCH_JOBS, REBUILD_INDEX_BATCH_SIZE, # type: ignore
     MAX_QUEUED_ANALYSIS_JOBS, # New config for limiting queued analysis jobs
     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
     LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
@@ -49,7 +46,9 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
-from .commons import score_vector # Import from commons
+from .commons import score_vector
+from .annoy_manager import build_and_store_annoy_index
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +102,10 @@ def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
 
 def download_track(jellyfin_url, headers, temp_dir, item):
     """Downloads a track from Jellyfin to a temporary directory."""
-    filename = f"{item['Name'].replace('/', '_')}-{item.get('AlbumArtist', 'Unknown')}.mp3"
+    # Sanitize both track name and artist name to remove invalid characters for filenames
+    sanitized_track_name = item['Name'].replace('/', '_').replace('\\', '_')
+    sanitized_artist_name = item.get('AlbumArtist', 'Unknown').replace('/', '_').replace('\\', '_')
+    filename = f"{sanitized_track_name}-{sanitized_artist_name}.mp3"
     path = os.path.join(temp_dir, filename)
     try:
         r = requests.get(f"{jellyfin_url}/Items/{item['Id']}/Download", headers=headers, timeout=120)
@@ -170,8 +172,14 @@ def predict_other_models(embeddings): # Now accepts embeddings
 
 def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_labels_list):
     """Analyzes a single track for tempo, key, scale, moods, and other models."""
-    # Load audio once at 16000 Hz for all analyses.
-    audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
+    try:
+        # Load audio once at 16000 Hz for all analyses.
+        audio = MonoLoader(filename=file_path, sampleRate=16000, resampleQuality=4)()
+    except RuntimeError as e:
+        # Essentia often wraps loading errors in a generic RuntimeError.
+        # Catch any audio loading error, log it, and skip the track.
+        logger.warning("Skipping track %s due to an audio loading error in Essentia: %s", os.path.basename(file_path), e)
+        return None, None # Return a specific failure signal
 
     # Generate MusiCNN embeddings once
     musicnn_embedding_model = TensorflowPredictMusiCNN(
@@ -250,11 +258,17 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
 
 def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, parent_task_id):
     """RQ task to analyze a single album."""
+    # --- LOCAL IMPORTS TO PREVENT CIRCULAR DEPENDENCIES ---
+    from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
+                     save_track_analysis, save_track_embedding, JobStatus,
+                     TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
+                     TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
+    # --- END LOCAL IMPORTS ---
+
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
-        from app import save_track_embedding # Import here
         initial_details = {"album_name": album_name, "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Album analysis task started."]}
         save_task_status(current_task_id, "album_analysis", TASK_STATUS_STARTED, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=0, details=initial_details)
         headers = {"X-Emby-Token": jellyfin_token}
@@ -313,6 +327,36 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                 log_and_update_album_task(f"No tracks found for album: {album_name}", 100, task_state='SUCCESS')
                 return {"status": "SUCCESS", "message": f"No tracks in album {album_name}", "tracks_analyzed": 0}
 
+            # --- OPTIMIZATION: Batch check for existing tracks ---
+            all_track_ids_in_album = [t['Id'] for t in tracks]
+            
+            def get_existing_track_ids_in_batch(track_ids):
+                """Queries the DB for a batch of track IDs to see which ones are fully analyzed."""
+                if not track_ids:
+                    return set()
+                conn = get_db()
+                cur = conn.cursor()
+                try:
+                    query = """
+                        SELECT s.item_id
+                        FROM score s
+                        JOIN embedding e ON s.item_id = e.item_id
+                        WHERE s.item_id IN %s
+                          AND s.other_features IS NOT NULL AND s.other_features != ''
+                          AND s.energy IS NOT NULL
+                          AND s.mood_vector IS NOT NULL AND s.mood_vector != ''
+                          AND s.tempo IS NOT NULL
+                    """
+                    cur.execute(query, (tuple(track_ids),))
+                    existing_ids = {row[0] for row in cur.fetchall()}
+                    return existing_ids
+                finally:
+                    cur.close()
+
+            existing_track_ids_set = get_existing_track_ids_in_batch(all_track_ids_in_album)
+            logger.info(f"Album '{album_name}': Found {len(existing_track_ids_set)} of {len(all_track_ids_in_album)} tracks already analyzed.")
+            # --- END OPTIMIZATION ---
+
             total_tracks_in_album = len(tracks)
             for idx, item in enumerate(tracks, 1):
                 # === Cooperative Cancellation Check for Album Task ===
@@ -346,8 +390,8 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     current_track_name=track_name_full,
                     current_track_analysis_details=None)
 
-                if track_exists(item['Id']):
-                    log_and_update_album_task(f"Skipping '{track_name_full}' (already fully analyzed with embedding)", current_progress_val, current_track_name=track_name_full)
+                if item['Id'] in existing_track_ids_set:
+                    log_and_update_album_task(f"Skipping '{track_name_full}' (already fully analyzed)", current_progress_val, current_track_name=track_name_full)
                     tracks_skipped_count +=1
                     continue
 
@@ -360,6 +404,15 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                 try:
                     # analyze_track now returns two values: results dict and the embedding
                     analysis_results, track_embedding = analyze_track(path, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, MOOD_LABELS)
+                    
+                    # NEW: Check for the failure case from analyze_track
+                    if analysis_results is None:
+                        # The error has already been logged in analyze_track.
+                        # We can add another log here for the album task's context.
+                        log_and_update_album_task(f"Skipping '{track_name_full}' due to an audio loading error (e.g., multi-channel).", current_progress_val, current_track_name=track_name_full)
+                        tracks_skipped_count += 1
+                        continue # Move to the next track
+
                     tempo = analysis_results.get("tempo", 0.0)
                     key = analysis_results.get("key", "")
                     scale = analysis_results.get("scale", "")
@@ -387,8 +440,11 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                         "moods": {k: round(v, 2) for k, v in all_moods_predicted.items()}
                     }
                     # Save only the top_n_moods
+                    # IMPORTANT: Ensure save_track_analysis and save_track_embedding are defined
+                    # and accessible here, likely from your app module.
                     save_track_analysis(item['Id'], item['Name'], item.get('AlbumArtist', 'Unknown'), tempo, key, scale, top_moods_to_save_dict, energy=energy, other_features=other_features_str)
-                    # Save the embedding
+                    # IMPORTANT: Ensure save_track_embedding now saves the embedding as a binary blob
+                    # as shown in the new annoy_manager.py example.
                     save_track_embedding(item['Id'], track_embedding)
                     tracks_analyzed_count += 1
 
@@ -433,30 +489,37 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                 f"Failed to analyze album '{album_name}': An unexpected error occurred.",
                 current_progress_val,
                 task_state=TASK_STATUS_FAILURE,
-                final_summary_details=failure_details,
-                print_console=False # The detailed error is already printed above
+                final_summary_details=failure_details
             )
             raise
 
 def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods):
     """Main RQ task to orchestrate the analysis of multiple albums."""
+    # --- LOCAL IMPORTS TO PREVENT CIRCULAR DEPENDENCIES ---
+    from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
+                     TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
+                     TASK_STATUS_STARTED, TASK_STATUS_PROGRESS,
+                     get_child_tasks_from_db, rq_queue_default, JobStatus)
+    # --- END LOCAL IMPORTS ---
+
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
 
     with app.app_context():
-        # IDEMPOTENCY CHECK: If task is already in a terminal state, don't run again.
+        # --- STATE RECOVERY ---
         task_info = get_task_info_from_db(current_task_id)
         if task_info and task_info.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
             logger.info(f"Main analysis task {current_task_id} is already in a terminal state ('{task_info.get('status')}'). Skipping execution.")
-            final_details = {}
-            if task_info.get('details'):
-                try:
-                    final_details = json.loads(task_info.get('details'))
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse details JSON for already terminal task {current_task_id}.")
-            # Return the existing final status and details
-            return {"status": task_info.get('status'), "message": f"Task already in terminal state '{task_info.get('status')}'.", "details": final_details}
-
+            # ... (rest of idempotency check)
+            return {"status": task_info.get('status'), "message": f"Task already in terminal state '{task_info.get('status')}'."}
+        
+        try:
+            task_details_json = task_info.get('details') if task_info else "{}"
+            parsed_details = json.loads(task_details_json)
+            checked_album_ids = set(parsed_details.get('checked_album_ids', []))
+        except (json.JSONDecodeError, TypeError):
+            checked_album_ids = set()
+        # --- END STATE RECOVERY ---
 
         initial_details = {"message": "Fetching albums...", "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main analysis task started."]}
         save_task_status(current_task_id, "main_analysis", TASK_STATUS_STARTED, progress=0, details=initial_details)
@@ -487,7 +550,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
 
             meta_details = {"status_message": message}
             if details_extra:
-                for key in ["albums_completed", "total_albums", "successful_albums", "failed_albums", "total_tracks_analyzed", "albums_found", "album_task_ids"]:
+                for key in ["albums_completed", "total_albums", "successful_albums", "failed_albums", "total_tracks_analyzed", "albums_found", "album_task_ids", "albums_skipped", "albums_to_process", "checked_album_ids"]:
                     if key in details_extra:
                         meta_details[key] = details_extra[key]
 
@@ -501,203 +564,202 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
         try:
             log_and_update_main_analysis("🚀 Starting main analysis process...", 0)
             clean_temp(TEMP_DIR)
-            albums = get_recent_albums(jellyfin_url, jellyfin_user_id, headers, num_recent_albums)
-            if not albums:
+            all_albums = get_recent_albums(jellyfin_url, jellyfin_user_id, headers, num_recent_albums)
+            if not all_albums:
                 log_and_update_main_analysis("⚠️ No new albums to analyze.", 100, {"albums_found": 0}, task_state=TASK_STATUS_SUCCESS)
                 return {"status": "SUCCESS", "message": "No new albums to analyze.", "albums_processed": 0}
 
-            total_albums = len(albums)
-            log_and_update_main_analysis(f"Found {total_albums} albums to process.", 5, {"albums_found": total_albums, "album_tasks_ids": []})
-            album_jobs = []
-            album_job_ids = []
-            active_album_jobs_map = {}
-            from app import rq_queue_default # Use the default queue for sub-tasks
+            total_albums_to_check = len(all_albums)
+            log_and_update_main_analysis(f"Found {total_albums_to_check} albums to check.", 2)
             
-            albums_to_process_queue = list(albums) # Create a queue of albums to process
-            logger.debug("Initial albums_to_process_queue size: %s", len(albums_to_process_queue))
+            active_jobs_map = {}
+            launched_jobs = []
+            albums_skipped_count = 0
             albums_launched_count = 0
             albums_completed_count = 0
+            
+            # --- Incremental Index Rebuild Configuration ---
+            last_rebuild_at_album_count = 0
 
-            while albums_completed_count < total_albums or active_album_jobs_map: # Keep looping if there are active jobs
-                # --- Worker Shutdown Check ---
-                if current_job and current_job.is_stopped:
-                    logger.warning(f"Main analysis task {current_task_id} received stop signal from worker. Raising exception to force re-queue.")
-                    raise Exception("Worker shutdown detected, re-queueing task for graceful restart.")
-                # --- End Worker Shutdown Check ---
 
-                # === Cooperative Cancellation Check for Main Analysis Task ===
-                if current_job: # Check if running as an RQ job
-                    with app.app_context(): # Ensure DB access
-                        # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Checking for cooperative cancellation.")
-                    # Check self status first
-                        main_task_db_info = get_task_info_from_db(current_task_id)
-                        if main_task_db_info and main_task_db_info.get('status') == TASK_STATUS_REVOKED:
-                            log_and_update_main_analysis(f"🛑 Main analysis task {current_task_id} has been REVOKED. Stopping and attempting to update children.", current_progress, task_state=TASK_STATUS_REVOKED)
-                            # Update DB status of child jobs to REVOKED
-                            for child_job_instance in album_jobs:
-                                if not child_job_instance: continue
-                                try:
-                                    # No need to call child_job_instance.cancel() here,
-                                    # as the child task's cooperative cancellation will pick up the DB status change.
-                                    with app.app_context(): # New context for each save
-                                        child_db_info = get_task_info_from_db(child_job_instance.id)
-                                        if child_db_info and child_db_info.get('status') not in [TASK_STATUS_REVOKED, TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, JobStatus.CANCELED, JobStatus.FINISHED, JobStatus.FAILED]: # Avoid re-revoking
-                                            logger.info("[MainAnalysisTask-%s] Marking child job %s as REVOKED in DB.", current_task_id, child_job_instance.id)
-                                            save_task_status(child_job_instance.id, "album_analysis", TASK_STATUS_REVOKED, parent_task_id=current_task_id, progress=100, details={"message": "Parent task was revoked.", "log": ["Parent task revoked."]})
-                                except Exception as e_cancel_child: # nosec
-                                    logger.error("Error trying to mark child job %s as REVOKED: %s", child_job_instance.id, e_cancel_child, exc_info=True)
-                            clean_temp(TEMP_DIR)
-                            return {"status": "REVOKED", "message": "Main analysis task was revoked."}
-                # === End Cooperative Cancellation Check ===
+            def get_existing_track_ids(track_ids):
+                if not track_ids: return set()
+                conn = get_db()
+                cur = conn.cursor()
+                try:
+                    query = """
+                        SELECT s.item_id FROM score s JOIN embedding e ON s.item_id = e.item_id
+                        WHERE s.item_id IN %s AND s.other_features IS NOT NULL AND s.other_features != ''
+                          AND s.energy IS NOT NULL AND s.mood_vector IS NOT NULL AND s.mood_vector != ''
+                          AND s.tempo IS NOT NULL
+                    """
+                    cur.execute(query, (tuple(track_ids),))
+                    return {row[0] for row in cur.fetchall()}
+                finally:
+                    cur.close()
 
-                # Check status of active jobs and remove completed ones
-                completed_in_this_cycle_ids = []
-                # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: Checking {len(active_album_jobs_map)} active jobs.")
-                for job_id_active, job_instance_active in list(active_album_jobs_map.items()): # Iterate over a copy
+            def monitor_and_clear_jobs():
+                nonlocal albums_completed_count
+                nonlocal last_rebuild_at_album_count
+
+                completed_in_cycle = []
+                # Iterate over a copy of the keys to allow modification during the loop
+                for job_id in list(active_jobs_map.keys()):
                     try:
-                        is_child_completed = False
-
-                        try:
-                            job_instance_active.refresh() # Get latest status from Redis
-                            child_status_rq = job_instance_active.get_status()
-                            logger.debug("Job %s RQ status: %s", job_id_active, child_status_rq)
-
-                            if job_instance_active.is_finished or job_instance_active.is_failed or child_status_rq == JobStatus.CANCELED:
-                                is_child_completed = True
-                            else: # Still active in RQ
-                                pass # Child is active, all_done will be set to False later
-
-                        except NoSuchJobError:
-                            logger.warning("Child job %s not found in Redis. Checking DB.", job_instance_active.id)
-                            with app.app_context(): # Ensure DB context
-                                db_task_info = get_task_info_from_db(job_id_active)
-
-                            logger.debug("Job %s not in RQ. DB info: %s", job_id_active, db_task_info)
-                            if db_task_info:
-                                db_status = db_task_info.get('status')
-                                if db_status in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FINISHED, JobStatus.FAILED]:
-                                    is_child_completed = True
-                                    if db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
-                                        logger.info("Child job %s (from DB) has status: %s.", job_id_active, db_status)
-                                    # If SUCCESS/FINISHED, it's completed, no special print needed here.
-                                else:
-                                    logger.warning("Child job %s (from DB) has non-terminal status '%s' but missing from RQ. Treating as completed.", job_id_active, db_status)
-                                    is_child_completed = True
-                            else:
-                                logger.critical("Child job %s not found in Redis or DB. Treating as completed.", job_id_active)
-                                is_child_completed = True
-
-                        if is_child_completed:
-                            completed_in_this_cycle_ids.append(job_id_active)
-                            albums_completed_count += 1
-                    except Exception as e_monitor_child:
-                        logger.error("ERROR monitoring child job %s: %s. Treating as completed to avoid hanging.", job_id_active, e_monitor_child, exc_info=True)
-                        completed_in_this_cycle_ids.append(job_id_active) # Remove from active map
-                        albums_completed_count += 1 # Ensure progress
+                        # Fetch the job fresh from Redis to get the most up-to-date status
+                        job = Job.fetch(job_id, connection=redis_conn)
+                        if job.is_finished or job.is_failed or job.is_canceled:
+                            completed_in_cycle.append(job_id)
+                    except NoSuchJobError: # This is the critical case to handle robustly
+                        logger.warning(f"Sub-task job {job_id} not found in Redis. Checking database for final status...")
+                        # The main task runs in an app_context, so we can safely call DB functions
+                        db_status_info = get_task_info_from_db(job_id)
+                        if db_status_info and db_status_info.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                            logger.info(f"  DB confirms task {job_id} is in a terminal state: {db_status_info.get('status')}. Marking as complete.")
+                            completed_in_cycle.append(job_id)
+                        else:
+                            # This indicates a lost job. It's gone from Redis but not marked as complete in the DB.
+                            # This can happen if a worker dies without moving the job to the failed queue.
+                            # We will mark it as FAILED to be safe and prevent the main task from waiting forever.
+                            db_status = db_status_info.get('status') if db_status_info else 'NOT_IN_DB'
+                            error_msg = f"Job lost from Redis queue while in a non-terminal state (DB status: {db_status})."
+                            logger.error(f"  CRITICAL: Job {job_id} is missing from Redis but its DB status is '{db_status}'. Marking as failed.")
+                            save_task_status(job_id, "album_analysis", TASK_STATUS_FAILURE, parent_task_id=current_task_id, progress=100, details={"error": error_msg})
+                            completed_in_cycle.append(job_id) # Treat as "completed" to unblock the main task.
                 
-                for j_id in completed_in_this_cycle_ids:
-                    if j_id in active_album_jobs_map:
-                        logger.debug("Removing completed job %s from active map.", j_id)
-                        del active_album_jobs_map[j_id]
-
-                # Enqueue new jobs if slots are available and albums are pending
-                logger.debug("Checking to enqueue new jobs. Active: %s, Max Queued: %s, Albums in queue: %s", len(active_album_jobs_map), MAX_QUEUED_ANALYSIS_JOBS, len(albums_to_process_queue))
-                while len(active_album_jobs_map) < MAX_QUEUED_ANALYSIS_JOBS and albums_to_process_queue:
-                    album = albums_to_process_queue.pop(0) # Get next album
-                    logger.debug("Enqueuing job for album: %s", album.get('Name'))
-                    sub_task_id = str(uuid.uuid4()) # type: ignore
-                    save_task_status(sub_task_id, "album_analysis", "PENDING", parent_task_id=current_task_id, sub_type_identifier=album['Id'], details={"album_name": album['Name']})
-                    job = rq_queue_default.enqueue(
-                        analyze_album_task,
-                        args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
-                        job_id=sub_task_id,
-                        description=f"Analyzing album: {album['Name']}",
-                        job_timeout=-1,
-                        retry=Retry(max=3), # Add retry for sub-tasks
-                        meta={'parent_task_id': current_task_id}
+                for job_id in completed_in_cycle:
+                    if job_id in active_jobs_map:
+                        del active_jobs_map[job_id]
+                        albums_completed_count += 1
+                
+                # --- Incremental Index Rebuild Logic ---
+                if albums_completed_count > last_rebuild_at_album_count and \
+                   (albums_completed_count - last_rebuild_at_album_count) >= REBUILD_INDEX_BATCH_SIZE:
+                    
+                    progress_for_rebuild = 5 + int(85 * ((albums_skipped_count + albums_completed_count) / float(total_albums_to_check)))
+                    log_and_update_main_analysis(
+                        f"Batch of {albums_completed_count - last_rebuild_at_album_count} albums complete. Rebuilding index...",
+                        progress_for_rebuild
                     )
-                    album_jobs.append(job) # Keep original list for final summary
-                    album_job_ids.append(job.id) # Keep original list for final summary
-                    active_album_jobs_map[job.id] = job
-                    albums_launched_count += 1
+                    
+                    try:
+                        db_conn_rebuild = get_db()
+                        build_and_store_annoy_index(db_conn_rebuild)
+                        redis_conn.publish('index-updates', 'reload')
+                        logger.info(f"Incremental index rebuild complete after {albums_completed_count} albums.")
+                        # IMPORTANT: Update the counter to prevent immediate re-rebuilds
+                        last_rebuild_at_album_count = albums_completed_count
+                    except Exception as e_rebuild:
+                        logger.error(f"Failed to perform incremental index rebuild: {e_rebuild}", exc_info=True)
+                        # We don't stop the main task, just log the error and continue.
 
-                status_message_for_log = f"Albums launched: {albums_launched_count}/{total_albums}. Completed: {albums_completed_count}/{total_albums}. Active/Queued: {len(active_album_jobs_map)}."
-                progress_while_waiting = 10 + int(80 * (albums_completed_count / float(total_albums))) if total_albums > 0 else 10
-                log_and_update_main_analysis(
-                    status_message_for_log,
-                    progress_while_waiting,
-                    {"albums_completed": albums_completed_count, "albums_launched": albums_launched_count, "total_albums": total_albums})
+            # Main Dispatch and Monitoring Loop
+            for idx, album in enumerate(all_albums):
+                if album['Id'] in checked_album_ids:
+                    albums_skipped_count += 1
+                    logger.info(f"Skipping album '{album['Name']}' (already checked in a previous run).")
+                    continue
+
+                # --- Concurrency Management ---
+                while len(active_jobs_map) >= MAX_QUEUED_ANALYSIS_JOBS:
+                    monitor_and_clear_jobs()
+                    progress = 5 + int(85 * ((albums_skipped_count + albums_completed_count) / float(total_albums_to_check)))
+                    status_message = f"Launched: {albums_launched_count}. Completed: {albums_completed_count}/{albums_launched_count}. Active: {len(active_jobs_map)}. Skipped: {albums_skipped_count}/{total_albums_to_check}. (Throttling)"
+                    log_and_update_main_analysis(status_message, progress, details_extra={"checked_album_ids": list(checked_album_ids)})
+                    time.sleep(5)
+
+                # --- Check a single album ---
+                tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album['Id'])
+                if not tracks:
+                    albums_skipped_count += 1
+                    logger.info(f"Skipping album '{album['Name']}' (no tracks found).")
+                    checked_album_ids.add(album['Id'])
+                    continue
+
+                track_ids = [t['Id'] for t in tracks]
+                existing_ids_set = get_existing_track_ids(track_ids)
+
+                if len(existing_ids_set) >= len(track_ids):
+                    albums_skipped_count += 1
+                    logger.info(f"Skipping album '{album['Name']}' (all tracks already analyzed).")
+                    checked_album_ids.add(album['Id'])
+                    continue
                 
-                # print(f"[MainAnalysisTask-{current_task_id}] DEBUG: End of main while loop iteration. albums_completed_count: {albums_completed_count}, total_albums: {total_albums}, len(active_album_jobs_map): {len(active_album_jobs_map)}")
-                if albums_completed_count >= total_albums and not active_album_jobs_map: # All completed and active map empty, or no more albums to launch
-                    logger.debug("All albums processed and active map empty. Breaking main loop.")
-                    break
-                time.sleep(5) # nosec
+                # --- Enqueue album for processing ---
+                sub_task_id = str(uuid.uuid4())
+                job = rq_queue_default.enqueue(
+                    'tasks.analysis.analyze_album_task',
+                    args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
+                    job_id=sub_task_id,
+                    description=f"Analyzing album: {album['Name']}",
+                    job_timeout=-1,
+                    retry=Retry(max=3),
+                    meta={'parent_task_id': current_task_id}
+                )
+                active_jobs_map[job.id] = job
+                launched_jobs.append(job)
+                albums_launched_count += 1
+                checked_album_ids.add(album['Id'])
+                
+                progress = 5 + int(idx / float(total_albums_to_check))
+                status_message = f"Launched: {albums_launched_count}. Completed: {albums_completed_count}/{albums_launched_count}. Active: {len(active_jobs_map)}. Skipped: {albums_skipped_count}/{total_albums_to_check}."
+                log_and_update_main_analysis(
+                    status_message,
+                    progress,
+                    details_extra={"albums_to_process": albums_launched_count, "albums_skipped": albums_skipped_count, "checked_album_ids": list(checked_album_ids)}
+                )
+
+            # --- Final Monitoring Loop ---
+            while active_jobs_map:
+                monitor_and_clear_jobs()
+                progress = 5 + int(85 * ((albums_skipped_count + albums_completed_count) / float(total_albums_to_check)))
+                status_message = f"Launched: {albums_launched_count}. Completed: {albums_completed_count}/{albums_launched_count}. Active: {len(active_jobs_map)}. Skipped: {albums_skipped_count}/{total_albums_to_check}. (Finalizing)"
+                log_and_update_main_analysis(status_message, progress, details_extra={"checked_album_ids": list(checked_album_ids)})
+                time.sleep(5)
+
+            # Final Summary
             successful_albums = 0
             failed_albums = 0
             total_tracks_analyzed_all_albums = 0
-            for job_instance in album_jobs:
-                job_is_successful = False
-                job_is_failed_or_canceled = False
-                album_tracks_analyzed = 0
-
-                # Wrap final counting for each job in a try-except
+            total_tracks_skipped_in_albums = 0
+            for job_instance in launched_jobs:
                 try:
-                    try:
-                        job_instance.refresh() # Try to get fresh status from RQ
-                        if job_instance.is_finished:
-                            job_is_successful = True
-                            if isinstance(job_instance.result, dict):
-                                album_tracks_analyzed = job_instance.result.get("tracks_analyzed", 0)
-                        elif job_instance.is_failed or job_instance.get_status() == JobStatus.CANCELED: # type: ignore
-                            # print(f"[MainAnalysisTask-{current_task_id}] Info: Child job {job_instance.id} (from RQ) ended with status: {job_instance.get_status()}.")
-                            job_is_failed_or_canceled = True
-                    except NoSuchJobError: # nosec
-                        logger.warning("Final check for job %s - not in Redis. Checking DB.", job_instance.id)
-                        with app.app_context():
-                            db_task_info = get_task_info_from_db(job_instance.id)
-                        if db_task_info:
-                            db_status = db_task_info.get('status')
-                            if db_status in [TASK_STATUS_SUCCESS, JobStatus.FINISHED]:
-                                job_is_successful = True
-                                if db_task_info.get('details'):
-                                    try:
-                                        details_dict = json.loads(db_task_info.get('details'))
-                                        if 'tracks_analyzed' in details_dict:
-                                            album_tracks_analyzed = details_dict.get("tracks_analyzed", 0)
-                                    except (json.JSONDecodeError, TypeError): pass # Log already cleaned or minimal
-                            elif db_status in [TASK_STATUS_FAILURE, TASK_STATUS_REVOKED, JobStatus.CANCELED, JobStatus.FAILED]:
-                                logger.info("Child job %s (from DB) has final status: %s.", job_instance.id, db_status)
-                                job_is_failed_or_canceled = True
-                            else:
-                                logger.warning("Final check for job %s (from DB) - non-terminal status '%s' but not in RQ. Counted as failed/canceled.", job_instance.id, db_status)
-                                job_is_failed_or_canceled = True
-                        else:
-                            logger.critical("Final check for job %s - not found in Redis or DB. Counted as failed/canceled.", job_instance.id)
-                            job_is_failed_or_canceled = True
-                except Exception as e_final_count:
-                    job_id_for_error = job_instance.id if job_instance else "Unknown_ID"
-                    logger.error("ERROR during final result processing for job %s: %s. Counting as failed.", job_id_for_error, e_final_count, exc_info=True)
-                    job_is_successful = False
-                    job_is_failed_or_canceled = True # Ensure it's counted as failed
-                    album_tracks_analyzed = 0 # Reset tracks analyzed for this problematic job
-
-                if job_is_successful:
-                    successful_albums += 1
-                    total_tracks_analyzed_all_albums += album_tracks_analyzed
-                elif job_is_failed_or_canceled:
+                    job_instance.refresh()
+                    if job_instance.is_finished and isinstance(job_instance.result, dict):
+                        successful_albums += 1
+                        total_tracks_analyzed_all_albums += job_instance.result.get("tracks_analyzed", 0)
+                        total_tracks_skipped_in_albums += job_instance.result.get("tracks_skipped", 0)
+                    else:
+                        failed_albums += 1
+                except Exception:
                     failed_albums += 1
+            
+            # --- Annoy Index Creation ---
+            # Perform a final rebuild to include any remaining albums that didn't form a full batch.
+            log_and_update_main_analysis("Performing final index rebuild to include all tracks...", 95)
+            db_conn = get_db()
+            build_and_store_annoy_index(db_conn)
+            
+            final_message = f"Main analysis complete. Found {total_albums_to_check} albums, skipped {albums_skipped_count}. Of the {albums_launched_count} launched, {successful_albums} succeeded, {failed_albums} failed. Total tracks analyzed: {total_tracks_analyzed_all_albums}. Annoy index created."
 
-            final_summary_for_db = {
-                "successful_albums": successful_albums,
-                "failed_albums": failed_albums,
-            # total_tracks_analyzed_all_albums will now reflect only newly/re-analyzed tracks
-                "total_tracks_analyzed": total_tracks_analyzed_all_albums
-            }
-            final_message = f"Main analysis complete. Successful albums: {successful_albums}, Failed albums: {failed_albums}. Total tracks analyzed: {total_tracks_analyzed_all_albums}."
-            log_and_update_main_analysis(final_message, 100, details_extra=final_summary_for_db, task_state=TASK_STATUS_SUCCESS)
+            log_and_update_main_analysis("Publishing index-reload notification to Redis...", 98)
+            try:
+                # Use Redis Pub/Sub to notify the web server to reload the index.
+                # This is more robust than an HTTP call in a containerized environment.
+                redis_conn.publish('index-updates', 'reload')
+                logger.info("Successfully published 'reload' message to 'index-updates' channel.")
+            except Exception as e:
+                logger.warning(f"Could not publish index-reload notification to Redis: {e}")
+                final_message += " (Warning: Could not notify web server for live reload.)"
+
+            if total_tracks_skipped_in_albums > 0:
+                final_message += f" An additional {total_tracks_skipped_in_albums} tracks were skipped within these albums due to errors (e.g., multi-channel audio)."
+
+            final_details = {"successful_albums": successful_albums, "failed_albums": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums, "total_tracks_skipped_in_albums": total_tracks_skipped_in_albums}
+            log_and_update_main_analysis(final_message, 100, details_extra=final_details, task_state=TASK_STATUS_SUCCESS)
             clean_temp(TEMP_DIR)
-            return {"status": "SUCCESS", "message": final_message, "successful_albums": successful_albums, "failed_albums": failed_albums, "total_tracks_analyzed": total_tracks_analyzed_all_albums}
+            return {"status": "SUCCESS", "message": final_message}
+
         except Exception as e:
             # Log the full traceback on the server for debugging.
             logger.critical("FATAL ERROR: Analysis failed: %s", e, exc_info=True)
@@ -709,16 +771,4 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     details_extra={"error_message": "An unexpected error occurred. Check server logs for details."},
                     task_state=TASK_STATUS_FAILURE
                 )
-                # Attempt to mark children as REVOKED if the parent fails
-                if 'album_jobs' in locals() and album_jobs: # Check if album_jobs was initialized
-                    logger.info("Parent task failed. Attempting to mark %s children as REVOKED.", len(album_jobs))
-                    for child_job_instance in album_jobs:
-                        try: # Guard against issues with individual child job objects during cleanup
-                            if not child_job_instance: continue # Skip if somehow a None entry exists
-                            with app.app_context(): # Ensure context for DB ops
-                                child_db_info = get_task_info_from_db(child_job_instance.id)
-                                if child_db_info and child_db_info.get('status') not in [TASK_STATUS_REVOKED, TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, JobStatus.CANCELED]:
-                                    save_task_status(child_job_instance.id, "album_analysis", TASK_STATUS_REVOKED, parent_task_id=current_task_id, progress=100, details={"message": "Parent task failed.", "log": ["Parent task failed."]})
-                        except Exception as e_cancel_child_on_fail: # nosec
-                            logger.error("Error marking child job %s as REVOKED during parent failure: %s", child_job_instance.id, e_cancel_child_on_fail, exc_info=True)
             raise

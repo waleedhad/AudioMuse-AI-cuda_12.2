@@ -1,0 +1,97 @@
+/* --- Sidebar Menu Styles --- */
+.page-container {
+    display: flex;
+}
+
+.sidebar {
+    width: 250px;
+    background-color: #111827;
+    color: white;
+    padding: 1.5rem;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    transition: transform 0.3s ease-in-out;
+    z-index: 1000;
+    /* Start off-screen by default */
+    transform: translateX(-100%);
+}
+
+/* When the .open class is added by JS, slide the menu in */
+.sidebar.open {
+    transform: translateX(0);
+}
+
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.sidebar-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.menu-toggle {
+    background: none;
+    border: none;
+    color: #1F2937; /* Default color is dark, for when menu is closed */
+    font-size: 1.5rem;
+    cursor: pointer;
+    position: fixed;
+    top: 1.5rem;
+    left: 1.5rem; /* Always on the left */
+    z-index: 1001;
+    transition: color 0.3s;
+}
+
+/* When the sidebar is open, make the button light */
+.sidebar.open + .main-content .menu-toggle {
+    color: white;
+}
+
+.sidebar-nav {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    margin-top: 4rem;
+}
+
+.sidebar-nav li a {
+    display: block;
+    color: #d1d5db;
+    text-decoration: none;
+    padding: 0.75rem 0;
+    font-size: 1rem;
+    white-space: nowrap;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.sidebar-nav li a:hover {
+    color: #ffffff;
+    background-color: #374151;
+}
+
+.sidebar-nav li a.active {
+    color: #ffffff;
+    font-weight: 600;
+    background-color: #2563EB;
+}
+
+.main-content {
+    /* Default state: full width */
+    margin-left: 0;
+    width: 100%;
+    padding: 4rem 1.5rem 1.5rem;
+    transition: margin-left 0.3s ease-in-out;
+    box-sizing: border-box; /* Prevents padding from adding to the width and causing overflow */
+}
+
+/* When the .sidebar-open class is added by JS, push the content over */
+.main-content.sidebar-open {
+    margin-left: 250px;
+}

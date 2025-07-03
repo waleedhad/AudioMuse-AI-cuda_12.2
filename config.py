@@ -13,6 +13,7 @@ TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
 # --- General Constants (Read from Environment Variables where applicable) ---
+APP_VERSION = "v0.5.0-beta"
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
@@ -58,6 +59,9 @@ MAX_QUEUED_ANALYSIS_JOBS = int(os.environ.get("MAX_QUEUED_ANALYSIS_JOBS", "100")
 ITERATIONS_PER_BATCH_JOB = int(os.environ.get("ITERATIONS_PER_BATCH_JOB", "20")) # Number of clustering iterations per RQ batch job
 MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "10")) # Max number of batch jobs to run concurrently
 DB_FETCH_CHUNK_SIZE = int(os.environ.get("DB_FETCH_CHUNK_SIZE", "1000")) # Chunk size for fetching full track data from DB in batch jobs
+
+# --- Batching Constants for Analysis ---
+REBUILD_INDEX_BATCH_SIZE = int(os.environ.get("REBUILD_INDEX_BATCH_SIZE", "10")) # Rebuild Annoy index after this many albums are analyzed.
 
 # --- Guided Evolutionary Clustering Constants ---
 TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10")) # Number of best solutions to keep as elites
@@ -168,6 +172,12 @@ TOP_N_MOODS = 5
 TOP_N_OTHER_FEATURES = int(os.environ.get("TOP_N_OTHER_FEATURES", "2")) # Number of top "other features" to consider for clustering vector
 EMBEDDING_MODEL_PATH = "/app/model/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/model/msd-msd-musicnn-1.pb"
+EMBEDDING_DIMENSION = 200 # *** ADDED THIS LINE ***
+
+# --- Annoy Index Constants ---
+INDEX_NAME = os.environ.get("ANNOY_INDEX_NAME", "music_library") # The primary key for our index in the DB
+NUM_TREES = int(os.environ.get("ANNOY_NUM_TREES", "50")) # More trees = higher accuracy, larger index, longer build time. 50 means aroudn 1,5GB for 1 millions songs
+
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)
