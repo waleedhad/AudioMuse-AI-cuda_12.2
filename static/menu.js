@@ -90,4 +90,14 @@ document.addEventListener('DOMContentLoaded', function() {
         listItem.appendChild(link);
         navList.appendChild(listItem);
     });
+
+    // Display App Version from meta tag
+    const versionMeta = document.querySelector('meta[name="app-version"]');
+    if (versionMeta && versionMeta.content) {
+        const appVersion = versionMeta.content;
+        const versionElement = document.createElement('div');
+        versionElement.className = 'app-version'; // For styling
+        versionElement.textContent = `AudioMuse-AI - Version ${appVersion}`;
+        sidebar.appendChild(versionElement);
+    }
 });

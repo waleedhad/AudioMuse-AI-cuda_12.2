@@ -39,7 +39,7 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
-    PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
+    PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, APP_VERSION, \
     AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
 
 # NOTE: Annoy Manager import is moved to be local where used to prevent circular imports.
@@ -48,6 +48,15 @@ logger = logging.getLogger(__name__)
 
 # --- Flask App Setup ---
 app = Flask(__name__)
+
+# Log the application version on startup
+app.logger.info(f"Starting AudioMuse-AI Backend version {APP_VERSION}")
+
+# --- Context Processor to Inject Version ---
+@app.context_processor
+def inject_version():
+    """Injects the app version into all templates."""
+    return dict(app_version=APP_VERSION)
 
 # --- Swagger Setup ---
 app.config['SWAGGER'] = {

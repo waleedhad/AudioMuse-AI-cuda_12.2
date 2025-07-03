@@ -19,6 +19,7 @@ from rq import Worker
 try:
     # Import the specific queues we defined
     from app import app, redis_conn, rq_queue_high, rq_queue_default
+    from config import APP_VERSION
 except ImportError as e:
     print(f"Error importing from app.py: {e}")
     print("Please ensure app.py is in the Python path and does not have top-level errors.")
@@ -33,7 +34,7 @@ if __name__ == '__main__':
     # The queues_to_listen are already configured with this connection.
 
     # Use the list of names directly for the log message
-    print(f"DEFAULT RQ Worker starting. Listening on queues: {queues_to_listen}")
+    print(f"DEFAULT RQ Worker starting. Version: {APP_VERSION}. Listening on queues: {queues_to_listen}")
     print(f"Using Redis connection: {redis_conn.connection_pool.connection_kwargs}")
 
     # Create a worker instance, explicitly passing the connection.

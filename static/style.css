@@ -378,6 +378,17 @@ button:disabled,
     color: #4B5563;
 }
 
+/* --- App Version in Sidebar --- */
+.app-version {
+    /* This will now appear directly after the navigation links */
+    padding: 2rem 1rem 1rem 1rem; /* Extra top padding to space it from the last link */
+    font-size: 0.8rem; /* Smaller font */
+    color: #6B7280; /* Grey text color */
+    text-align: center;
+    /* Ensure long text wraps and doesn't get truncated */
+    overflow-wrap: break-word;
+}
+
 /* --- Utility --- */
 .hidden {
     display: none !important;
