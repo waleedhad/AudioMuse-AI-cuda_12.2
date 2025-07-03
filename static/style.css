@@ -70,13 +70,14 @@ section {
 }
 
 .config-title-group .subtitle {
-    margin-top: 0.5rem;
+    margin-top: 0;
     color: #4B5563;
 }
 
 #config-header h1 {
     border: none;
     padding: 0;
+    margin-bottom: 0.5rem;
 }
 
 .header-controls {
