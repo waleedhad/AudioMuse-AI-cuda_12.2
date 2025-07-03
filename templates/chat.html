@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/menu.css">
     <title>AudioMuse-AI - Instant Playlist</title>
     <style>
         /* --- Base & Typography (Reverted to Light Mode) --- */
@@ -114,9 +115,20 @@
         .hidden { display: none; }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-800 flex items-start justify-center min-h-screen p-4 sm:p-6">
+<body class="bg-gray-50 text-gray-800">
 
-    <main class="bg-white w-full max-w-2xl mx-auto p-6 sm:p-8 rounded-2xl shadow-lg">
+<div class="page-container">
+    <aside class="sidebar">
+        <nav>
+            <ul class="sidebar-nav">
+                <!-- Menu items are dynamically inserted by menu.js -->
+            </ul>
+        </nav>
+    </aside>
+
+    <div class="main-content" id="main-content">
+        <button class="menu-toggle">&#9776;</button>
+        <main class="bg-white w-full max-w-2xl mx-auto p-6 sm:p-8 rounded-2xl shadow-lg">
         <!-- Header Section -->
         <header class="text-center border-b border-gray-200 pb-6 mb-6">
             <h1 class="text-3xl font-bold text-gray-900">AudioMuse-AI - Instant Playlist</h1>
@@ -186,8 +198,10 @@
                 <div id="jellyfinResponseArea" class="mt-3 text-sm"></div>
             </div>
         </section>
-    </main>
-
+        </main>
+    </div>
+</div>
+    
     <script>
         // --- Self-Executing Anonymous Function to Encapsulate Code ---
         (() => {
@@ -497,5 +511,6 @@
             createPlaylistForm.addEventListener('submit', handleCreateJellyfinPlaylist);
         })();
     </script>
+    <script src="/static/menu.js"></script>
 </body>
 </html>

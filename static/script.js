@@ -1,5 +1,4 @@
 // --- DOM Element References ---
-const loadingSpinner = document.getElementById('loading-spinner');
 const mainContent = document.getElementById('main-content');
 
 // View switcher
@@ -54,7 +53,15 @@ function switchView(viewToShow) {
         advancedViewBtn.classList.remove('active');
         advancedParams.forEach(el => el.classList.add('hidden'));
         if (kmeansParamsBasic) kmeansParamsBasic.classList.remove('hidden'); // Show K-Means params in basic
-        if (basicAlgorithmDisplay) basicAlgorithmDisplay.classList.remove('hidden');
+        if (basicAlgorithmDisplay) {
+            basicAlgorithmDisplay.classList.remove('hidden');
+            // This fixes the hardcoded green color on the "K-Means" text in basic view
+            // by removing the inline style, allowing the CSS to apply the correct color.
+            const pElement = basicAlgorithmDisplay.querySelector('p');
+            if (pElement) {
+                pElement.style.color = '';
+            }
+        }
         if (clusterAlgorithmSelect) clusterAlgorithmSelect.classList.add('hidden'); // Hide algorithm dropdown in basic
 
         // In basic view, we only support K-Means
@@ -67,20 +74,14 @@ function switchView(viewToShow) {
         advancedViewBtn.classList.add('active');
         advancedParams.forEach(el => el.classList.remove('hidden'));
         kmeansParamsBasic.classList.add('hidden'); // Hide the basic K-Means inputs
-        basicAlgorithmDisplay.classList.add('hidden');
+        if (basicAlgorithmDisplay) basicAlgorithmDisplay.classList.add('hidden');
         if (clusterAlgorithmSelect) clusterAlgorithmSelect.classList.remove('hidden'); // Show algorithm dropdown in advanced
     }
      // This function handles showing/hiding algorithm-specific params
     toggleClusteringParams();
 }
 
-function showLoading(show) {
-    loadingSpinner.style.display = show ? 'flex' : 'none';
-    mainContent.style.display = show ? 'none' : 'block';
-}
-
 async function fetchConfig() {
-    showLoading(true);
     try {
         const response = await fetch('/api/config');
         const config = await response.json();
@@ -91,8 +92,6 @@ async function fetchConfig() {
     } catch (error) {
         console.error('Error fetching config:', error);
         showMessageBox('Error', 'Failed to load configuration. Please check the backend server.');
-    } finally {
-        showLoading(false);
     }
 }
 
@@ -178,8 +177,6 @@ function toggleAiConfig() {
 
 function updateCancelButtonState(isDisabled) {
     cancelTaskBtn.disabled = isDisabled;
-    cancelTaskBtn.style.opacity = isDisabled ? '0.5' : '1';
-    cancelTaskBtn.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
 }
 
 async function checkActiveTasks() {
@@ -261,13 +258,19 @@ async function checkActiveTasks() {
 }
 
 function disableTaskButtons(isDisabled) {
-    startAnalysisBtn.disabled = isDisabled;
-    startClusteringBtn.disabled = isDisabled;
-    fetchPlaylistsBtn.disabled = isDisabled;
-    
-    [startAnalysisBtn, startClusteringBtn, fetchPlaylistsBtn].forEach(btn => {
-        btn.style.opacity = isDisabled ? '0.5' : '1';
-        btn.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
+    const buttons = [startAnalysisBtn, startClusteringBtn, fetchPlaylistsBtn];
+    buttons.forEach(button => {
+        button.disabled = isDisabled;
+        // The CSS for :disabled is not specific enough to override the button's ID-based style.
+        // We apply the style directly here to ensure the visual state matches the disabled state.
+        if (isDisabled) {
+            button.style.backgroundColor = '#93C5FD'; // Disabled color from CSS
+            button.style.cursor = 'not-allowed';
+        } else {
+            // Revert to the original color by removing the inline style, allowing CSS to take over.
+            button.style.backgroundColor = '';
+            button.style.cursor = '';
+        }
     });
 }
 
@@ -279,13 +282,19 @@ function displayTaskStatus(task) {
     statusProgress.textContent = task.progress || 0;
     progressBar.style.width = `${task.progress || 0}%`;
 
-    let color = '#fbbf24'; // Yellow for pending/progress
-    if (['SUCCESS', 'FINISHED'].includes(stateUpper)) color = '#4ade80'; // Green for success
-    else if (['FAILURE', 'FAILED', 'REVOKED', 'CANCELED'].includes(stateUpper)) color = '#f87171'; // Red for failure
-    else if (stateUpper === 'IDLE') color = '#d1d5db'; // Gray for idle
+    // Set status class instead of inline style
+    statusStatus.className = 'status-text'; // Reset classes
+    let statusClass = 'status-pending';
+    if (['SUCCESS', 'FINISHED'].includes(stateUpper)) {
+        statusClass = 'status-success';
+    } else if (['FAILURE', 'FAILED', 'REVOKED', 'CANCELED'].includes(stateUpper)) {
+        statusClass = 'status-failure';
+    } else if (stateUpper === 'IDLE') {
+        statusClass = 'status-idle';
+    }
+    statusStatus.classList.add('status-status', statusClass);
 
-    statusStatus.style.color = color;
-    
+
     if (['SUCCESS', 'FINISHED'].includes(stateUpper) && (task.task_type_from_db || task.task_type || '').toLowerCase().includes('clustering')) {
         fetchPlaylists(); 
     }
@@ -404,7 +413,7 @@ async function cancelTask() {
 }
 
 async function fetchPlaylists() {
-    playlistsContainer.innerHTML = '<p style="color: #9ca3af;">Fetching playlists...</p>';
+    playlistsContainer.innerHTML = '<p>Fetching playlists...</p>';
     playlistsSection.style.display = 'block';
     try {
         const response = await fetch('/api/playlists');
@@ -413,30 +422,31 @@ async function fetchPlaylists() {
         renderPlaylists(playlistsData);
     } catch (error) {
         console.error('Error fetching playlists:', error);
-        playlistsContainer.innerHTML = `<p style="color: #f87171;">Error fetching playlists: ${error.message}</p>`;
+        playlistsContainer.innerHTML = `<p class="status-failure">Error fetching playlists: ${error.message}</p>`;
     }
 }
 
 function renderPlaylists(playlistsData) {
     playlistsContainer.innerHTML = '';
     if (!playlistsData || Object.keys(playlistsData).length === 0) {
-        playlistsContainer.innerHTML = '<p style="color: #9ca3af;">No playlists found.</p>';
+        playlistsContainer.innerHTML = '<p>No playlists found.</p>';
         return;
     }
     for (const [playlistName, songs] of Object.entries(playlistsData)) {
         const playlistDiv = document.createElement('div');
-        playlistDiv.style.cssText = 'margin-bottom: 1rem; padding: 1rem; background-color: #1f2937; border-radius: 0.375rem;';
+        playlistDiv.className = 'playlist-item';
         playlistDiv.innerHTML = `
-            <p style="color: #93c5fd;">
-                <strong style="color: #e5e7eb;">${playlistName}</strong> - (${songs.length} songs)
-                <button class="show-songs-btn" style="margin-left: 0.5rem; background-color: #3b82f6; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 0.25rem; cursor: pointer;">SHOW</button>
-            </p>
-            <ul class="song-list" style="display: none; margin-top: 0.5rem; list-style-type: disc; padding-left: 1.5rem;">
+            <div class="playlist-header">
+                <strong class="playlist-name">${playlistName}</strong>
+                <span class="playlist-song-count">(${songs.length} songs)</span>
+                <button class="show-songs-btn">SHOW</button>
+            </div>
+            <ul class="song-list" style="display: none;">
                 ${songs.map(song => `<li>${song.title} by ${song.author}</li>`).join('')}
             </ul>`;
         playlistDiv.querySelector('.show-songs-btn').addEventListener('click', e => {
             const btn = e.target;
-            const list = btn.closest('div').querySelector('.song-list');
+            const list = btn.closest('.playlist-item').querySelector('.song-list');
             list.style.display = list.style.display === 'none' ? 'block' : 'none';
             btn.textContent = list.style.display === 'none' ? 'SHOW' : 'HIDE';
         });
@@ -449,8 +459,15 @@ function showMessageBox(title, message) {
     document.getElementById(boxId)?.remove();
     const messageBox = document.createElement('div');
     messageBox.id = boxId;
-    messageBox.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #333; color: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); z-index: 1000; border: 1px solid #3b82f6; max-width: 400px; text-align: center;';
-    messageBox.innerHTML = `<h3 style="font-weight: bold; margin-bottom: 10px; color: #93c5fd;">${title}</h3><p>${message}</p><button style="margin-top: 15px; padding: 8px 15px; background-color: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;" onclick="this.parentNode.remove()">OK</button>`;
+    // Using a more neutral, light-theme style for the message box
+    messageBox.style.cssText = 'position: fixed; top: 20px; right: 20px; background-color: #fff; color: #1F2937; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; border: 1px solid #E5E7EB; max-width: 400px; text-align: left;';
+    messageBox.innerHTML = `<h3 style="font-weight: 600; margin-top:0; margin-bottom: 10px; color: #111827;">${title}</h3><p style="margin:0;">${message}</p><button style="position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 1.5rem; color: #9CA3AF; cursor: pointer;" onclick="this.parentNode.remove()">&times;</button>`;
+    
+    // Auto-remove the message box after a few seconds
+    setTimeout(() => {
+        messageBox.remove();
+    }, 5000);
+
     document.body.appendChild(messageBox);
 }
 
