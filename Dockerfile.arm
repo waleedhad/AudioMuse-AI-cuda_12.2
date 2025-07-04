@@ -1,4 +1,4 @@
-# STAGE 1: Build Essentia from your modernized repository
+# STAGE 1: Build Essentia from your modernized repository 
 # This stage compiles Essentia and its dependencies for the target ARM64 architecture.
 # It uses a modern Ubuntu base image to ensure compatibility with recent toolchains.
 FROM ubuntu:22.04 AS builder
