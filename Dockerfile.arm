@@ -106,10 +106,11 @@ RUN pip3 install --no-cache-dir \
 # Copy pre-built Essentia libraries and Python bindings from the builder stage.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 
-# THE FINAL FIX: Copy the required TensorFlow runtime libraries into a standard system path.
-# This ensures that when Python imports essentia, the OS can find its dependencies.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
+# THE FINAL FIX: Copy the final linked libraries from the standard /usr/local/lib path
+# where 'waf install' and 'setup_tensorflow.py' place them.
+COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
+COPY --from=builder /usr/local/lib/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/_pywrap_tensorflow_internal.so /usr/local/lib/
 
 # Update the dynamic linker's cache to recognize the newly copied shared libraries.
 RUN ldconfig
