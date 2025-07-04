@@ -103,16 +103,12 @@ RUN pip3 install --no-cache-dir \
     sqlglot \
     google-generativeai
 
-# Copy pre-built Essentia libraries and Python bindings from the builder stage.
+# THE FINAL FIX: Copy the entire essentia Python package from the builder stage.
+# Because we did a static build, all necessary code is linked into the _essentia.so file
+# within this directory, so we don't need to copy the individual .so files.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 
-# THE FINAL FIX: Copy the final linked libraries from the standard /usr/local/lib path
-# where 'waf install' and 'setup_tensorflow.py' place them.
-COPY --from=builder /usr/local/lib/libessentia.so /usr/local/lib/
-COPY --from=builder /usr/local/lib/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/_pywrap_tensorflow_internal.so /usr/local/lib/
-
-# Update the dynamic linker's cache to recognize the newly copied shared libraries.
+# Update the dynamic linker's cache.
 RUN ldconfig
 
 # Create model directory and download models.
