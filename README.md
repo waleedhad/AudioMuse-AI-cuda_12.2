@@ -1,4 +1,7 @@
-[![Downloads](https://img.shields.io/github/downloads/neptunehub/AudioMuse-AI/total.svg)](https://github.com/neptunehub/AudioMuse-AI/releases)
+![Downloads](https://img.shields.io/github/downloads/neptunehub/AudioMuse-AI/total.svg)
+![GitHub stars](https://img.shields.io/github/stars/neptunehub/AudioMuse-AI.svg)
+![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
+![GitHub release](https://img.shields.io/github/v/release/neptunehub/AudioMuse-AI.svg)
 
 
 # **AudioMuse-AI - Let the choice happen, the open-source way**
