@@ -871,8 +871,12 @@ def _perform_single_clustering_iteration(
                 logging.warning("%s Iteration %s: n_clusters (%s) for SpectralClustering is >= n_samples (%s). It will fail. Skipping iteration.", log_prefix, run_idx, n_clusters_param, n_samples)
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
-            spectral = SpectralClustering(n_clusters=n_clusters_param, assign_labels='kmeans', random_state=None)
+            # Add verbose logging for the potentially long-running spectral clustering
+            logging.info("%s Iteration %s: Starting SpectralClustering.fit_predict on %s samples. This may take a very long time.", log_prefix, run_idx, n_samples)
+            spectral = SpectralClustering(n_clusters=n_clusters_param, assign_labels='kmeans', random_state=None, verbose=True)
             labels = spectral.fit_predict(data_for_clustering_current)
+            logging.info("%s Iteration %s: SpectralClustering.fit_predict completed.", log_prefix, run_idx)
+
             raw_distances = np.full(data_for_clustering_current.shape[0], np.inf)
             for cluster_id_val in set(labels):
                 if cluster_id_val == -1: continue
