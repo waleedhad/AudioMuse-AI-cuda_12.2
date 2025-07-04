@@ -39,15 +39,14 @@ RUN git clone https://github.com/NeptuneHub/essentia.git
 WORKDIR /essentia
 
 # Set up TensorFlow linking using Essentia's helper script.
-# This creates the necessary symbolic links and pkg-config file.
+# This creates the necessary symbolic links and pkg-config file for the 'configure' step.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set PKG_CONFIG_PATH so the build system can find the configuration files for
-# both the system's Python and the TensorFlow libraries we just set up.
+# Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
+# The LDFLAGS is the definitive fix for the final linking error.
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow_core
+ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
-
-# The CXXFLAGS for the deprecated NumPy API is no longer needed because you have
-# updated the Essentia source code to be compatible with modern NumPy.
 
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
