@@ -43,7 +43,7 @@ WORKDIR /essentia
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
 # Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow_core
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
 ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
