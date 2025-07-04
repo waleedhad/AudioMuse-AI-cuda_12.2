@@ -158,8 +158,8 @@ def get_similar_tracks_endpoint():
 
         return jsonify(final_results)
     except RuntimeError as e:
-        logger.error(f"Runtime error finding neighbors for {target_item_id}: {e}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Runtime error finding neighbors for {target_item_id}: {e}", exc_info=True)
+        return jsonify({"error": "The similarity search service is currently unavailable."}), 500
     except Exception as e:
         logger.error(f"Unexpected error finding neighbors for {target_item_id}: {e}", exc_info=True)
         return jsonify({"error": "An unexpected error occurred."}), 500
@@ -206,4 +206,4 @@ def create_jellyfin_playlist():
 
     except Exception as e:
         logger.error(f"Failed to create Jellyfin playlist '{playlist_name}': {e}", exc_info=True)
-        return jsonify({"error": f"Failed to create playlist: {str(e)}"}), 500
+        return jsonify({"error": "An error occurred while creating the playlist on Jellyfin."}), 500
