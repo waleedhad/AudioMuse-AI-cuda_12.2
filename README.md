@@ -1,3 +1,6 @@
+[![Downloads](https://img.shields.io/github/downloads/neptunehub/AudioMuse-AI/total.svg)](https://github.com/neptunehub/AudioMuse-AI/releases)
+
+
 # **AudioMuse-AI - Let the choice happen, the open-source way**
 
 AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using sonic audio analysis via [Essentia](https://essentia.upf.edu/) and playlist automatic generation using clustering algorithm and AI based feature. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
