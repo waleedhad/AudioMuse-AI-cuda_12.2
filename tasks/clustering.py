@@ -61,6 +61,7 @@ def run_clustering_batch_task(
     num_clusters_min_max_tuple,
     dbscan_params_ranges_dict,
     gmm_params_ranges_dict,
+    spectral_params_ranges_dict,
     pca_params_ranges_dict,
     max_songs_per_cluster,
     parent_task_id,
@@ -194,7 +195,9 @@ def run_clustering_batch_task(
 
                 iteration_result = _perform_single_clustering_iteration(
                     current_run_global_idx, item_ids_for_this_iteration, # Pass IDs
-                    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict, pca_params_ranges_dict, active_mood_labels_for_batch,
+                    clustering_method, num_clusters_min_max_tuple, dbscan_params_ranges_dict, gmm_params_ranges_dict,
+                    spectral_params_ranges_dict,
+                    pca_params_ranges_dict, active_mood_labels_for_batch,
                     max_songs_per_cluster, log_prefix=log_prefix_for_iter,
                     elite_solutions_params_list=(elite_solutions_params_list_for_iter if elite_solutions_params_list_for_iter else []),
                     exploitation_probability=exploitation_probability,
@@ -243,6 +246,7 @@ def run_clustering_task(
     dbscan_eps_min, dbscan_eps_max, dbscan_min_samples_min, dbscan_min_samples_max,
     pca_components_min, pca_components_max, num_clustering_runs, max_songs_per_cluster_val, # Renamed to max_songs_per_cluster_val
     gmm_n_components_min, gmm_n_components_max,
+    spectral_n_clusters_min, spectral_n_clusters_max,
     min_songs_per_genre_for_stratification_param,
     stratified_sampling_target_percentile_param,
     score_weight_diversity_param, score_weight_silhouette_param,
@@ -295,6 +299,8 @@ def run_clustering_task(
             "dbscan_min_samples_max": dbscan_min_samples_max,
             "gmm_n_components_min": gmm_n_components_min,
             "gmm_n_components_max": gmm_n_components_max,
+            "spectral_n_clusters_min": spectral_n_clusters_min,
+            "spectral_n_clusters_max": spectral_n_clusters_max,
             "pca_components_min": pca_components_min,
             "pca_components_max": pca_components_max,
             "max_songs_per_cluster": max_songs_per_cluster_val,
@@ -347,8 +353,8 @@ def run_clustering_task(
                         "clustering_run_job_ids", "batch_jobs_launched", "total_batch_jobs", "active_runs_count",
                         "clustering_method", "num_clusters_min", "num_clusters_max", "dbscan_eps_min",
                         "dbscan_eps_max", "dbscan_min_samples_min", "dbscan_min_samples_max",
-                        "gmm_n_components_min", "gmm_n_components_max", "pca_components_min",
-                        "pca_components_max", "max_songs_per_cluster",
+                        "gmm_n_components_min", "gmm_n_components_max", "spectral_n_clusters_min", "spectral_n_clusters_max",
+                        "pca_components_min", "pca_components_max", "max_songs_per_cluster",
                         "min_songs_per_genre_for_stratification", "stratified_sampling_target_percentile",
                         "score_weight_diversity_for_run", "score_weight_silhouette_for_run",
                         "score_weight_davies_bouldin_for_run", "score_weight_calinski_harabasz_for_run",
@@ -660,6 +666,7 @@ def run_clustering_task(
                         num_clusters_min_max_tuple_for_batch = (num_clusters_min, num_clusters_max)
                         dbscan_params_ranges_dict_for_batch = {"eps_min": dbscan_eps_min, "eps_max": dbscan_eps_max, "samples_min": dbscan_min_samples_min, "samples_max": dbscan_min_samples_max}
                         gmm_params_ranges_dict_for_batch = {"n_components_min": gmm_n_components_min, "n_components_max": gmm_n_components_max}
+                        spectral_params_ranges_dict_for_batch = {"n_clusters_min": spectral_n_clusters_min, "n_clusters_max": spectral_n_clusters_max}
                         pca_params_ranges_dict_for_batch = {"components_min": pca_components_min, "components_max": pca_components_max}
                         current_elite_params_for_batch_json = json.dumps([item["params"] for item in elite_solutions_list]) if elite_solutions_list else "[]"
                         should_exploit_for_this_batch = (current_batch_start_run_idx >= exploitation_start_run_idx) and elite_solutions_list
@@ -676,7 +683,9 @@ def run_clustering_task(
                                 SAMPLING_PERCENTAGE_CHANGE_PER_RUN,
                                 clustering_method, active_mood_labels,
                                 num_clusters_min_max_tuple_for_batch, dbscan_params_ranges_dict_for_batch,
-                                gmm_params_ranges_dict_for_batch, pca_params_ranges_dict_for_batch,
+                                gmm_params_ranges_dict_for_batch,
+                                spectral_params_ranges_dict_for_batch,
+                                pca_params_ranges_dict_for_batch,
                                 max_songs_per_cluster_val, current_task_id,
                                 score_weight_diversity_param, score_weight_silhouette_param,
                                 score_weight_davies_bouldin_param, score_weight_calinski_harabasz_param,
@@ -749,6 +758,9 @@ def run_clustering_task(
                 best_params_log_string += f"Eps={dbscan_params['eps']}, MinSamples={dbscan_params['min_samples']}, "
             elif clustering_method_conf['method'] == 'gmm':
                 best_params_log_string += f"Components={clustering_method_conf['params']['n_components']}, "
+            elif clustering_method_conf['method'] == 'spectral':
+                best_params_log_string += f"N_Clusters={clustering_method_conf['params']['n_clusters']}, "
+
 
             pca_conf = best_clustering_results['parameters']['pca_config']
             best_params_log_string += f"PCA={pca_conf['enabled']}"

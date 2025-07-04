@@ -1,4 +1,4 @@
-# /home/guido/Music/AudioMuse-AI/config.py
+#AudioMuse-AI/config.py
 import os
 
 # --- Jellyfin and DB Constants (Read from Environment Variables first) ---
@@ -20,7 +20,7 @@ MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
-CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
+CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, gmm, or spectral
 AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "NONE").upper() # Accepted: OLLAMA, GEMINI, NONE
 ENABLE_CLUSTERING_EMBEDDINGS = os.environ.get("ENABLE_CLUSTERING_EMBEDDINGS", "False").lower() == "true"
 
@@ -45,6 +45,10 @@ MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE = int(os.getenv("MINIBATCH_KMEANS_PROCESS
 GMM_N_COMPONENTS_MIN = int(os.getenv("GMM_N_COMPONENTS_MIN", "40"))
 GMM_N_COMPONENTS_MAX = int(os.getenv("GMM_N_COMPONENTS_MAX", "100"))
 GMM_COVARIANCE_TYPE = os.environ.get("GMM_COVARIANCE_TYPE", "full") # 'full', 'tied', 'diag', 'spherical'
+
+# --- SpectralClustering Only Constants (Ranges for Evolutionary Approach) ---
+SPECTRAL_N_CLUSTERS_MIN = int(os.getenv("SPECTRAL_N_CLUSTERS_MIN", "40"))
+SPECTRAL_N_CLUSTERS_MAX = int(os.getenv("SPECTRAL_N_CLUSTERS_MAX", "100"))
 
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components

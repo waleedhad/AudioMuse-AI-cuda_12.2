@@ -12,8 +12,8 @@ const basicAlgorithmDisplay = document.getElementById('basic-algorithm-display')
 // Config Form
 const clusterAlgorithmSelect = document.getElementById('config-cluster_algorithm');
 const dbscanParamsDiv = document.getElementById('dbscan-params');
-// const kmeansParamsDiv = document.getElementById('kmeans-params'); // This element doesn't exist, kmeansParamsBasic is used
 const gmmParamsDiv = document.getElementById('gmm-params');
+const spectralParamsDiv = document.getElementById('spectral-params'); // New reference for Spectral
 const aiModelProviderSelect = document.getElementById('config-ai_model_provider');
 const ollamaConfigGroup = document.getElementById('ollama-config-group');
 const geminiConfigGroup = document.getElementById('gemini-config-group');
@@ -55,8 +55,6 @@ function switchView(viewToShow) {
         if (kmeansParamsBasic) kmeansParamsBasic.classList.remove('hidden'); // Show K-Means params in basic
         if (basicAlgorithmDisplay) {
             basicAlgorithmDisplay.classList.remove('hidden');
-            // This fixes the hardcoded green color on the "K-Means" text in basic view
-            // by removing the inline style, allowing the CSS to apply the correct color.
             const pElement = basicAlgorithmDisplay.querySelector('p');
             if (pElement) {
                 pElement.style.color = '';
@@ -106,7 +104,7 @@ function renderConfig(config) {
     document.getElementById('config-top_n_moods').value = config.top_n_moods || 0;
 
     // Clustering
-    clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm') ? config.cluster_algorithm : 'kmeans';
+    clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm' || config.cluster_algorithm === 'spectral') ? config.cluster_algorithm : 'kmeans';
     document.getElementById('config-max_distance').value = config.max_distance || 0;
     document.getElementById('config-max_songs_per_cluster').value = config.max_songs_per_cluster || 0;
     document.getElementById('config-pca_components_min').value = config.pca_components_min || 0;
@@ -131,6 +129,9 @@ function renderConfig(config) {
     document.getElementById('config-num_clusters_max').value = config.num_clusters_max || 0;
     document.getElementById('config-gmm_n_components_min').value = config.gmm_n_components_min || 0;
     document.getElementById('config-gmm_n_components_max').value = config.gmm_n_components_max || 0;
+    document.getElementById('config-spectral_n_clusters_min').value = config.spectral_n_clusters_min || 0;
+    document.getElementById('config-spectral_n_clusters_max').value = config.spectral_n_clusters_max || 0;
+
 
     // AI Naming
     aiModelProviderSelect.value = config.ai_model_provider || 'NONE';
@@ -144,6 +145,7 @@ function toggleClusteringParams() {
     const selectedAlgorithm = clusterAlgorithmSelect.value;
     dbscanParamsDiv.classList.add('hidden');
     gmmParamsDiv.classList.add('hidden');
+    spectralParamsDiv.classList.add('hidden'); // Hide spectral params by default
     // K-Means params (kmeansParamsBasic) are handled based on view below
 
     // Only show algorithm-specific params in advanced view
@@ -157,6 +159,8 @@ function toggleClusteringParams() {
             dbscanParamsDiv.classList.remove('hidden');
         } else if (selectedAlgorithm === 'gmm') {
             gmmParamsDiv.classList.remove('hidden');
+        } else if (selectedAlgorithm === 'spectral') {
+            spectralParamsDiv.classList.remove('hidden');
         } else if (selectedAlgorithm === 'kmeans' && kmeansParamsBasic) { 
             kmeansParamsBasic.classList.remove('hidden'); // Show K-Means params if K-Means is selected
         }
@@ -261,13 +265,10 @@ function disableTaskButtons(isDisabled) {
     const buttons = [startAnalysisBtn, startClusteringBtn, fetchPlaylistsBtn];
     buttons.forEach(button => {
         button.disabled = isDisabled;
-        // The CSS for :disabled is not specific enough to override the button's ID-based style.
-        // We apply the style directly here to ensure the visual state matches the disabled state.
         if (isDisabled) {
             button.style.backgroundColor = '#93C5FD'; // Disabled color from CSS
             button.style.cursor = 'not-allowed';
         } else {
-            // Revert to the original color by removing the inline style, allowing CSS to take over.
             button.style.backgroundColor = '';
             button.style.cursor = '';
         }
@@ -282,7 +283,6 @@ function displayTaskStatus(task) {
     statusProgress.textContent = task.progress || 0;
     progressBar.style.width = `${task.progress || 0}%`;
 
-    // Set status class instead of inline style
     statusStatus.className = 'status-text'; // Reset classes
     let statusClass = 'status-pending';
     if (['SUCCESS', 'FINISHED'].includes(stateUpper)) {
@@ -299,16 +299,13 @@ function displayTaskStatus(task) {
         fetchPlaylists(); 
     }
 
-    // Correctly extract the status message
     let statusMessage = 'N/A';
     if (task.details) {
         if (task.details.status_message) {
             statusMessage = task.details.status_message;
         } else if (Array.isArray(task.details.log) && task.details.log.length > 0) {
-            // Fallback to the last log entry if status_message is not available.
             statusMessage = task.details.log[task.details.log.length - 1];
         } else if (task.details.message) {
-            // Further fallback to the general message field.
             statusMessage = task.details.message;
         }
     }
@@ -336,7 +333,6 @@ async function startTask(taskType) {
         playlistsSection.style.display = 'none';
         playlistsContainer.innerHTML = '';
         
-        // Always collect all params, backend can decide what to use based on algorithm
         Object.assign(payload, {
             clustering_method: clusterAlgorithmSelect.value,
             max_distance: parseFloat(document.getElementById('config-max_distance').value),
@@ -361,12 +357,14 @@ async function startTask(taskType) {
             num_clusters_max: parseInt(document.getElementById('config-num_clusters_max').value),
             gmm_n_components_min: parseInt(document.getElementById('config-gmm_n_components_min').value),
             gmm_n_components_max: parseInt(document.getElementById('config-gmm_n_components_max').value),
+            spectral_n_clusters_min: parseInt(document.getElementById('config-spectral_n_clusters_min').value),
+            spectral_n_clusters_max: parseInt(document.getElementById('config-spectral_n_clusters_max').value),
             ai_model_provider: aiModelProviderSelect.value,
             ollama_server_url: document.getElementById('config-ollama_server_url').value,
             ollama_model_name: document.getElementById('config-ollama_model_name').value,
             gemini_api_key: document.getElementById('config-gemini_api_key').value,
             gemini_model_name: document.getElementById('config-gemini_model_name').value,
-            enable_clustering_embeddings: document.getElementById('config-enable_clustering_embeddings').checked // Added this line
+            enable_clustering_embeddings: document.getElementById('config-enable_clustering_embeddings').checked
         });
     }
 
@@ -459,11 +457,9 @@ function showMessageBox(title, message) {
     document.getElementById(boxId)?.remove();
     const messageBox = document.createElement('div');
     messageBox.id = boxId;
-    // Using a more neutral, light-theme style for the message box
     messageBox.style.cssText = 'position: fixed; top: 20px; right: 20px; background-color: #fff; color: #1F2937; padding: 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; border: 1px solid #E5E7EB; max-width: 400px; text-align: left;';
     messageBox.innerHTML = `<h3 style="font-weight: 600; margin-top:0; margin-bottom: 10px; color: #111827;">${title}</h3><p style="margin:0;">${message}</p><button style="position: absolute; top: 10px; right: 10px; background: none; border: none; font-size: 1.5rem; color: #9CA3AF; cursor: pointer;" onclick="this.parentNode.remove()">&times;</button>`;
     
-    // Auto-remove the message box after a few seconds
     setTimeout(() => {
         messageBox.remove();
     }, 5000);

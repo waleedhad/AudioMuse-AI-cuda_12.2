@@ -10,7 +10,7 @@ from collections import defaultdict
 
 # Sklearn imports for _perform_single_clustering_iteration
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans, DBSCAN, MiniBatchKMeans
+from sklearn.cluster import KMeans, DBSCAN, MiniBatchKMeans, SpectralClustering
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture # type: ignore
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score # type: ignore
@@ -314,7 +314,7 @@ def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_ty
 
 def _perform_single_clustering_iteration(
     run_idx, item_ids_for_subset, 
-    clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges, active_mood_labels, 
+    clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, spectral_params_ranges, pca_params_ranges, active_mood_labels, 
     max_songs_per_cluster, log_prefix="",
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, 
@@ -533,6 +533,11 @@ def _perform_single_clustering_iteration(
                         upper_bound_gmm_comps = min(gmm_params_ranges["n_components_max"], max_clusters_or_components) if max_clusters_or_components > 0 else gmm_params_ranges["n_components_max"]
                         mutated_n_components = _mutate_param(elite_n_components, gmm_params_ranges["n_components_min"], upper_bound_gmm_comps, mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA))
                         temp_method_params_config = {"method": "gmm", "params": {"n_components": max(1, mutated_n_components)}}
+                    elif clustering_method == "spectral":
+                        elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", spectral_params_ranges["n_clusters_min"])
+                        upper_bound_n_clusters = min(spectral_params_ranges["n_clusters_max"], max_clusters_or_components) if max_clusters_or_components > 0 else spectral_params_ranges["n_clusters_max"]
+                        mutated_n_clusters = _mutate_param(elite_n_clusters, max(1, spectral_params_ranges["n_clusters_min"]), upper_bound_n_clusters, mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA))
+                        temp_method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, mutated_n_clusters)}}
 
                     if temp_method_params_config and temp_pca_config is not None:
                         if clustering_method == "kmeans": # type: ignore
@@ -593,6 +598,10 @@ def _perform_single_clustering_iteration(
                 upper_bound_gmm_rand = min(gmm_params_ranges["n_components_max"], max_clusters_or_components_rand) if max_clusters_or_components_rand > 0 else gmm_params_ranges["n_components_max"]
                 gmm_n_rand = random.randint(gmm_params_ranges["n_components_min"], upper_bound_gmm_rand)
                 method_params_config = {"method": "gmm", "params": {"n_components": max(1, gmm_n_rand)}}
+            elif clustering_method == "spectral":
+                upper_bound_spectral_rand = min(spectral_params_ranges["n_clusters_max"], max_clusters_or_components_rand) if max_clusters_or_components_rand > 0 else spectral_params_ranges["n_clusters_max"]
+                spectral_n_rand = random.randint(spectral_params_ranges["n_clusters_min"], upper_bound_spectral_rand)
+                method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, spectral_n_rand)}}
             else:
                 logging.error("%s Iteration %s: Unsupported clustering method %s", log_prefix, run_idx, clustering_method)
                 return None # type: ignore
@@ -850,6 +859,31 @@ def _perform_single_clustering_iteration(
             if data_for_clustering_current.shape[0] > 0 and labels.max() < gmm.means_.shape[0] and len(labels) == data_for_clustering_current.shape[0]:
                 centers_for_points = gmm.means_[labels] 
                 raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
+
+        elif method_from_config == "spectral":
+            if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0:
+                logging.warning("%s Iteration %s: Data for SpectralClustering is empty. Cannot fit.", log_prefix, run_idx)
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+            
+            n_samples = data_for_clustering_current.shape[0]
+            n_clusters_param = params_from_config["n_clusters"]
+            if n_clusters_param >= n_samples:
+                logging.warning("%s Iteration %s: n_clusters (%s) for SpectralClustering is >= n_samples (%s). It will fail. Skipping iteration.", log_prefix, run_idx, n_clusters_param, n_samples)
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            spectral = SpectralClustering(n_clusters=n_clusters_param, assign_labels='kmeans', random_state=None)
+            labels = spectral.fit_predict(data_for_clustering_current)
+            raw_distances = np.full(data_for_clustering_current.shape[0], np.inf)
+            for cluster_id_val in set(labels):
+                if cluster_id_val == -1: continue
+                indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id_val]
+                if not indices: continue
+                cluster_points = data_for_clustering_current[indices]
+                if len(cluster_points) > 0:
+                    center = cluster_points.mean(axis=0)
+                    for i_idx in indices:
+                        raw_distances[i_idx] = np.linalg.norm(data_for_clustering_current[i_idx] - center)
+                    cluster_centers_map[cluster_id_val] = center
 
         silhouette_metric_value = 0.0; davies_bouldin_metric_value = 0.0; calinski_harabasz_metric_value = 0.0
         s_score_raw_val_for_log = 0.0; db_score_raw_val_for_log = 0.0; ch_score_raw_val_for_log = 0.0 # nosec
