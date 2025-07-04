@@ -1,5 +1,6 @@
 ![Downloads](https://img.shields.io/github/downloads/neptunehub/AudioMuse-AI/total.svg)
 ![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
+![Latest Tag](https://img.shields.io/github/v/tag/neptunehub/AudioMuse-AI?label=latest-tag)
 
 
 # **AudioMuse-AI - Let the choice happen, the open-source way**
