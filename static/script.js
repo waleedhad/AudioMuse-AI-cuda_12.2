@@ -26,6 +26,7 @@ const cancelTaskBtn = document.getElementById('cancel-task-btn');
 
 // Task Status Display
 const statusTaskId = document.getElementById('status-task-id');
+const statusRunningTime = document.getElementById('status-running-time');
 const statusTaskType = document.getElementById('status-task-type');
 const statusStatus = document.getElementById('status-status');
 const statusProgress = document.getElementById('status-progress');
@@ -42,6 +43,24 @@ let currentTaskId = null;
 let lastPolledTaskDetails = {};
 
 // --- Functions ---
+
+/**
+ * Formats a duration in seconds into a HH : MM : SS string.
+ * @param {number} totalSeconds The total seconds to format.
+ * @returns {string} The formatted time string.
+ */
+function formatRunningTime(totalSeconds) {
+    if (totalSeconds === null || totalSeconds === undefined || isNaN(totalSeconds) || totalSeconds < 0) {
+        return '-- : -- : --';
+    }
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+    
+    const pad = (num) => String(num).padStart(2, '0');
+
+    return `${pad(hours)} : ${pad(minutes)} : ${pad(seconds)}`;
+}
 
 /**
  * Switches between basic and advanced configuration views.
@@ -277,6 +296,7 @@ function disableTaskButtons(isDisabled) {
 
 function displayTaskStatus(task) {
     statusTaskId.textContent = task.task_id || 'N/A';
+    statusRunningTime.textContent = formatRunningTime(task.running_time_seconds);
     statusTaskType.textContent = task.task_type_from_db || task.task_type || 'N/A';
     const stateUpper = (task.state || task.status || 'IDLE').toUpperCase();
     statusStatus.textContent = stateUpper;
