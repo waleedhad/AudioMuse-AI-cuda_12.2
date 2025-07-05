@@ -47,6 +47,10 @@ ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow_core
 ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
+# THE DEFINITIVE FIX: Set CXXFLAGS to use the older NumPy C-API, which is required
+# by the essentia source code when compiling against modern NumPy.
+ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
+
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
 RUN python3 ./waf
@@ -108,8 +112,10 @@ RUN pip3 install --no-cache-dir \
     google-generativeai
 
 # Copy the pre-built essentia Python package from the builder stage.
-# This is all that is needed as the static build linked all necessary code.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
+
+# Update the dynamic linker's cache to recognize the newly installed libraries.
+RUN ldconfig
 
 # Create model directory and download models.
 RUN mkdir -p /app/model
