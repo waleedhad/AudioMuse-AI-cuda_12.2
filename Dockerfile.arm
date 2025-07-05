@@ -91,9 +91,8 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
 # Install Python packages for the final application.
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
-# THE STRONGEST FIX: Install TensorFlow directly into the final image.
-# This is the most robust way to ensure the essentia runtime has its required libraries,
-# avoiding any fragile COPY commands for the .so files.
+# Install TensorFlow directly into the final image.
+# This is the most robust way to ensure the essentia runtime has its required libraries.
 RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
 
 RUN pip3 install --no-cache-dir \
@@ -113,8 +112,11 @@ RUN pip3 install --no-cache-dir \
     google-generativeai
 
 # Copy the pre-built essentia Python package from the builder stage.
-# Because we are installing TensorFlow directly, we no longer need to copy its libraries.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
+
+# THE FINAL FIX: Update the dynamic linker's cache to recognize the newly installed libraries.
+# This makes the TensorFlow and Essentia libraries visible to the operating system.
+RUN ldconfig
 
 # Create model directory and download models.
 RUN mkdir -p /app/model
