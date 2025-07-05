@@ -39,17 +39,13 @@ RUN git clone https://github.com/NeptuneHub/essentia.git
 WORKDIR /essentia
 
 # Set up TensorFlow linking using Essentia's helper script.
-# This creates the necessary symbolic links and pkg-config file.
+# This creates the necessary symbolic links and pkg-config file for the 'configure' step.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set PKG_CONFIG_PATH so the build system can find the configuration files for
-# both the system's Python and the TensorFlow libraries we just set up.
+# Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow_core
+ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
-
-# THE DEFINITIVE FIX: Use ENV to set CXXFLAGS for all subsequent RUN commands.
-# This ensures the flag is used during the 'waf' compile step, not just 'configure'.
-# This resolves the NumPy C-API error.
-ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
 
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
@@ -91,8 +87,7 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
 # Install Python packages for the final application.
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
-# Install TensorFlow directly into the final image.
-# This is the most robust way to ensure the essentia runtime has its required libraries.
+# Install TensorFlow directly into the final image to provide runtime libraries.
 RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
 
 RUN pip3 install --no-cache-dir \
@@ -114,8 +109,10 @@ RUN pip3 install --no-cache-dir \
 # Copy the pre-built essentia Python package from the builder stage.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
 
-# THE FINAL FIX: Update the dynamic linker's cache to recognize the newly installed libraries.
-# This makes the TensorFlow and Essentia libraries visible to the operating system.
+# THE DEFINITIVE FIX: Copy the required TensorFlow runtime libraries from the builder stage
+# into a standard system path, then update the linker's cache.
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
 RUN ldconfig
 
 # Create model directory and download models.
