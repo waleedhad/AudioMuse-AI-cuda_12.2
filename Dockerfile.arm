@@ -42,10 +42,14 @@ WORKDIR /essentia
 # This creates the necessary symbolic links and pkg-config file.
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
-ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
+# Set PKG_CONFIG_PATH so the build system can find the configuration files for
+# both the system's Python and the TensorFlow libraries we just set up.
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
+
+# THE DEFINITIVE FIX: Use ENV to set CXXFLAGS for all subsequent RUN commands.
+# This ensures the flag is used during the 'waf' compile step, not just 'configure'.
+# This resolves the NumPy C-API error.
+ENV CXXFLAGS="-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION"
 
 # Build and install Essentia using the Waf build system in separate, cacheable layers.
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow
@@ -87,6 +91,11 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
 # Install Python packages for the final application.
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
+# THE STRONGEST FIX: Install TensorFlow directly into the final image.
+# This is the most robust way to ensure the essentia runtime has its required libraries,
+# avoiding any fragile COPY commands for the .so files.
+RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
+
 RUN pip3 install --no-cache-dir \
     Flask \
     Flask-Cors \
@@ -103,16 +112,9 @@ RUN pip3 install --no-cache-dir \
     sqlglot \
     google-generativeai
 
-# Copy pre-built Essentia libraries and Python bindings from the builder stage.
+# Copy the pre-built essentia Python package from the builder stage.
+# Because we are installing TensorFlow directly, we no longer need to copy its libraries.
 COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
-
-# THE FINAL FIX: Copy the required TensorFlow runtime libraries from the builder stage
-# into a standard system path, then update the linker's cache.
-# The paths are corrected to remove the non-existent 'tensorflow_core' directory.
-# The copy for 'libessentia.so' is removed as it's not created in a static build.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so /usr/local/lib/
-RUN ldconfig
 
 # Create model directory and download models.
 RUN mkdir -p /app/model
