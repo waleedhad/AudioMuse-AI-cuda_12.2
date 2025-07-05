@@ -43,7 +43,7 @@ WORKDIR /essentia
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
 # Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow_core
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
 ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 
@@ -108,8 +108,10 @@ COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local
 
 # THE FINAL FIX: Copy the required TensorFlow runtime libraries from the builder stage
 # into a standard system path, then update the linker's cache.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/libtensorflow_framework.so.2 /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow_core/python/_pywrap_tensorflow_internal.so /usr/local/lib/
+# The paths are corrected to remove the non-existent 'tensorflow_core' directory.
+# The copy for 'libessentia.so' is removed as it's not created in a static build.
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/libtensorflow_framework.so.2 /usr/local/lib/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/tensorflow/python/_pywrap_tensorflow_internal.so /usr/local/lib/
 RUN ldconfig
 
 # Create model directory and download models.
