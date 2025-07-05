@@ -521,13 +521,13 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
 
 2.  **Data Perturbation:** For subsequent runs after the first, the sampled subset isn't entirely random. A percentage of songs (`SAMPLING_PERCENTAGE_CHANGE_PER_RUN`) are randomly swapped out, while the rest are kept from the previous iteration's sample. This controlled perturbation introduces variability while retaining some continuity between runs.
 
-1.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 5000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
+3.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 5000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
 
-3.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
+4.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
     *   **Elite Solutions:** The parameter sets from the best-performing runs (the "elites") are remembered.
     *   **Exploitation & Mutation:** For subsequent runs, there's a chance (`EXPLOITATION_PROBABILITY_CONFIG`) that instead of purely random parameters, the system will take an elite solution and "mutate" its parameters slightly. This involves making small, random adjustments (controlled by `MUTATION_INT_ABS_DELTA`, `MUTATION_FLOAT_ABS_DELTA`, etc.) to the elite's parameters, effectively exploring the "neighborhood" of good solutions to potentially find even better ones.
 
-3.  **Comprehensive Scoring:** Each clustering outcome is evaluated using a composite score. This score is a weighted sum of several factors, designed to balance different aspects of playlist quality:
+5.  **Comprehensive Scoring:** Each clustering outcome is evaluated using a composite score. This score is a weighted sum of several factors, designed to balance different aspects of playlist quality:
     *   **Playlist Diversity:** Measures how varied the predominant characteristics (e.g., moods, danceability) are across all generated playlists.
     *   **Playlist Purity:** Assesses how well the songs within each individual playlist align with that playlist's central theme or characteristic.
     *   **Internal Clustering Metrics:** Standard metrics evaluate the geometric quality of the clusters:
@@ -535,9 +535,86 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
         *   **Davies-Bouldin Index:** How well-separated are the clusters relative to their intra-cluster similarity?
         *   **Calinski-Harabasz Index:** Ratio of between-cluster to within-cluster dispersion.
 
-5.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
 
-5.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
+6.  **How Purity and Diversity Scores Are Calculated**
+
+    The **Purity** and **Diversity** scores are key metrics (created for this songs clustering) used by the evolutionary algorithm to evaluate the quality of a set of playlists. These scores help balance **intra-playlist consistency** (Purity) with **inter-playlist variety** (Diversity). They are calculated in a consistent way, whether you use **interpretable score vectors** or **high-dimensional embeddings** for clustering.
+
+    **a. Determining the Playlist’s "Personality"**
+
+    Each playlist (or cluster) is assigned a **representative profile**—its thematic "personality"—based on how it was formed.
+
+    - **If clustering was done using score vectors:**
+        - The algorithm calculates the **centroid** of the cluster in feature vector space.
+        - This centroid is reverse-mapped into interpretable attributes, such as:  
+          `Tempo: 120bpm`, `Energy: 0.8`, `Mood_Rock: 75%`, `Mood_Happy: 60%`, etc.
+
+    - **If clustering was done using embeddings:**
+        - Embedding dimensions are not human-interpretable.
+        - The algorithm computes the **average score vector** across all songs in the cluster (using their original interpretable features).
+        - This average vector becomes the playlist’s interpretable profile.
+
+    In both cases, the result is a readable "personality profile" that defines the core characteristics of the playlist.
+
+    **b. Purity Score – Intra-Playlist Consistency**
+
+    The **Purity score** answers:  
+    _"How well do the songs within a playlist match its main theme?"_
+
+    - From the playlist’s profile, the algorithm extracts:
+        - The **top K mood labels**
+        - The **predominant non-mood feature** (e.g., tempo, energy)
+    - Each song is evaluated for how strongly it reflects these:
+        - `raw_playlist_purity_component` sums the highest score a song has for any of the top moods.
+        - `raw_other_feature_purity_component` sums the score for the playlist’s predominant other feature.
+
+    These raw values are then:
+
+    - Transformed with the natural logarithm (`np.log1p`)
+    - Normalized using:
+        - `LN_MOOD_PURITY_STATS`
+        - `LN_OTHER_FEATURES_PURITY_STATS`
+
+    A higher Purity score means songs in a playlist are tightly aligned to its theme.
+
+    **c. Diversity Score – Inter-Playlist Variety**
+
+    The **Diversity score** answers:  
+    _"How different are the playlists from each other?"_
+
+    - The algorithm looks at the **personality profiles** of all playlists.
+    - It identifies unique, dominant characteristics across playlists (moods, features).
+    - It then calculates:
+        - `raw_mood_diversity_score`: sum of highest scores for each unique predominant mood
+        - `raw_other_features_diversity_score`: same, for other features
+
+    These scores are also:
+
+    - Log-transformed (`np.log1p`)
+    - Normalized using:
+        - `LN_MOOD_DIVERSITY_STATS`
+        - `LN_OTHER_FEATURES_DIVERSITY_STATS`
+
+    > If using embeddings, alternative normalization constants are used, such as:
+    >
+    > - `LN_MOOD_DIVERSITY_EMBEDDING_STATS`
+    > - `LN_OTHER_FEATURES_DIVERSITY_EMBEDDING_STATS`
+
+    A higher Diversity score means playlists differ significantly from one another in theme and sound.
+
+    **d. Final Scoring**
+
+    The two components are combined using weighted coefficients:
+
+    ```python
+    final_score = (SCORE_WEIGHT_PURITY * purity_score) + (SCORE_WEIGHT_DIVERSITY * diversity_score)
+    ```
+
+    By adjusting `SCORE_WEIGHT_PURITY` and `SCORE_WEIGHT_DIVERSITY`, you can control whether the algorithm favors tightly themed playlists or maximally diverse collections.
+
+7.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
+
+8.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
 
 This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
 
