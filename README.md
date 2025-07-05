@@ -30,6 +30,7 @@ Addional important information on this project can also be found here:
   - [1. K-Means](#1-k-means)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
+  - [4. Spectral Clustering](#4-spectral-clustering)
   - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
@@ -286,7 +287,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
 | `ENABLE_CLUSTERING_EMBEDDINGS`           | Whether to use audio embeddings (True) or score-based features (False) for clustering. | `false`                              |
-| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
+| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`, `spectral`.                             | `kmeans`                             |
 | `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `0`                                  |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
@@ -472,25 +473,37 @@ AudioMuse-AI offers three main clustering algorithms (K-Means, DBSCAN, GMM). A k
 *   **Direct Audio Embeddings:** Using the 200-dimensional MusiCNN embeddings generated during analysis. This can provide a more nuanced clustering based on deeper audio characteristics. This option is controlled by the `ENABLE_CLUSTERING_EMBEDDINGS` parameter in the UI's "Advanced" section and configuration. GMM may perform particularly well with embeddings. When embeddings are used with K-Means, MiniBatchKMeans is employed to handle the larger data size more efficiently.
 
 Regardless of the input data chosen, the selected clustering algorithm is executed multiple times (default 5000) following an Evolutionary Monte Carlo approach. This allows the system to test multiple configurations of parameters and find the best ones.
+
+When chose clustering algorithm consider their complexity (speed, scalability, etc) expecially if you have big song dataset:
+* So K-Means -> GMM -> DBSCAN -> Spectral (from faster to slower)
+
+About quality it really depends from how your song are distributed. K-Means because is faster is always a good choice. GMM give good result in some test with embbeding. Spectral give also good result with embbeding but is very slow.
+
 Here's an explanation of the pros and cons of the different algorithms:
 
 ### **1\. K-Means**
 
 * **Best For:** Speed, simplicity, when clusters are roughly spherical and of similar size.  
 * **Pros:** Very fast (especially MiniBatchKMeans for large datasets/embeddings), scalable, clear "average" cluster profiles.  
-* **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers.
+* **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers, and can be slow on large datasets (complexity is O(n*k*d*i), though MiniBatchKMeans helps).
 
 ### **2\. DBSCAN**
 
 * **Best For:** Discovering clusters of arbitrary shapes, handling outliers well, when the number of clusters is unknown.  
 * **Pros:** No need to set K, finds varied shapes, robust to noise.  
-* **Cons:** Sensitive to eps and min\_samples parameters, can struggle with varying cluster densities, no direct "centroids."
+* **Cons:** Sensitive to eps and min_samples parameters, can struggle with varying cluster densities, no direct "centroids," and can be slow on large datasets (complexity is O(n log n) to O(n²)).
 
 ### **3\. GMM (Gaussian Mixture Models)**
 
 * **Best For:** Modeling more complex, elliptical cluster shapes and when a probabilistic assignment of tracks to clusters is beneficial.  
 * **Pros:** Flexible cluster shapes, "soft" assignments, model-based insights.  
-* **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
+* **Cons:** Requires setting number of components, computationally intensive (can be slow, with complexity of O(n*k*d²) per iteration), sensitive to initialization.
+
+### **4. Spectral Clustering**
+
+* **Best For:** Finding clusters with complex, non-convex shapes (e.g., intertwined genres) when the number of clusters is known beforehand.
+* **Pros:** Very effective for irregular cluster geometries where distance-based algorithms like K-Means fail. It does not assume clusters are spherical.
+* **Cons:** Computationally very expensive (often O(n^3) due to matrix operations), which makes it impractical for large music libraries. It also requires you to specify the number of clusters, similar to K-Means.
 
 **Recommendation:** Start with **K-Means** (which will use MiniBatchKMeans by default if embeddings are enabled) due to its speed in the evolutionary search. MiniBatchKMeans is particularly helpful for larger libraries or when using embeddings. Experiment with **GMM** for more nuanced results, especially when using direct audio embeddings. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 5000) helps the integrated evolutionary algorithm to find a good solution.
 
