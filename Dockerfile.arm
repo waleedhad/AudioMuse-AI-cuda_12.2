@@ -59,32 +59,31 @@ RUN pip3 install --no-cache-dir \
 
 # Clone Essentia
 RUN git clone https://github.com/NeptuneHub/essentia.git /essentia
+
 WORKDIR /essentia
 
 # Setup TensorFlow linking for Essentia
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set environment variables for linker
+# Set environment variables for linking TensorFlow
 ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
 ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
-# Build Essentia
-# Configure separately to cache this step if source doesn't change
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow
+# Configure, build, and install Essentia
+ENV PYTHON_VERSION=3.10
+ENV PYTHON_SITEPACKAGES=/usr/local/lib/python${PYTHON_VERSION}/dist-packages
 
-# Compile
-RUN python3 ./waf
+RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
+    python3 ./waf build && \
+    python3 ./waf install && \
+    echo "Essentia installed to:" && find ${PYTHON_SITEPACKAGES} -type d -name 'essentia*'
 
-# Install
-RUN python3 ./waf install && \
-    echo "Essentia installed to:" && find /usr/local -type d -name 'essentia*'
+# Set PYTHONPATH correctly to where Essentia was installed and your app
+ENV PYTHONPATH=${PYTHON_SITEPACKAGES}:/app
 
-# Clean build dependencies and source (optional, but saves space)
-#DELETED FOR TESTING NOW
-
-# Back to app folder
+# Return to app folder
 WORKDIR /app
 
 # Download models
@@ -108,9 +107,6 @@ RUN mkdir -p /app/model && wget -q -P /app/model \
 # Copy application code
 COPY . /app
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# Set PYTHONPATH to include only installed packages and app
-ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
 
 EXPOSE 8000
 
