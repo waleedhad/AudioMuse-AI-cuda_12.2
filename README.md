@@ -1,4 +1,3 @@
-![Downloads](https://img.shields.io/badge/downloads-0-blue)
 ![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
 ![Latest Tag](https://img.shields.io/github/v/tag/neptunehub/AudioMuse-AI?label=latest-tag)
 
@@ -12,6 +11,10 @@ Addional important information on this project can also be found here:
 * Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
 
 **IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
+
+The **supported architecture** are:
+* **amd64**: Supported
+* **arm64**: Not supported yet, **work in progress..**
 
 ## **Table of Contents**
 
