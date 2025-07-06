@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Install all build-time and runtime dependencies
+# Install system and build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -59,34 +59,57 @@ RUN pip3 install --no-cache-dir \
 
 # Clone Essentia
 RUN git clone https://github.com/NeptuneHub/essentia.git /essentia
-
 WORKDIR /essentia
 
-# Setup TensorFlow linking for Essentia
+# Set TensorFlow linking
 RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
 
-# Set environment variables for linking TensorFlow
+# Set linker environment
 ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
 ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
 ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
-# Configure, build, and install Essentia
-ENV PYTHON_VERSION=3.10
-ENV PYTHON_SITEPACKAGES=/usr/local/lib/python${PYTHON_VERSION}/dist-packages
-
+# Build and install Essentia
 RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
-    python3 ./waf build && \
-    python3 ./waf install && \
-    echo "Essentia installed to:" && find ${PYTHON_SITEPACKAGES} -type d -name 'essentia*'
+    python3 ./waf && \
+    python3 ./waf install
 
-# Set PYTHONPATH correctly to where Essentia was installed and your app
-ENV PYTHONPATH=${PYTHON_SITEPACKAGES}:/app
+# 🔎 Debug & Fix: Check Essentia installation and fix PYTHONPATH
+RUN echo ">> Checking Essentia install..." && \
+    find /usr/local -type d -iname "*essentia*" && \
+    find /usr/local -name "*_essentia*.so" || true && \
+    if [ -d "/usr/local/lib/python3/dist-packages/essentia" ]; then \
+      ln -s /usr/local/lib/python3/dist-packages/essentia /usr/local/lib/python3.10/dist-packages/essentia && \
+      echo "✅ Symlinked essentia to correct site-packages"; \
+    fi && \
+    python3 -c "import essentia; print('✅ Essentia imported successfully')" || (echo '❌ Failed to import essentia'; exit 1)
 
-# Return to app folder
+# Clean up build dependencies
+RUN apt-get purge -y \
+    build-essential \
+    g++ \
+    gcc \
+    python3-dev \
+    libeigen3-dev \
+    libfftw3-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libchromaprint-dev \
+    libyaml-dev \
+    libyaml-cpp-dev \
+    libtag1-dev \
+    libsamplerate0-dev \
+    libatlas-base-dev && \
+    apt-get autoremove -y && \
+    apt-get clean
+
+# Back to app folder
 WORKDIR /app
 
-# Download models
+# Download model files
 RUN mkdir -p /app/model && wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
@@ -107,6 +130,9 @@ RUN mkdir -p /app/model && wget -q -P /app/model \
 # Copy application code
 COPY . /app
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Set PYTHONPATH to include essentia and app code
+ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/essentia/src/python:/app
 
 EXPOSE 8000
 
