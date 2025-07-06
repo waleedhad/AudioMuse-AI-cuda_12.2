@@ -1,15 +1,20 @@
-# STAGE 1: Build Essentia from your modernized repository
-# This stage compiles Essentia and its dependencies for the target ARM64 architecture.
-# It uses a modern Ubuntu base image to ensure compatibility with recent toolchains.
-FROM ubuntu:22.04 AS builder
+FROM ubuntu:22.04
 
-# Install all necessary build dependencies using apt.
+ENV LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# Install all build-time and runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     git \
     wget \
-    python3-pip \
+    curl \
+    vim \
+    python3 python3-pip python3-dev python3-setuptools \
     pkg-config \
     libeigen3-dev \
     libfftw3-dev \
@@ -23,76 +28,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtag1-dev \
     libsamplerate0-dev \
     libatlas-base-dev \
-    python3-dev \
-    python3-setuptools \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install the specific Python dependencies required for the build.
-RUN pip3 install --no-cache-dir numpy==1.26.4
-RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
-
-# Clone your updated Essentia repository.
-WORKDIR /
-RUN git clone https://github.com/NeptuneHub/essentia.git
-
-# Set the working directory to the cloned source folder.
-WORKDIR /essentia
-
-# Set up TensorFlow linking using Essentia's helper script.
-# This creates the necessary symbolic links and pkg-config file.
-RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
-
-# Set environment variables to explicitly help the compiler and linker find the TensorFlow libraries.
-# The path uses /tensorflow_core based on the output from the setup_tensorflow.py script.
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
-ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
-
-
-# Build and install Essentia using the Waf build system in separate, cacheable layers.
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow
-RUN python3 ./waf
-RUN python3 ./waf install
-
-# --- End of builder stage ---
-
-
-# STAGE 2: Final application image
-# This stage creates a clean, smaller image containing only the runtime dependencies
-# and the pre-compiled application artifacts.
-FROM ubuntu:22.04
-
-ENV LANG=C.UTF-8 \
-    PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
-
-WORKDIR /app
-
-# Install only the necessary runtime dependencies.
-# Added python3-dev, which is required to compile the 'annoy' package from source.
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
-    apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-dev \
-    libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
-    ffmpeg wget git vim \
-    redis-tools curl \
+    libpq-dev \
+    redis-tools \
     supervisor \
-    strace \
     procps \
     iputils-ping \
-    libpq-dev \
     gcc \
     g++ \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python packages for the final application.
+# Install Python dependencies
 RUN pip3 install --no-cache-dir numpy==1.26.4
-
-# Install TensorFlow directly into the final image.
-# This is the most robust way to ensure the essentia runtime has its required libraries.
 RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
 
+# Install additional Python packages
 RUN pip3 install --no-cache-dir \
     Flask \
     Flask-Cors \
@@ -109,17 +58,51 @@ RUN pip3 install --no-cache-dir \
     sqlglot \
     google-generativeai
 
-# Copy the pre-built essentia Python package from the builder stage.
-COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local/lib/python3.10/dist-packages/
+# Clone Essentia
+RUN git clone https://github.com/NeptuneHub/essentia.git /essentia
+WORKDIR /essentia
 
-# Update the dynamic linker's cache to recognize the newly installed libraries.
-# This makes the TensorFlow and Essentia libraries visible to the operating system.
-#RUN ldconfig
+# Setup TensorFlow linking for Essentia
+RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
+
+# Set environment variables for linker
+ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
+ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
-# Create model directory and download models.
-RUN mkdir -p /app/model
-RUN wget -q -P /app/model \
+# Build Essentia
+RUN python3 ./waf configure --build-static --with-python --with-tensorflow
+RUN python3 ./waf
+RUN python3 ./waf install
+
+# Clean up build tools to reduce image size
+RUN apt-get purge -y \
+    build-essential \
+    g++ \
+    gcc \
+    python3-dev \
+    libeigen3-dev \
+    libfftw3-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libchromaprint-dev \
+    libyaml-dev \
+    libyaml-cpp-dev \
+    libtag1-dev \
+    libsamplerate0-dev \
+    libatlas-base-dev && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /essentia
+
+# Back to app folder
+WORKDIR /app
+
+# Download models
+RUN mkdir -p /app/model && wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-msd-musicnn-1.pb \
@@ -136,14 +119,15 @@ RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
 
-# Copy application code and configuration.
+# Copy application code
 COPY . /app
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Set the PYTHONPATH to include the installed packages.
+# Set PYTHONPATH so Essentia and your app are found
 ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
 
 EXPOSE 8000
 
 WORKDIR /workspace
+
 CMD ["bash", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then echo 'Starting worker processes via supervisord...' && /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf; else echo 'Starting web service...' && python3 /app/app.py; fi"]
