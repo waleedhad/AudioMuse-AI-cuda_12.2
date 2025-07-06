@@ -34,8 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     iputils-ping \
     gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+    g++
 
 # Install Python dependencies
 RUN pip3 install --no-cache-dir numpy==1.26.4
@@ -72,11 +71,13 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfi
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Build Essentia
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow
-RUN python3 ./waf
-RUN python3 ./waf install
+RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
+    python3 ./waf && \
+    python3 ./waf install && \
+    echo "Essentia installed to:" && find /usr/local -type d -name 'essentia*'
 
-# Clean up build tools to reduce image size
+# You can clean only build tools, not source tree
+
 RUN apt-get purge -y \
     build-essential \
     g++ \
@@ -95,8 +96,7 @@ RUN apt-get purge -y \
     libsamplerate0-dev \
     libatlas-base-dev && \
     apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /essentia
+    apt-get clean
 
 # Back to app folder
 WORKDIR /app
@@ -123,8 +123,8 @@ RUN mkdir -p /app/model && wget -q -P /app/model \
 COPY . /app
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Set PYTHONPATH so Essentia and your app are found
-ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
+# Set PYTHONPATH to include essentia and app code
+ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/essentia/src/python:/app
 
 EXPOSE 8000
 
