@@ -1,0 +1,32 @@
+name: Update Download Badge
+
+on:
+  schedule:
+    - cron: "0 * * * *"  # Every hour
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  update-badge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.x
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Scrape download count and update badge
+        run: python .github/scripts/update_badge.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add README.md
+          git diff --cached --quiet || git commit -m "Update download badge"
+          git push
