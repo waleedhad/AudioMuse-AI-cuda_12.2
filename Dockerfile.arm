@@ -71,32 +71,18 @@ ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfi
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Build Essentia
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
-    python3 ./waf && \
-    python3 ./waf install && \
+# Configure separately to cache this step if source doesn't change
+RUN python3 ./waf configure --build-static --with-python --with-tensorflow
+
+# Compile
+RUN python3 ./waf
+
+# Install
+RUN python3 ./waf install && \
     echo "Essentia installed to:" && find /usr/local -type d -name 'essentia*'
 
-# You can clean only build tools, not source tree
-
-RUN apt-get purge -y \
-    build-essential \
-    g++ \
-    gcc \
-    python3-dev \
-    libeigen3-dev \
-    libfftw3-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libchromaprint-dev \
-    libyaml-dev \
-    libyaml-cpp-dev \
-    libtag1-dev \
-    libsamplerate0-dev \
-    libatlas-base-dev && \
-    apt-get autoremove -y && \
-    apt-get clean
+# Clean build dependencies and source (optional, but saves space)
+#DELETED FOR TESTING NOW
 
 # Back to app folder
 WORKDIR /app
@@ -123,8 +109,8 @@ RUN mkdir -p /app/model && wget -q -P /app/model \
 COPY . /app
 COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Set PYTHONPATH to include essentia and app code
-ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/essentia/src/python:/app
+# Set PYTHONPATH to include only installed packages and app
+ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
 
 EXPOSE 8000
 
