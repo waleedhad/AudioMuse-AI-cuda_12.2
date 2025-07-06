@@ -1,4 +1,4 @@
-![Downloads](https://img.shields.io/github/downloads/neptunehub/AudioMuse-AI/total.svg)
+![Downloads](https://img.shields.io/badge/downloads-0-blue)
 ![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
 ![Latest Tag](https://img.shields.io/github/v/tag/neptunehub/AudioMuse-AI?label=latest-tag)
 
