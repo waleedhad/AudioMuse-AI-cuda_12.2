@@ -114,7 +114,8 @@ COPY --from=builder /usr/local/lib/python3.10/dist-packages/essentia* /usr/local
 
 # Update the dynamic linker's cache to recognize the newly installed libraries.
 # This makes the TensorFlow and Essentia libraries visible to the operating system.
-RUN ldconfig
+#RUN ldconfig
+ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Create model directory and download models.
 RUN mkdir -p /app/model
