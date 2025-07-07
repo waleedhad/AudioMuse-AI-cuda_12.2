@@ -49,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip and install Python packages required by the application.
 # The tensorflow version MUST match the C-library version downloaded in the next step.
 RUN pip3 install --upgrade pip
+# NOTE: Using tensorflow 2.16.1 to support the newer numpy version.
 RUN pip3 install --no-cache-dir \
     numpy==1.26.4 \
     Flask \
@@ -65,15 +66,15 @@ RUN pip3 install --no-cache-dir \
     flasgger \
     sqlglot \
     google-generativeai \
-    tensorflow==2.12.0
+    tensorflow==2.16.1
 
 # --- Download and install TensorFlow C library (ARM64) ---
 # This C-API library is required to build Essentia with TensorFlow support.
 # We download the aarch64 (ARM64) version that matches our Python TF package.
 WORKDIR /tmp
-RUN wget -q https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.12.0.tar.gz && \
-    tar -C /usr/local -xzf libtensorflow-cpu-linux-aarch64-2.12.0.tar.gz && \
-    rm libtensorflow-cpu-linux-aarch64-2.12.0.tar.gz && \
+RUN wget -q https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.16.1.tar.gz && \
+    tar -C /usr/local -xzf libtensorflow-cpu-linux-aarch64-2.16.1.tar.gz && \
+    rm libtensorflow-cpu-linux-aarch64-2.16.1.tar.gz && \
     # CRITICAL FIX: This ensures the dynamic linker finds the new libraries system-wide.
     # We add the library path to the linker's configuration and update its cache.
     echo "/usr/local/lib" > /etc/ld.so.conf.d/tensorflow.conf && \
