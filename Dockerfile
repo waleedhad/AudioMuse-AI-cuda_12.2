@@ -6,7 +6,9 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
+# Clean apt cache and update package lists before installing to avoid stale data issues
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
     libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
@@ -46,7 +48,7 @@ RUN pip3 install --no-cache-dir \
     tensorflow==2.15.0 \
     librosa
 
-RUN pip3 install --no-cache-dir essentia-tensorflow
+# Removed essentia-tensorflow as it's no longer used
 
 # Create the model directory
 RUN mkdir -p /app/model
