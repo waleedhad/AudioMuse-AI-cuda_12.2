@@ -73,10 +73,12 @@ RUN pip3 install --no-cache-dir \
 WORKDIR /essentia
 RUN git clone https://github.com/NeptuneHub/essentia.git .
 RUN git submodule update --init --recursive
-# Use Essentia's built-in script to extract the TensorFlow C library
-# from the installed Python package. This is more reliable than downloading separately.
+# Use Essentia's built-in script to extract the TensorFlow C library from the installed Python package.
 RUN ./src/3rdparty/tensorflow/setup_from_python.sh
-# Update the linker cache to recognize the newly extracted libraries.
+# CRITICAL FIX: Copy the extracted libraries to a standard system location
+# so the dynamic linker can find them at runtime.
+RUN cp src/3rdparty/tensorflow/lib/libtensorflow* /usr/local/lib/
+# Update the linker cache to recognize the newly installed libraries.
 RUN ldconfig
 
 # --- Build Essentia ---
