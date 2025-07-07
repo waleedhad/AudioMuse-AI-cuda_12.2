@@ -29,7 +29,7 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
 
 RUN pip3 install --no-cache-dir numpy==1.26.4
 
-RUN pip3 install --no-cache-dir \
+RUN pip3 install --no-cache-dir --break-system-packages \
     Flask \
     Flask-Cors \
     redis \
