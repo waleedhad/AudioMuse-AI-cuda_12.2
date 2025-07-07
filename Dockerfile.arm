@@ -87,7 +87,11 @@ RUN wget -q https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflo
 WORKDIR /essentia
 RUN git clone https://github.com/NeptuneHub/essentia.git .
 RUN git submodule update --init --recursive
-RUN python3 ./waf configure --with-python --with-tensorflow
+# Set LDFLAGS with rpath to embed the TF library location directly into the Essentia binary.
+# This makes the build more robust and is a good practice for avoiding linking errors.
+ENV LDFLAGS="-Wl,-rpath,/usr/local/lib"
+# We add --no-msse to disable x86-specific instructions (SSE) which are not available on ARM.
+RUN python3 ./waf configure --with-python --with-tensorflow --no-msse
 RUN python3 ./waf
 RUN python3 ./waf install
 
