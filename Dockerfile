@@ -42,7 +42,9 @@ RUN pip3 install --no-cache-dir \
     ftfy \
     flasgger \
     sqlglot \
-    google-generativeai
+    google-generativeai \
+    tensorflow==2.15.0 \
+    librosa
 
 RUN pip3 install --no-cache-dir essentia-tensorflow
 
