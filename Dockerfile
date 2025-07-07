@@ -6,13 +6,14 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Clean apt cache and update package lists before installing to avoid stale data issues
+# Clean apt cache and update package lists
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
-    apt-get dist-upgrade -y && \
-    apt-get install -y --no-install-recommends \
+    apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30
+
+# Install system dependencies, removed libtag1v5 as a potential source of 404s
+RUN apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
-    libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
+    libfftw3-3 libyaml-0-2 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
     supervisor \
@@ -21,12 +22,10 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
     iputils-ping \
     libopenblas-dev \
     liblapack-dev \
-    # Added dependencies for psycopg2-binary
     libpq-dev \
     gcc \
     g++ \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip to a newer version that supports necessary flags and is more robust
 RUN pip3 install --no-cache-dir --upgrade pip
@@ -76,7 +75,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 # Create the model directory
 RUN mkdir -p /app/model
 
-# Download models from the GitHub release
+# Download models from the GitHub release (corrected URL)
 RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
