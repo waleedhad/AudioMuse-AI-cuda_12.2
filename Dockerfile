@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Clean apt cache and update package lists 
+# Clean apt cache and update package lists
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
     apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30
 
