@@ -1,11 +1,19 @@
+# Dockerfile for building Essentia with TensorFlow support on ARM64 (aarch64)
+# Base Image: Ubuntu 22.04 (Jammy Jellyfish)
 FROM ubuntu:22.04
 
+# --- Environment Variables ---
+# Set non-interactive frontend to avoid prompts during package installation.
 ENV DEBIAN_FRONTEND=noninteractive
-ARG TARGETARCH
-ARG BUILDPLATFORM
+# Ensure python output is sent straight to the terminal without being buffered.
+ENV PYTHONUNBUFFERED=1
+# Set the library path to include /usr/local/lib for our custom builds.
+# This helps the runtime linker find the TensorFlow C library needed by Essentia.
+ENV LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
 
-# --- Base dependencies ---
-RUN apt-get update && apt-get install -y \
+# --- Base system & build dependencies ---
+# Install essential packages for building software, Python, and all of Essentia's dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
     python3 \
@@ -22,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
-    libavresample-dev \
+    libswresample-dev \
     libsamplerate0-dev \
     libtag1-dev \
     libboost-filesystem-dev \
@@ -34,43 +42,104 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     swig \
     python3-numpy \
+    supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Install TensorFlow Python bindings (already needed) ---
-RUN pip install --no-cache-dir tensorflow==2.16.1 numpy
+# --- Python dependencies ---
+# Upgrade pip and install Python packages required by the application.
+# The tensorflow version MUST match the C-library version downloaded in the next step.
+RUN pip3 install --upgrade pip
+RUN pip3 install --no-cache-dir \
+    numpy==1.26.4 \
+    Flask \
+    Flask-Cors \
+    redis \
+    requests \
+    scikit-learn \
+    rq \
+    pyyaml \
+    six \
+    annoy \
+    psycopg2-binary \
+    ftfy \
+    flasgger \
+    sqlglot \
+    google-generativeai \
+    tensorflow==2.12.0
 
-# --- Install TensorFlow C library (for linking during Essentia build) ---
-RUN curl -L -o /tmp/tensorflow.tar.gz https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.16.1.tar.gz && \
-    tar -C /usr/local -xzf /tmp/tensorflow.tar.gz && \
+# --- Download and install TensorFlow C library (ARM64) ---
+# This C-API library is required to build Essentia with TensorFlow support.
+# We download the aarch64 (ARM64) version that matches our Python TF package.
+WORKDIR /tmp
+RUN wget -q https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.12.0.tar.gz && \
+    tar -C /usr/local -xzf libtensorflow-cpu-linux-aarch64-2.12.0.tar.gz && \
+    rm libtensorflow-cpu-linux-aarch64-2.12.0.tar.gz && \
+    # CRITICAL FIX: This ensures the dynamic linker finds the new libraries system-wide.
+    # We add the library path to the linker's configuration and update its cache.
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/tensorflow.conf && \
     ldconfig
 
-# --- Environment variables for linker/compiler ---
-ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-ENV LIBRARY_PATH=/usr/local/lib
-ENV CPLUS_INCLUDE_PATH=/usr/local/include
-
-# --- Clone and build Essentia ---
+# --- Clone and build Essentia with TensorFlow support ---
+# We clone your specified fork of Essentia, configure it to build with Python and TensorFlow support, compile, and install.
+# Each step is a separate RUN command to better leverage Docker's layer caching.
+# The --build-static flag is removed as we are building a dynamic Python module that needs to
+# link against the shared TensorFlow library.
 WORKDIR /essentia
-RUN git clone https://github.com/MTG/essentia.git . && \
-    git submodule update --init --recursive
+RUN git clone https://github.com/NeptuneHub/essentia.git .
+RUN git submodule update --init --recursive
+RUN python3 ./waf configure --with-python --with-tensorflow
+RUN python3 ./waf
+RUN python3 ./waf install
 
-RUN ./waf configure --build-static --with-python --with-tensorflow && \
-    ./waf && \
-    ./waf install
-
-# --- Fix site-packages location (for Python import) ---
+# --- Fix Python module path for ARM ---
+# The waf build system might install to a generic python3 path.
+# We create a symlink to the specific python3.10 path used by the system
+# to ensure Python can find the installed Essentia module.
 RUN if [ -d "/usr/local/lib/python3/dist-packages/essentia" ]; then \
-      ln -s /usr/local/lib/python3/dist-packages/essentia /usr/local/lib/python3.10/dist-packages/essentia && \
-      echo "✅ Symlinked essentia to correct site-packages"; \
+      ln -s /usr/local/lib/python3/dist-packages/essentia /usr/local/lib/python3.10/dist-packages/essentia; \
     fi
 
-# --- Validate Essentia import ---
-RUN echo ">> Verifying Essentia import..." && \
-    python3 -c "import essentia; print('✅ Essentia imported successfully')" || (echo '❌ Failed to import essentia'; exit 1)
+# --- Validate Essentia install ---
+# This is a critical step to ensure the build and linking were successful.
+# If this fails, the container will stop building.
+RUN echo "Validating Essentia import..." && \
+    python3 -c "import essentia; print('Essentia imported successfully')" || (echo 'Failed to import essentia'; exit 1)
 
-# --- Continue with the rest of your app build ---
+# --- Setup AudioMuse-AI app ---
 WORKDIR /app
-COPY . /app
-RUN pip install -r requirements.txt
 
-CMD ["python3", "app.py"]
+COPY . /app
+COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Download models
+RUN mkdir -p /app/model && wget -q -P /app/model \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_sad-audioset-vggish-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_sad-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
+
+# --- Final environment setup ---
+# This ensures that the Python interpreter can find both the system-installed
+# Essentia module and the application code.
+ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/app
+
+EXPOSE 8000
+
+# The WORKDIR should be a neutral location, not /app, to avoid potential
+# module name conflicts if there's a file named 'app.py' and you try to import 'app'.
+WORKDIR /workspace
+
+# The final command to run the application. It checks an environment variable
+# to decide whether to start the web server or the background worker.
+CMD ["bash", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then echo 'Starting worker processes via supervisord...' && /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf; else echo 'Starting web service...' && python3 /app/app.py; fi"]
