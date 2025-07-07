@@ -1,4 +1,4 @@
-name: Build, Test, and Push AudioMuse AI Docker Image on ARM and INTEL
+name: Build, Test, and Push AudioMuse AI Docker Image
 
 on:
   push:
@@ -67,7 +67,7 @@ jobs:
             -e POSTGRES_USER=testuser \
             -e POSTGRES_PASSWORD=testpass \
             -e POSTGRES_DB=testdb \
-            postgres:15-alpine
+            postgres:latest # Changed to postgres:latest for better compatibility
 
           echo "Waiting for PostgreSQL (Flask test AMD64) to start..."
           for i in $(seq 1 30); do
@@ -115,7 +115,7 @@ jobs:
             -e POSTGRES_USER=testuser \
             -e POSTGRES_PASSWORD=testpass \
             -e POSTGRES_DB=testdb \
-            postgres:15-alpine
+            postgres:latest # Changed to postgres:latest for better compatibility
 
           echo "Waiting for PostgreSQL (Flask test ARM64) to start..."
           for i in $(seq 1 30); do
@@ -133,11 +133,6 @@ jobs:
           done
 
           echo "Starting Flask app container for health check (ARM64)..."
-          # Note: Port 8000 might already be in use by the AMD64 test.
-          # We need to use a different port or ensure the previous container is stopped/removed.
-          # For simplicity and isolation, we'll use a different port for ARM64 test if running on the same host.
-          # Alternatively, these could be run in separate jobs with different runners or a matrix strategy.
-          # For now, let's assume sequential execution and clean up.
           docker run -d --name flask-test-app-arm64 -p 8001:8000 --platform linux/arm64 \
             --link postgres-flask-test-arm64:postgres \
             -e SERVICE_TYPE=flask \
@@ -186,7 +181,7 @@ jobs:
             -e POSTGRES_USER=testuser \
             -e POSTGRES_PASSWORD=testpass \
             -e POSTGRES_DB=testdb \
-            postgres:15-alpine
+            postgres:latest # Changed to postgres:latest for better compatibility
 
           echo "Waiting for PostgreSQL (RQ worker test AMD64) to start..."
           for i in $(seq 1 30); do
@@ -256,7 +251,7 @@ jobs:
             -e POSTGRES_USER=testuser \
             -e POSTGRES_PASSWORD=testpass \
             -e POSTGRES_DB=testdb \
-            postgres:15-alpine
+            postgres:latest # Changed to postgres:latest for better compatibility
 
           echo "Waiting for PostgreSQL (RQ worker test ARM64) to start..."
           for i in $(seq 1 30); do
