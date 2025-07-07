@@ -1,141 +1,76 @@
 FROM ubuntu:22.04
 
-ENV LANG=C.UTF-8 \
-    PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
+ARG TARGETARCH
+ARG BUILDPLATFORM
 
-WORKDIR /app
-
-# Install system and build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# --- Base dependencies ---
+RUN apt-get update && apt-get install -y \
     build-essential \
-    ca-certificates \
     git \
+    python3 \
+    python3-pip \
+    python3-dev \
+    python3-setuptools \
+    python-is-python3 \
     wget \
     curl \
-    vim \
-    python3 python3-pip python3-dev python3-setuptools \
-    pkg-config \
-    libeigen3-dev \
+    ca-certificates \
+    libyaml-dev \
     libfftw3-dev \
+    libeigen3-dev \
     libavcodec-dev \
     libavformat-dev \
     libavutil-dev \
-    libswresample-dev \
-    libchromaprint-dev \
-    libyaml-dev \
-    libyaml-cpp-dev \
-    libtag1-dev \
+    libavresample-dev \
     libsamplerate0-dev \
-    libatlas-base-dev \
-    libpq-dev \
-    redis-tools \
-    supervisor \
-    procps \
-    iputils-ping \
-    gcc \
-    g++
+    libtag1-dev \
+    libboost-filesystem-dev \
+    libboost-thread-dev \
+    libboost-system-dev \
+    libboost-date-time-dev \
+    libboost-regex-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    swig \
+    python3-numpy \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir numpy==1.26.4
-RUN pip3 install --no-cache-dir tensorflow-aarch64==2.16.1
+# --- Install TensorFlow Python bindings (already needed) ---
+RUN pip install --no-cache-dir tensorflow==2.16.1 numpy
 
-# Install additional Python packages
-RUN pip3 install --no-cache-dir \
-    Flask \
-    Flask-Cors \
-    redis \
-    requests \
-    scikit-learn \
-    rq \
-    pyyaml \
-    six \
-    annoy \
-    psycopg2-binary \
-    ftfy \
-    flasgger \
-    sqlglot \
-    google-generativeai
+# --- Install TensorFlow C library (for linking during Essentia build) ---
+RUN curl -L -o /tmp/tensorflow.tar.gz https://storage.googleapis.com/tensorflow/libtensorflow/libtensorflow-cpu-linux-aarch64-2.16.1.tar.gz && \
+    tar -C /usr/local -xzf /tmp/tensorflow.tar.gz && \
+    ldconfig
 
-# Clone Essentia
-RUN git clone https://github.com/NeptuneHub/essentia.git /essentia
+# --- Environment variables for linker/compiler ---
+ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+ENV LIBRARY_PATH=/usr/local/lib
+ENV CPLUS_INCLUDE_PATH=/usr/local/include
+
+# --- Clone and build Essentia ---
 WORKDIR /essentia
+RUN git clone https://github.com/MTG/essentia.git . && \
+    git submodule update --init --recursive
 
-# Set TensorFlow linking
-RUN python3 src/3rdparty/tensorflow/setup_tensorflow.py --mode python
+RUN ./waf configure --build-static --with-python --with-tensorflow && \
+    ./waf && \
+    ./waf install
 
-# Set linker environment
-ENV TF_DIR=/usr/local/lib/python3.10/dist-packages/tensorflow
-ENV LDFLAGS="-L${TF_DIR} -L${TF_DIR}/python -l:libtensorflow_framework.so.2 -l:_pywrap_tensorflow_internal.so"
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig/
-ENV LD_LIBRARY_PATH=/usr/local/lib
-
-# Build and install Essentia
-RUN python3 ./waf configure --build-static --with-python --with-tensorflow && \
-    python3 ./waf && \
-    python3 ./waf install
-
-# 🔎 Debug & Fix: Check Essentia installation and fix PYTHONPATH
-RUN echo ">> Checking Essentia install..." && \
-    find /usr/local -type d -iname "*essentia*" && \
-    find /usr/local -name "*_essentia*.so" || true && \
-    if [ -d "/usr/local/lib/python3/dist-packages/essentia" ]; then \
+# --- Fix site-packages location (for Python import) ---
+RUN if [ -d "/usr/local/lib/python3/dist-packages/essentia" ]; then \
       ln -s /usr/local/lib/python3/dist-packages/essentia /usr/local/lib/python3.10/dist-packages/essentia && \
       echo "✅ Symlinked essentia to correct site-packages"; \
-    fi && \
+    fi
+
+# --- Validate Essentia import ---
+RUN echo ">> Verifying Essentia import..." && \
     python3 -c "import essentia; print('✅ Essentia imported successfully')" || (echo '❌ Failed to import essentia'; exit 1)
 
-# Clean up build dependencies
-RUN apt-get purge -y \
-    build-essential \
-    g++ \
-    gcc \
-    python3-dev \
-    libeigen3-dev \
-    libfftw3-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libchromaprint-dev \
-    libyaml-dev \
-    libyaml-cpp-dev \
-    libtag1-dev \
-    libsamplerate0-dev \
-    libatlas-base-dev && \
-    apt-get autoremove -y && \
-    apt-get clean
-
-# Back to app folder
+# --- Continue with the rest of your app build ---
 WORKDIR /app
-
-# Download model files
-RUN mkdir -p /app/model && wget -q -P /app/model \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_sad-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_sad-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-msd-musicnn-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/msd-musicnn-1.pb
-
-# Copy application code
 COPY . /app
-COPY deplyment/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+RUN pip install -r requirements.txt
 
-# Set PYTHONPATH to include essentia and app code
-ENV PYTHONPATH=/usr/local/lib/python3.10/dist-packages:/essentia/src/python:/app
-
-EXPOSE 8000
-
-WORKDIR /workspace
-
-CMD ["bash", "-c", "if [ \"$SERVICE_TYPE\" = \"worker\" ]; then echo 'Starting worker processes via supervisord...' && /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf; else echo 'Starting web service...' && python3 /app/app.py; fi"]
+CMD ["python3", "app.py"]
