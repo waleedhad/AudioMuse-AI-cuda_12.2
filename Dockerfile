@@ -6,10 +6,6 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Reverting mirror change, relying on default Ubuntu mirrors which are generally more stable.
-# RUN sed -i 's|http://archive.ubuntu.com|http://ports.ubuntu.com|g' /etc/apt/sources.list && \
-#     sed -i 's|http://security.ubuntu.com|http://ports.ubuntu.com|g' /etc/apt/sources.list
-
 # Clean apt cache and update package lists before installing to avoid stale data issues
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
     apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
@@ -35,24 +31,45 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
 # Upgrade pip to a newer version that supports necessary flags and is more robust
 RUN pip3 install --no-cache-dir --upgrade pip
 
-RUN pip3 install --no-cache-dir \
-    Flask \
-    Flask-Cors \
-    redis \
-    requests \
-    scikit-learn \
-    rq \
-    pyyaml \
-    six \
-    annoy \
-    # Added psycopg2-binary for PostgreSQL connectivity
-    psycopg2-binary \
-    ftfy \
-    flasgger \
-    sqlglot \
-    google-generativeai \
-    tensorflow==2.15.0 \
-    librosa
+# Install Python packages, with conditional TensorFlow installation for ARM
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      pip3 install --no-cache-dir \
+        Flask \
+        Flask-Cors \
+        redis \
+        requests \
+        scikit-learn \
+        rq \
+        pyyaml \
+        six \
+        annoy \
+        psycopg2-binary \
+        ftfy \
+        flasgger \
+        sqlglot \
+        google-generativeai \
+        tensorflow-aarch64==2.15.0 \
+        librosa; \
+    else \
+      pip3 install --no-cache-dir \
+        Flask \
+        Flask-Cors \
+        redis \
+        requests \
+        scikit-learn \
+        rq \
+        pyyaml \
+        six \
+        annoy \
+        psycopg2-binary \
+        ftfy \
+        flasgger \
+        sqlglot \
+        google-generativeai \
+        tensorflow==2.15.0 \
+        librosa; \
+    fi
 
 # Removed essentia-tensorflow as it's no longer used
 
@@ -67,7 +84,7 @@ RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-audioset-vggish-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-audioset-vggish-1.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-1.pb \
+    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_happy-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-audioset-vggish-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_party-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_relaxed-audioset-vggish-1.pb \
