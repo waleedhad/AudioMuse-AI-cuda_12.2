@@ -6,9 +6,9 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-# Set a different mirror for apt-get to try to avoid 404s
-RUN sed -i 's|http://archive.ubuntu.com|http://ports.ubuntu.com|g' /etc/apt/sources.list && \
-    sed -i 's|http://security.ubuntu.com|http://ports.ubuntu.com|g' /etc/apt/sources.list
+# Reverting mirror change, relying on default Ubuntu mirrors which are generally more stable.
+# RUN sed -i 's|http://archive.ubuntu.com|http://ports.ubuntu.com|g' /etc/apt/sources.list && \
+#     sed -i 's|http://security.ubuntu.com|http://ports.ubuntu.com|g' /etc/apt/sources.list
 
 # Clean apt cache and update package lists before installing to avoid stale data issues
 RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
