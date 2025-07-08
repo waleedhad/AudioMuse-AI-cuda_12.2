@@ -6,10 +6,14 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
-    apt-get install -y --no-install-recommends \
+# Clean apt cache and update package lists 
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30
+
+# Install system dependencies, removed libtag1v5 as a potential source of 404s
+RUN apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
-    libfftw3-3 libyaml-0-2 libtag1v5 libsamplerate0 \
+    libfftw3-3 libyaml-0-2 libsamplerate0 \
     ffmpeg wget git vim \
     redis-tools curl \
     supervisor \
@@ -18,40 +22,60 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::Timeout=30 && \
     iputils-ping \
     libopenblas-dev \
     liblapack-dev \
-    # Added dependencies for psycopg2-binary
     libpq-dev \
     gcc \
     g++ \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir numpy==1.26.4
+# Upgrade pip to a newer version that supports necessary flags and is more robust
+RUN pip3 install --no-cache-dir --upgrade pip
 
-RUN pip3 install --no-cache-dir \
-    Flask \
-    Flask-Cors \
-    redis \
-    requests \
-    scikit-learn \
-    rq \
-    pyyaml \
-    six \
-    annoy \
-    # Added psycopg2-binary for PostgreSQL connectivity
-    psycopg2-binary \
-    ftfy \
-    flasgger \
-    sqlglot \
-    google-generativeai \
-    tensorflow==2.15.0 \
-    librosa
+# Install Python packages, with conditional TensorFlow installation for ARM
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      pip3 install --no-cache-dir \
+        Flask \
+        Flask-Cors \
+        redis \
+        requests \
+        scikit-learn \
+        rq \
+        pyyaml \
+        six \
+        annoy \
+        psycopg2-binary \
+        ftfy \
+        flasgger \
+        sqlglot \
+        google-generativeai \
+        tensorflow-aarch64==2.15.0 \
+        librosa; \
+    else \
+      pip3 install --no-cache-dir \
+        Flask \
+        Flask-Cors \
+        redis \
+        requests \
+        scikit-learn \
+        rq \
+        pyyaml \
+        six \
+        annoy \
+        psycopg2-binary \
+        ftfy \
+        flasgger \
+        sqlglot \
+        google-generativeai \
+        tensorflow==2.15.0 \
+        librosa; \
+    fi
 
-RUN pip3 install --no-cache-dir essentia-tensorflow
+# Removed essentia-tensorflow as it's no longer used
 
 # Create the model directory
 RUN mkdir -p /app/model
 
-# Download models from the GitHub release
+# Download models from the GitHub release (corrected URL)
 RUN wget -q -P /app/model \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \

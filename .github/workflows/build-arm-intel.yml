@@ -1,0 +1,199 @@
+name: Build, Test, and Push AudioMuse AI Docker Image
+
+on:
+  push:
+    branches:
+      - devel-librosa # Trigger only for 'devel-librosa' branch
+
+jobs:
+  build-test-and-push: # Combined job for build, test, and final push
+    runs-on: ubuntu-latest # Run on a single AMD64 runner
+
+    permissions:
+      contents: read # Allow checkout to read repository contents
+      packages: write # Allow pushing packages to GitHub Container Registry
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3 # Essential for multi-architecture builds
+        with:
+          driver: docker-container # Use the docker-container driver for multi-platform builds
+          driver-opts: image=moby/buildkit:latest # Ensure a recent BuildKit image is used
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine Docker image tags
+        id: docker_tags
+        run: |
+          REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          FINAL_TAG=""
+
+          if [[ "${GITHUB_REF}" == "refs/heads/devel-librosa" ]]; then
+            FINAL_TAG="ghcr.io/$REPO_NAME_LOWER:devel-librosa"
+            echo "Building final tag: $FINAL_TAG"
+
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
+            FINAL_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}"
+            echo "Building versioned tag: $FINAL_TAG"
+          fi
+
+          # Export the final tag for subsequent steps
+          echo "docker_tags=$FINAL_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: List files in the workspace (for debugging)
+        run: ls -la ${{ github.workspace }}
+
+      - name: Build, Test, and Push AudioMuse AI Image
+        id: docker_build_and_push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ github.workspace }} # Explicitly set the full workspace path as context
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64 # Build for both Intel and ARM architectures
+          push: true # Push the final multi-arch image
+          tags: ${{ steps.docker_tags.outputs.docker_tags }}
+          cache-from: type=gha,scope=${{ github.ref_name }} # Pull cache from GitHub Actions cache
+          cache-to: type=gha,scope=${{ github.ref_name }},mode=max # Push cache to GitHub Actions cache
+
+      - name: Run Flask App Container Health Check (AMD64)
+        run: |
+          echo "Starting temporary PostgreSQL container for Flask test (AMD64)..."
+          docker run -d --name postgres-flask-test-amd64 \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            postgres:latest
+
+          echo "Waiting for PostgreSQL (Flask test AMD64) to start..."
+          for i in $(seq 1 30); do
+            if docker exec postgres-flask-test-amd64 pg_isready -U testuser -d testdb -q; then
+              echo "PostgreSQL (Flask test AMD64) is ready."
+              break
+            fi
+            echo "Waiting for PostgreSQL (Flask test AMD64)... ($i/30)"
+            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "PostgreSQL (Flask test AMD64) did not become ready in time."
+              docker logs postgres-flask-test-amd64
+              exit 1
+            fi
+          done
+
+          echo "Starting Flask app container for health check (AMD64)..."
+          # Use the newly built multi-arch image, running its AMD64 variant natively
+          docker run -d --name flask-test-app-amd64 -p 8000:8000 \
+            --link postgres-flask-test-amd64:postgres \
+            -e SERVICE_TYPE=flask \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            -e POSTGRES_HOST=postgres \
+            -e POSTGRES_PORT=5432 \
+            ${{ steps.docker_tags.outputs.docker_tags }}
+
+          echo "Waiting for Flask app (AMD64) to start (max 60 seconds)..."
+          for i in $(seq 1 60); do
+            if curl -sf -I http://localhost:8000/api/last_task | grep -qE "HTTP/[12](.[01])? (2|3)[0-9]{2}"; then
+              echo "Flask app (AMD64) is up and responsive!"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 1
+          done
+          echo "Flask app (AMD64) did not start or respond with a successful status on /api/last_task within the expected time."
+          docker logs flask-test-app-amd64
+          exit 1
+
+      - name: Run RQ Worker Container Health Check (AMD64)
+        run: |
+          echo "Starting temporary Redis container for RQ worker (AMD64)..."
+          docker run -d --name redis-test-amd64 redis:latest
+
+          echo "Waiting for Redis (AMD64) to start..."
+          for i in $(seq 1 30); do
+            if docker exec redis-test-amd64 redis-cli ping | grep -q PONG; then
+              echo "Redis (AMD64) is ready."
+              break
+            fi
+            echo "Waiting for Redis (AMD64)... ($i/30)"
+            sleep 1
+            if [ $i -eq 30 ]; then
+              echo "Redis (AMD64) did not become ready in time."
+              docker logs redis-test-amd64
+              exit 1
+            fi
+          done
+
+          echo "Starting temporary PostgreSQL container for RQ worker test (AMD64)..."
+          docker run -d --name postgres-rq-test-amd64 \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            postgres:latest
+
+          echo "Waiting for PostgreSQL (RQ worker test AMD64) to start..."
+          for i in $(seq 1 30); do
+            if docker exec postgres-rq-test-amd64 pg_isready -U testuser -d testdb -q; then
+              echo "PostgreSQL (RQ worker test AMD64) is ready."
+              break
+            fi
+            echo "Waiting for PostgreSQL (RQ worker test AMD64)... ($i/30)"
+            sleep 2
+            if [ $i -eq 30 ]; then
+              echo "PostgreSQL (RQ worker test AMD64) did not become ready in time."
+              docker logs postgres-rq-test-amd64
+              exit 1
+            fi
+          done
+
+          echo "Starting RQ worker container for health check (AMD64)..."
+          # Use the newly built multi-arch image, running its AMD64 variant natively
+          docker run -d --name rq-test-worker-amd64 \
+            --link redis-test-amd64:redis --link postgres-rq-test-amd64:postgres \
+            -e SERVICE_TYPE=worker \
+            -e REDIS_URL=redis://redis:6379/0 \
+            -e POSTGRES_USER=testuser \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            -e POSTGRES_HOST=postgres \
+            -e POSTGRES_PORT=5432 \
+            ${{ steps.docker_tags.outputs.docker_tags }}
+
+          echo "Waiting for RQ worker (AMD64) to start (max 90 seconds)..."
+          for i in $(seq 1 30); do
+            if docker ps -f name=rq-test-worker-amd64 --format '{{.Status}}' | grep -q 'Up'; then
+              sleep 2
+              if docker logs rq-test-worker-amd64 2>&1 | grep -E "Listening on|RQ Worker [^ ]+ started"; then
+                  echo "RQ worker container (AMD64) is running and listening."
+                  exit 0
+              fi
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 3
+          done
+          echo "RQ worker container (AMD64) did not start or become ready within the expected time."
+          docker logs rq-test-worker-amd64
+          exit 1
+
+      - name: Clean up Docker containers and temporary image (local)
+        if: always() # Run this step even if previous steps fail
+        run: |
+          echo "Cleaning up temporary Docker containers and local image cache..."
+          # Clean up Flask test containers
+          docker rm -f flask-test-app-amd64 || true
+          docker rm -f postgres-flask-test-amd64 || true
+          # Clean up RQ worker test containers
+          docker rm -f rq-test-worker-amd64 || true
+          docker rm -f redis-test-amd64 || true
+          docker rm -f postgres-rq-test-amd64 || true
+          # Remove the temporary image from local cache
+          docker rmi ${{ steps.docker_tags.outputs.docker_tags }} || true
