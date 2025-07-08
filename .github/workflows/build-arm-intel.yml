@@ -6,12 +6,12 @@ on:
       - devel-librosa # Trigger only for 'devel-librosa' branch
 
 jobs:
-  build-and-test:
+  build-test-and-push: # Combined job for build, test, and final push
     runs-on: ubuntu-latest # Run on a single AMD64 runner
 
     permissions:
       contents: read # Allow checkout to read repository contents
-      packages: write # Allow pushing and deleting packages from GitHub Container Registry
+      packages: write # Allow pushing packages to GitHub Container Registry
 
     steps:
       - name: Checkout code
@@ -34,37 +34,35 @@ jobs:
         id: docker_tags
         run: |
           REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          ALL_TAGS=""
+          FINAL_TAG=""
 
           if [[ "${GITHUB_REF}" == "refs/heads/devel-librosa" ]]; then
-            DEV_LIBROSA_TAG="ghcr.io/$REPO_NAME_LOWER:devel-librosa"
-            ALL_TAGS="$DEV_LIBROSA_TAG"
-            echo "Building devel-librosa tag: $DEV_LIB_ROSA_TAG"
+            FINAL_TAG="ghcr.io/$REPO_NAME_LOWER:devel-librosa"
+            echo "Building final tag: $FINAL_TAG"
 
           elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
-            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}"
-            ALL_TAGS="$VERSIONED_TAG"
-            echo "Building versioned tag: $VERSIONED_TAG"
+            FINAL_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}"
+            echo "Building versioned tag: $FINAL_TAG"
           fi
 
-          # Export the main tags for subsequent steps
-          echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
-          # Export a unique temporary tag for internal multi-architecture testing
-          echo "test_tag=ghcr.io/$REPO_NAME_LOWER:test-temp-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          # Export the final tag for subsequent steps
+          echo "docker_tags=$FINAL_TAG" >> "$GITHUB_OUTPUT"
 
       - name: List files in the workspace (for debugging)
         run: ls -la ${{ github.workspace }}
 
-      - name: Build and Push Docker image (for multi-arch testing)
-        id: docker_build_test
+      - name: Build, Test, and Push AudioMuse AI Image
+        id: docker_build_and_push
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ github.workspace }} # Explicitly set the full workspace path as context
+          file: Dockerfile
           platforms: linux/amd64,linux/arm64 # Build for both Intel and ARM architectures
-          push: true # Push the temporary image to the registry for testing
-          tags: ${{ steps.docker_tags.outputs.test_tag }}
+          push: true # Push the final multi-arch image
+          tags: ${{ steps.docker_tags.outputs.docker_tags }}
+          cache-from: type=gha,scope=${{ github.ref_name }} # Pull cache from GitHub Actions cache
+          cache-to: type=gha,scope=${{ github.ref_name }},mode=max # Push cache to GitHub Actions cache
 
       - name: Run Flask App Container Health Check (AMD64)
         run: |
@@ -91,6 +89,7 @@ jobs:
           done
 
           echo "Starting Flask app container for health check (AMD64)..."
+          # Use the newly built multi-arch image, running its AMD64 variant natively
           docker run -d --name flask-test-app-amd64 -p 8000:8000 \
             --link postgres-flask-test-amd64:postgres \
             -e SERVICE_TYPE=flask \
@@ -99,7 +98,7 @@ jobs:
             -e POSTGRES_DB=testdb \
             -e POSTGRES_HOST=postgres \
             -e POSTGRES_PORT=5432 \
-            ${{ steps.docker_tags.outputs.test_tag }}
+            ${{ steps.docker_tags.outputs.docker_tags }}
 
           echo "Waiting for Flask app (AMD64) to start (max 60 seconds)..."
           for i in $(seq 1 60); do
@@ -157,6 +156,7 @@ jobs:
           done
 
           echo "Starting RQ worker container for health check (AMD64)..."
+          # Use the newly built multi-arch image, running its AMD64 variant natively
           docker run -d --name rq-test-worker-amd64 \
             --link redis-test-amd64:redis --link postgres-rq-test-amd64:postgres \
             -e SERVICE_TYPE=worker \
@@ -166,7 +166,7 @@ jobs:
             -e POSTGRES_DB=testdb \
             -e POSTGRES_HOST=postgres \
             -e POSTGRES_PORT=5432 \
-            ${{ steps.docker_tags.outputs.test_tag }}
+            ${{ steps.docker_tags.outputs.docker_tags }}
 
           echo "Waiting for RQ worker (AMD64) to start (max 90 seconds)..."
           for i in $(seq 1 30); do
@@ -196,71 +196,4 @@ jobs:
           docker rm -f redis-test-amd64 || true
           docker rm -f postgres-rq-test-amd64 || true
           # Remove the temporary image from local cache
-          docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true
-
-      - name: Delete temporary Docker image from GHCR
-        if: always() # Ensure this runs even if previous steps fail
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          # Extract the package name (e.g., 'audiomuse-ai') from the full repository name
-          PACKAGE_NAME=$(echo "$REPO_NAME_LOWER" | cut -d'/' -f2)
-          # Extract just the tag part (e.g., 'test-temp-16137110491')
-          VERSION_TO_DELETE=$(echo "${{ steps.docker_tags.outputs.test_tag }}" | cut -d':' -f2)
-
-          echo "Attempting to delete temporary image: $PACKAGE_NAME with version: $VERSION_TO_DELETE from GHCR"
-          # Use gh CLI to delete the package version. `gh` is pre-installed on GitHub-hosted runners.
-          # The `packages:write` permission should be sufficient for deletion.
-          gh package delete $PACKAGE_NAME --version $VERSION_TO_DELETE --yes || true
-          echo "Deletion command executed. Check logs for actual deletion status."
-
-  # This job will run only once after the build-and-test matrix is complete
-  final-push:
-    needs: build-and-test # Ensure this job runs after all matrix jobs
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # Allow pushing to GitHub Container Registry
-
-    steps:
-      - name: Set up Docker Buildx (for final push)
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container # Use the docker-container driver for multi-platform builds
-          driver-opts: image=moby/buildkit:latest # Ensure a recent BuildKit image is used
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Determine Docker image tags for final push
-        id: docker_tags_final
-        run: |
-          REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          ALL_TAGS=""
-
-          if [[ "${GITHUB_REF}" == "refs/heads/devel-librosa" ]]; then
-            DEV_LIBROSA_TAG="ghcr.io/$REPO_NAME_LOWER:devel-librosa"
-            ALL_TAGS="$DEV_LIBROSA_TAG"
-            echo "Building devel-librosa tag: $DEV_LIB_ROSA_TAG"
-
-          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
-            VERSIONED_TAG="ghcr.io/$REPO_NAME_LOWER:${VERSION_TAG}"
-            ALL_TAGS="$VERSIONED_TAG"
-            echo "Building versioned tag: $VERSIONED_TAG"
-          fi
-          echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
-
-      - name: Build and Push AudioMuse AI Image (Final Multi-Arch Push)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64 # Build for both Intel and ARM architectures
-          push: true
-          tags: ${{ steps.docker_tags_final.outputs.docker_tags }}
+          docker rmi ${{ steps.docker_tags.outputs.docker_tags }} || true
