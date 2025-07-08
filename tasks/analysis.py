@@ -222,6 +222,7 @@ def analyze_track(file_path, mood_labels_list, model_paths):
         
         # 2b. Compute Mel spectrogram (power spectrogram)
         mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=16000, n_fft=512, hop_length=256, n_mels=96, window='hann', center=True, power=1.0)
         
         # 2c. Apply the specific logarithmic compression used by the original musicnn model.
         # This is the key step that was missing.
