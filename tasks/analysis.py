@@ -225,7 +225,8 @@ def analyze_track(file_path, mood_labels_list, model_paths):
         
         # 2c. Apply the specific logarithmic compression used by the original musicnn model.
         # This is the key step that was missing.
-        log_mel_spec = np.log10(1 + 10000 * mel_spec)
+        #log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
+        log_mel_spec = np.log(1 + 10000 * mel_spec)
 
         # 2d. Create patches from the correctly processed spectrogram
         spec_patches = [log_mel_spec[:, i:i+frame_size] for i in range(0, log_mel_spec.shape[1] - frame_size + 1, frame_size)]
@@ -251,7 +252,6 @@ def analyze_track(file_path, mood_labels_list, model_paths):
         with tf.Session(graph=embedding_graph) as sess:
             embedding_feed_dict = {DEFINED_TENSOR_NAMES['embedding']['input']: transposed_patches}
             embeddings_per_patch = run_inference(sess, embedding_feed_dict, DEFINED_TENSOR_NAMES['embedding']['output'])
-            processed_embeddings = np.mean(embeddings_per_patch, axis=0)
 
         # Load and run prediction model
         prediction_graph = tf.Graph()
@@ -278,7 +278,7 @@ def analyze_track(file_path, mood_labels_list, model_paths):
             # First, average the raw logits from all the patches. This preserves strong signals.
             averaged_logits = np.mean(mood_logits, axis=0)
             # Then, apply the sigmoid function ONCE to the single vector of averaged logits.
-            final_mood_predictions = sigmoid(averaged_logits)
+            final_mood_predictions = averaged_logits
 
             moods = {label: float(score) for label, score in zip(mood_labels_list, final_mood_predictions)}
 
@@ -288,6 +288,7 @@ def analyze_track(file_path, mood_labels_list, model_paths):
         
     # --- 4. Run Secondary Models ---
     other_predictions = {}
+
     for key in ["danceable", "aggressive", "happy", "party", "relaxed", "sad"]:
         try:
             other_model_graph = tf.Graph()
@@ -300,30 +301,41 @@ def analyze_track(file_path, mood_labels_list, model_paths):
                 tf.import_graph_def(graph_def, name="")
             
             with tf.Session(graph=other_model_graph) as sess:
-                reshaped_embedding = np.expand_dims(processed_embeddings, axis=0)
-                feed_dict = {DEFINED_TENSOR_NAMES[key]['input']: reshaped_embedding}
+                # FIX: Instead of averaging embeddings first, we now feed all patch embeddings to the model,
+                # making this consistent with how mood prediction works. This allows the model to see variance across the track.
+                feed_dict = {DEFINED_TENSOR_NAMES[key]['input']: embeddings_per_patch}
                 
                 probabilities_raw = run_inference(sess, feed_dict, DEFINED_TENSOR_NAMES[key]['output'])
 
                 if isinstance(probabilities_raw, bytes):
                     proto = tensor_pb2.TensorProto()
                     proto.ParseFromString(probabilities_raw)
-                    probabilities_from_model = tensor_util.MakeNdarray(proto)
+                    probabilities_per_patch = tensor_util.MakeNdarray(proto)
                 else:
-                    probabilities_from_model = probabilities_raw
+                    probabilities_per_patch = probabilities_raw
                 
-                final_probabilities = np.squeeze(probabilities_from_model)
-                
-                other_predictions[key] = float(final_probabilities[1]) if final_probabilities.size == 2 else 0.0
+                # The model returns probabilities for each patch. We take the probability of the
+                # positive class (index 1) and then average these probabilities across all patches.
+                if probabilities_per_patch.ndim == 2 and probabilities_per_patch.shape[1] == 2:
+                    positive_class_probs = probabilities_per_patch[:, 1]
+                    other_predictions[key] = float(np.mean(positive_class_probs))
+                else: # Fallback for unexpected output shapes
+                    other_predictions[key] = 0.0
 
         except Exception as e:
             logger.error(f"Error predicting '{key}' for {os.path.basename(file_path)}: {e}", exc_info=True)
             other_predictions[key] = 0.0
 
+    # --- 5. Final Aggregation for Storage ---
+    # The 1D averaged embedding is calculated here ONLY for efficient storage and for later use in clustering/similarity tasks.
+    # All classifications above use the full (2D) per-patch embeddings for a more detailed and accurate analysis across the track's duration.
+    processed_embeddings = np.mean(embeddings_per_patch, axis=0)
+
     return {
         "tempo": float(tempo), "key": musical_key, "scale": scale,
         "moods": moods, "energy": float(average_energy), **other_predictions
     }, processed_embeddings
+
 
 
 # --- RQ Task Definitions ---
