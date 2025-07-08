@@ -96,6 +96,18 @@ DEFINED_TENSOR_NAMES = {
     }
 }
 
+# --- Class Index Mapping ---
+# Based on confirmed metadata from the user.
+CLASS_INDEX_MAP = {
+    "aggressive": 0,
+    "happy": 0,
+    "relaxed": 1,
+    "sad": 1,
+    "danceable": 0,
+    "party": 1,
+}
+
+
 # --- Utility Functions ---
 def clean_temp(temp_dir):
     os.makedirs(temp_dir, exist_ok=True)
@@ -215,21 +227,17 @@ def analyze_track(file_path, mood_labels_list, model_paths):
 
     # --- 2. Prepare Spectrograms ---
     try:
-        # *** CRITICAL FIX: Replicating Essentia's/musicnn's exact preprocessing ***
-        
-        # 2a. Use exact parameters from Essentia's standard musicnn configuration
+        # Using the spectrogram settings confirmed to work for the main model
         n_mels, hop_length, n_fft, frame_size = 96, 256, 512, 187
-        
-        # 2b. Compute Mel spectrogram (power spectrogram)
-        mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
         #mel_spec = librosa.feature.melspectrogram(y=audio, sr=16000, n_fft=512, hop_length=256, n_mels=96, window='hann', center=True, power=1.0)
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
         
-        # 2c. Apply the specific logarithmic compression used by the original musicnn model.
-        # This is the key step that was missing.
-        #log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
-        log_mel_spec = np.log(1 + 10000 * mel_spec)
+        mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=True, power=2.0) #otherwise poer=2.0
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann')
 
-        # 2d. Create patches from the correctly processed spectrogram
+        #log_mel_spec = np.log(1 + 10000 * mel_spec)
+        log_mel_spec = np.log10(1 + 10000 * mel_spec)
+
         spec_patches = [log_mel_spec[:, i:i+frame_size] for i in range(0, log_mel_spec.shape[1] - frame_size + 1, frame_size)]
         if not spec_patches:
             logger.warning(f"Track too short to create spectrogram patches: {os.path.basename(file_path)}")
@@ -276,9 +284,7 @@ def analyze_track(file_path, mood_labels_list, model_paths):
             else:
                 mood_logits = mood_predictions_raw
             
-            # First, average the raw logits from all the patches. This preserves strong signals.
             averaged_logits = np.mean(mood_logits, axis=0)
-            # Then, apply the sigmoid function ONCE to the single vector of averaged logits.
             final_mood_predictions = averaged_logits
 
             moods = {label: float(score) for label, score in zip(mood_labels_list, final_mood_predictions)}
@@ -302,8 +308,6 @@ def analyze_track(file_path, mood_labels_list, model_paths):
                 tf.import_graph_def(graph_def, name="")
             
             with tf.Session(graph=other_model_graph) as sess:
-                # FIX: Instead of averaging embeddings first, we now feed all patch embeddings to the model,
-                # making this consistent with how mood prediction works. This allows the model to see variance across the track.
                 feed_dict = {DEFINED_TENSOR_NAMES[key]['input']: embeddings_per_patch}
                 
                 probabilities_raw = run_inference(sess, feed_dict, DEFINED_TENSOR_NAMES[key]['output'])
@@ -315,12 +319,12 @@ def analyze_track(file_path, mood_labels_list, model_paths):
                 else:
                     probabilities_per_patch = probabilities_raw
                 
-                # The model returns probabilities for each patch. We take the probability of the
-                # positive class (index 1) and then average these probabilities across all patches.
                 if probabilities_per_patch.ndim == 2 and probabilities_per_patch.shape[1] == 2:
-                    positive_class_probs = probabilities_per_patch[:, 1]
-                    other_predictions[key] = float(np.mean(positive_class_probs))
-                else: # Fallback for unexpected output shapes
+                    # Using the CLASS_INDEX_MAP to select the correct probability
+                    positive_class_index = CLASS_INDEX_MAP.get(key, 0)
+                    class_probs = probabilities_per_patch[:, positive_class_index]
+                    other_predictions[key] = float(np.mean(class_probs))
+                else:
                     other_predictions[key] = 0.0
 
         except Exception as e:
@@ -328,8 +332,6 @@ def analyze_track(file_path, mood_labels_list, model_paths):
             other_predictions[key] = 0.0
 
     # --- 5. Final Aggregation for Storage ---
-    # The 1D averaged embedding is calculated here ONLY for efficient storage and for later use in clustering/similarity tasks.
-    # All classifications above use the full (2D) per-patch embeddings for a more detailed and accurate analysis across the track's duration.
     processed_embeddings = np.mean(embeddings_per_patch, axis=0)
 
     return {
@@ -560,7 +562,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             while active_jobs:
                 monitor_and_clear_jobs()
                 progress = 5 + int(85 * ((albums_skipped + albums_completed) / float(total_albums_to_check)))
-                log_and_update_main(f"Finalizing... Completed: {albums_completed}/{albums_launched}", progress)
+                log_and_update_main(f"Finalizing... Completed: {albums_completed}/{launched_jobs}", progress)
                 time.sleep(5)
 
             log_and_update_main("Performing final index rebuild...", 95)
