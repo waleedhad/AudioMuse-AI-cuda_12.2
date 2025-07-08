@@ -39,7 +39,7 @@ jobs:
           if [[ "${GITHUB_REF}" == "refs/heads/devel-librosa" ]]; then
             DEV_LIBROSA_TAG="ghcr.io/$REPO_NAME_LOWER:devel-librosa"
             ALL_TAGS="$DEV_LIBROSA_TAG"
-            echo "Building devel-librosa tag: $DEV_LIBROSA_TAG"
+            echo "Building devel-librosa tag: $DEV_LIB_ROSA_TAG"
 
           elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
@@ -52,6 +52,9 @@ jobs:
           echo "docker_tags=$ALL_TAGS" >> "$GITHUB_OUTPUT"
           # Export a unique temporary tag for internal multi-architecture testing
           echo "test_tag=ghcr.io/$REPO_NAME_LOWER:test-temp-${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: List files in the workspace (for debugging)
+        run: ls -la ${{ github.workspace }}
 
       - name: Build and Push Docker image (for multi-arch testing)
         id: docker_build_test
@@ -243,7 +246,7 @@ jobs:
           if [[ "${GITHUB_REF}" == "refs/heads/devel-librosa" ]]; then
             DEV_LIBROSA_TAG="ghcr.io/$REPO_NAME_LOWER:devel-librosa"
             ALL_TAGS="$DEV_LIBROSA_TAG"
-            echo "Building devel-librosa tag: $DEV_LIBROSA_TAG"
+            echo "Building devel-librosa tag: $DEV_LIB_ROSA_TAG"
 
           elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION_TAG=$(echo "${GITHUB_REF}" | sed -e 's|refs/tags/v||g')
