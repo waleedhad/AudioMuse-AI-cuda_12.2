@@ -11,7 +11,7 @@ jobs:
 
     permissions:
       contents: read # Allow checkout to read repository contents
-      packages: write # Allow pushing to GitHub Container Registry
+      packages: write # Allow pushing and deleting packages from GitHub Container Registry
 
     steps:
       - name: Checkout code
@@ -19,6 +19,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3 # Essential for multi-architecture builds
+        with:
+          driver: docker-container # Use the docker-container driver for multi-platform builds
+          driver-opts: image=moby/buildkit:latest # Ensure a recent BuildKit image is used
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -108,8 +111,6 @@ jobs:
           docker logs flask-test-app-amd64
           exit 1
 
-      # Removed: Run Flask App Container Health Check (ARM64) due to QEMU emulation issues
-
       - name: Run RQ Worker Container Health Check (AMD64)
         run: |
           echo "Starting temporary Redis container for RQ worker (AMD64)..."
@@ -180,26 +181,36 @@ jobs:
           docker logs rq-test-worker-amd64
           exit 1
 
-      # Removed: Run RQ Worker Container Health Check (ARM64) due to QEMU emulation issues
-
-      - name: Clean up Docker containers and temporary image
+      - name: Clean up Docker containers and temporary image (local)
         if: always() # Run this step even if previous steps fail
         run: |
-          echo "Cleaning up temporary Docker containers and image..."
+          echo "Cleaning up temporary Docker containers and local image cache..."
           # Clean up Flask test containers
           docker rm -f flask-test-app-amd64 || true
           docker rm -f postgres-flask-test-amd64 || true
-          # docker rm -f flask-test-app-arm64 || true # Removed
-          # docker rm -f postgres-flask-test-arm64 || true # Removed
           # Clean up RQ worker test containers
           docker rm -f rq-test-worker-amd64 || true
           docker rm -f redis-test-amd64 || true
           docker rm -f postgres-rq-test-amd64 || true
-          # docker rm -f rq-test-worker-arm64 || true # Removed
-          # docker rm -f redis-test-arm64 || true # Removed
-          # docker rm -f postgres-rq-test-arm64 || true # Removed
-          # Remove the temporary image
+          # Remove the temporary image from local cache
           docker rmi ${{ steps.docker_tags.outputs.test_tag }} || true
+
+      - name: Delete temporary Docker image from GHCR
+        if: always() # Ensure this runs even if previous steps fail
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          # Extract the package name (e.g., 'audiomuse-ai') from the full repository name
+          PACKAGE_NAME=$(echo "$REPO_NAME_LOWER" | cut -d'/' -f2)
+          # Extract just the tag part (e.g., 'test-temp-16137110491')
+          VERSION_TO_DELETE=$(echo "${{ steps.docker_tags.outputs.test_tag }}" | cut -d':' -f2)
+
+          echo "Attempting to delete temporary image: $PACKAGE_NAME with version: $VERSION_TO_DELETE from GHCR"
+          # Use gh CLI to delete the package version. `gh` is pre-installed on GitHub-hosted runners.
+          # The `packages:write` permission should be sufficient for deletion.
+          gh package delete $PACKAGE_NAME --version $VERSION_TO_DELETE --yes || true
+          echo "Deletion command executed. Check logs for actual deletion status."
 
   # This job will run only once after the build-and-test matrix is complete
   final-push:
@@ -207,9 +218,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write # Allow pushing to GitHub Container Registry
 
     steps:
+      - name: Set up Docker Buildx (for final push)
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container # Use the docker-container driver for multi-platform builds
+          driver-opts: image=moby/buildkit:latest # Ensure a recent BuildKit image is used
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
