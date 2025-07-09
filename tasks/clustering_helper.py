@@ -537,7 +537,11 @@ def _perform_single_clustering_iteration(
                         elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", spectral_params_ranges["n_clusters_min"])
                         upper_bound_n_clusters = min(spectral_params_ranges["n_clusters_max"], max_clusters_or_components) if max_clusters_or_components > 0 else spectral_params_ranges["n_clusters_max"]
                         mutated_n_clusters = _mutate_param(elite_n_clusters, max(1, spectral_params_ranges["n_clusters_min"]), upper_bound_n_clusters, mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA))
-                        temp_method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, mutated_n_clusters)}}
+                        
+                        elite_random_state = elite_method_config_original.get("params", {}).get("random_state", random.randint(0, 10000))
+                        mutated_random_state = _mutate_param(elite_random_state, 0, 10000, mutation_config.get("int_abs_delta", 100))
+                        
+                        temp_method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, mutated_n_clusters), "random_state": mutated_random_state}}
 
                     if temp_method_params_config and temp_pca_config is not None:
                         if clustering_method == "kmeans": # type: ignore
@@ -601,7 +605,8 @@ def _perform_single_clustering_iteration(
             elif clustering_method == "spectral":
                 upper_bound_spectral_rand = min(spectral_params_ranges["n_clusters_max"], max_clusters_or_components_rand) if max_clusters_or_components_rand > 0 else spectral_params_ranges["n_clusters_max"]
                 spectral_n_rand = random.randint(spectral_params_ranges["n_clusters_min"], upper_bound_spectral_rand)
-                method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, spectral_n_rand)}}
+                spectral_random_state_rand = random.randint(0, 10000)
+                method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, spectral_n_rand), "random_state": spectral_random_state_rand}}
             else:
                 logging.error("%s Iteration %s: Unsupported clustering method %s", log_prefix, run_idx, clustering_method)
                 return None # type: ignore
@@ -871,9 +876,18 @@ def _perform_single_clustering_iteration(
                 logging.warning("%s Iteration %s: n_clusters (%s) for SpectralClustering is >= n_samples (%s). It will fail. Skipping iteration.", log_prefix, run_idx, n_clusters_param, n_samples)
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
 
+            random_state_param = params_from_config.get("random_state", None)
+            
             # Add verbose logging for the potentially long-running spectral clustering
             logging.info("%s Iteration %s: Starting SpectralClustering.fit_predict on %s samples. This may take a very long time.", log_prefix, run_idx, n_samples)
-            spectral = SpectralClustering(n_clusters=n_clusters_param, assign_labels='kmeans', random_state=None, verbose=True)
+            spectral = SpectralClustering(
+                n_clusters=n_clusters_param,
+                assign_labels='kmeans',
+                affinity='nearest_neighbors',
+                n_neighbors=30,
+                random_state=random_state_param,
+                verbose=True
+            )
             labels = spectral.fit_predict(data_for_clustering_current)
             logging.info("%s Iteration %s: SpectralClustering.fit_predict completed.", log_prefix, run_idx)
 
