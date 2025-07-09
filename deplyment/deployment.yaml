@@ -198,7 +198,7 @@ spec:
         fsGroup: 0
       containers:
       - name: flask-app
-        image: ghcr.io/neptunehub/audiomuse-ai:0.5.1-beta # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.6.0-beta # Your image from GHCR
         imagePullPolicy: Always
         ports:
         - containerPort: 8000 # Flask app listens on 8000
@@ -309,7 +309,7 @@ spec:
         fsGroup: 0
       containers:
       - name: rq-worker # Changed from celery-worker
-        image: ghcr.io/neptunehub/audiomuse-ai:0.5.1-beta # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.6.0-beta # Your image from GHCR
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE
