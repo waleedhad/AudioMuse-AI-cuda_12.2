@@ -465,7 +465,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                      TASK_STATUS_STARTED, TASK_STATUS_PROGRESS, TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
 
     current_job = get_current_job(redis_conn)
-    current_task_id = current_job.id if current_job else str(uuid.uuid4())
+    current_task_id = current_job.id if current_job else str(uuid.uuid4())    
 
     with app.app_context():
         if num_recent_albums < 0:
@@ -479,6 +479,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
         checked_album_ids = set(json.loads(task_info.get('details', '{}')).get('checked_album_ids', [])) if task_info else set()
         
         initial_details = {"message": "Fetching albums...", "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main analysis task started."]}
+
         save_task_status(current_task_id, "main_analysis", TASK_STATUS_STARTED, progress=0, details=initial_details)
         headers = {"X-Emby-Token": jellyfin_token}
         current_progress = 0
@@ -491,7 +492,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             details = {**kwargs, "status_message": message}
             log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
             task_state = kwargs.get('task_state', TASK_STATUS_PROGRESS)
-
+            
             if task_state != TASK_STATUS_SUCCESS:
                 current_task_logs.append(log_entry)
                 details["log"] = current_task_logs
@@ -499,7 +500,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 details["log"] = [f"Task completed successfully. Final status: {message}"]
 
             if current_job:
-                current_job.meta.update({'progress': progress, 'status_message': message})
+                current_job.meta.update({'progress': progress, 'status_message': message, 'details':details})
                 current_job.save_meta()
             save_task_status(current_task_id, "main_analysis", task_state, progress=progress, details=details)
 
