@@ -458,11 +458,10 @@ def save_track_embedding(item_id, embedding_vector):
     finally:
         cur.close()
 
-def get_all_tracks(): # Removed db_path
+def get_all_tracks():
+    """Fetches all tracks and their embeddings from the database."""
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    # Join with embedding table to get embedding_vector
-    # The column is now named 'embedding' and is of type BYTEA
     cur.execute("""
         SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding
         FROM score s
@@ -470,14 +469,19 @@ def get_all_tracks(): # Removed db_path
     """)
     rows = cur.fetchall()
     cur.close()
-    # Post-process to convert BYTEA back to numpy array
+    
+    # Convert DictRow objects to regular dicts to allow adding new keys.
+    processed_rows = []
     for row in rows:
-        if row['embedding']:
+        row_dict = dict(row)
+        if row_dict.get('embedding'):
             # Use np.frombuffer to convert the binary data back to a numpy array
-            row['embedding_vector'] = np.frombuffer(row['embedding'], dtype=np.float32)
+            row_dict['embedding_vector'] = np.frombuffer(row_dict['embedding'], dtype=np.float32)
         else:
-            row['embedding_vector'] = np.array([]) # Use a consistent name
-    return rows
+            row_dict['embedding_vector'] = np.array([]) # Use a consistent name
+        processed_rows.append(row_dict)
+        
+    return processed_rows
 
 def get_tracks_by_ids(item_ids_list):
     """Fetches full track data (including embeddings) for a specific list of item_ids."""
@@ -485,26 +489,27 @@ def get_tracks_by_ids(item_ids_list):
         return []
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    # Using a placeholder for a list of IDs
-    # psycopg2 can convert a list to a tuple for the IN operator
-    # The column is now named 'embedding' and is of type BYTEA
     query = """
         SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding
         FROM score s
         LEFT JOIN embedding e ON s.item_id = e.item_id
         WHERE s.item_id IN %s
     """
-    cur.execute(query, (tuple(item_ids_list),)) # Pass list as a tuple for IN clause
+    cur.execute(query, (tuple(item_ids_list),))
     rows = cur.fetchall()
     cur.close()
-    # Post-process to convert BYTEA back to numpy array
+
+    # Convert DictRow objects to regular dicts to allow adding new keys.
+    processed_rows = []
     for row in rows:
-        if row['embedding']:
-            row['embedding_vector'] = np.frombuffer(row['embedding'], dtype=np.float32)
+        row_dict = dict(row)
+        if row_dict.get('embedding'):
+            row_dict['embedding_vector'] = np.frombuffer(row_dict['embedding'], dtype=np.float32)
         else:
-            row['embedding_vector'] = np.array([])
-    # app.logger.debug(f"Fetched {len(rows)} tracks for {len(item_ids_list)} IDs.")
-    return rows
+            row_dict['embedding_vector'] = np.array([])
+        processed_rows.append(row_dict)
+    
+    return processed_rows
 
 def get_score_data_by_ids(item_ids_list):
     """Fetches only score-related data (excluding embeddings) for a specific list of item_ids."""
