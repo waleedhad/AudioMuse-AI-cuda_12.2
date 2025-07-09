@@ -1,7 +1,7 @@
 name: "Support in Test"
 description: Help test clustering algorithms and evaluate playlists with AudioMuse
 title: "[Test] Your Library Name / Date"
-labels: ["testing", "feedback"]
+labels: ["Support in Test"]
 
 body:
   - type: markdown
