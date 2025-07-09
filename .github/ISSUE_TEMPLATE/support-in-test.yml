@@ -37,7 +37,7 @@ body:
     attributes:
       label: "1. Test Setup"
       description: "Fill in your environment details."
-      placeholder: |
+      value: |
         1. Docker Image: e.g. `devel@2c541573eb15e...`
         2. System Specs: e.g. `x86, TrueNAS SCALE, Ryzen 5600G`
         3. Albums/Tracks Analyzed: e.g. `250 albums, 2138 tracks`
@@ -101,7 +101,7 @@ body:
     attributes:
       label: "4. Additional Feedback"
       description: "Bugs, unexpected behavior, suggestions? Let us know."
-      placeholder: |
+      value: |
         - Playlist creation failed after test 4
         - UI lagged during clustering
         - Would love a dark theme option
