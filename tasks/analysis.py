@@ -231,9 +231,13 @@ def analyze_track(file_path, mood_labels_list, model_paths):
         n_mels, hop_length, n_fft, frame_size = 96, 256, 512, 187
         #mel_spec = librosa.feature.melspectrogram(y=audio, sr=16000, n_fft=512, hop_length=256, n_mels=96, window='hann', center=True, power=1.0)
         #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
-        
-        mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=True, power=2.0) #otherwise poer=2.0
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann')
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann')   
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=False, power=1.0, norm='slaney', htk=False)
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=True, power=2.0)
+        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=False, power=1.0, norm=None, htk=False)
+
+        mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=False, power=2.0, norm='slaney', htk=False)
+
 
         #log_mel_spec = np.log(1 + 10000 * mel_spec)
         log_mel_spec = np.log10(1 + 10000 * mel_spec)
@@ -562,7 +566,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             while active_jobs:
                 monitor_and_clear_jobs()
                 progress = 5 + int(85 * ((albums_skipped + albums_completed) / float(total_albums_to_check)))
-                log_and_update_main(f"Finalizing... Completed: {albums_completed}/{launched_jobs}", progress)
+                log_and_update_main(f"Finalizing... Completed: {albums_completed}/{albums_launched}", progress)
                 time.sleep(5)
 
             log_and_update_main("Performing final index rebuild...", 95)
