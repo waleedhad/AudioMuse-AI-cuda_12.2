@@ -402,7 +402,10 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 **Important version**
 * **0.1.5-alpha** - Last version with the use of Sqlite and Celery. Only 1 worker admitted.
   * To deploy you can download the source code from here and use the appropriate deployment.yaml example: https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v0.1.5-alpha
+* **0.2.0-alpha** - First version that use PostgreSQL database AND Redis Queue.
 * **v0.3.4-beta** - First version that start to store also embeding in the database. If you pass to this version the analysis will re-scan the entire library
+* **v0.5.0-beta** - Introduce song similarity function with ANNOY. If you pass to this version you need to drop all the table and re-scan the entire library with the analysis;
+* **v0.6.0-beta** - Moved from Essentia to Librosa for audio feature extraction. If you pass to this version you need to drop all the table and re-scan the entire library with the analysis;
 
 ## **Workflow Overview**
 
