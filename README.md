@@ -14,7 +14,7 @@ Addional important information on this project can also be found here:
 
 The **supported architecture** are:
 * **amd64**: Supported
-* **arm64**: Not supported yet, **work in progress..**
+* **arm64**: Supported
 
 ## **Table of Contents**
 
@@ -477,6 +477,9 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
     *   Regardless of the K-Means variant, embeddings are standardized using `StandardScaler` before being fed into the clustering algorithms.
 
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
+
+The use of Librosa for songs preprocessing was introduced in order to improve the compatibility with other platform (eg. `ARM64`). It is configured in order to load the same MusicNN models previously used.
+Librosa loads audio using `librosa.load(file_path, sr=16000, mono=True)`, ensuring the sample rate is exactly `16,000 Hz` and the audio is converted to mono—both strict requirements of the model. It then computes a Mel spectrogram using `librosa.feature.melspectrogram` with parameters precisely matching those used during model training: `n_fft=512, hop_length=256, n_mels=96, window='hann', center=False, power=2.0, norm='slaney', htk=False`. The spectrogram is scaled using `np.log10(1 + 10000 * mel_spec)`, a transformation that must be replicated exactly. These preprocessing steps are crucial: any deviation in parameters results in incompatible input and incorrect model predictions. Once prepared, the data is passed into a frozen TensorFlow model graph using v1 compatibility mode. TensorFlow maps defined input/output tensor names and executes inference with session.run(), first generating embeddings for each patch of the spectrogram, and then passing these to various classifier heads (e.g., mood, genre). The entire pipeline depends on strict adherence to the original preprocessing parameters—without this, the model will fail to produce meaningful results.
 
 ## **Clustering Algorithm Deep Dive**
 
