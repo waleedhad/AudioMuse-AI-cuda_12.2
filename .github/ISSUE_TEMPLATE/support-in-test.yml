@@ -2,8 +2,6 @@ name: "Support in Test"
 description: Help test clustering algorithms and evaluate playlists with AudioMuse
 title: "[Test] Your Library Name / Date"
 labels: ["testing", "feedback"]
-assignees:
-  - your-github-username
 
 body:
   - type: markdown
@@ -24,81 +22,78 @@ body:
 
         While depending on your library size this might take a while, most of the time is just waiting for the clustering to finish; you only have to change some settings, press a button, and evaluate the result every couple hours.
 
-        The process is as follows:
-        1. Set up AudioMuse and ensure it runs correctly.
-        2. Run at least one analysis task (skip if already done).
-        3. Configure the test parameters using the Advanced tab.
-        4. Start clustering and wait for it to finish.
-        5. Enter results in the "Performance Properties" table.
-        6. Evaluate playlist quality in the "Playlist Evaluation" section.
-        7. Leave any feedback at the end. [File bugs here](https://github.com/NeptuneHub/AudioMuse-AI/issues/new?template=bug_report.md).
-
   - type: textarea
     id: test-setup
     attributes:
       label: "1. Test Setup"
       description: "Fill in your environment details."
       placeholder: |
-        1. Docker Image: `devel@2c541573eb15e42e51bdf176700132db04d78ade991ddc7fef9ccd5ee9c161df`
-        2. System Specs: `x86, TrueNAS SCALE, Ryzen 5600G`
-        3. Albums/Tracks Analyzed: `250 albums, 2138 tracks`
-        4. Analysis Duration: `2h 37m`
+        1. Docker Image: e.g. `devel@2c541573eb15e...`
+        2. System Specs: e.g. `x86, TrueNAS SCALE, Ryzen 5600G`
+        3. Albums/Tracks Analyzed: e.g. `250 albums, 2138 tracks`
+        4. Analysis Duration: e.g. `2h 37m`
     validations:
       required: true
 
-  - type: markdown
+  - type: checkboxes
+    id: test-parameters
     attributes:
-      value: |
-        ## 2. Test Parameters
-
-        | Test # | Clustering Algorithm | Clustering Runs | PCA Min | PCA Max | Use Embeddings |
-        |--------|----------------------|------------------|---------|---------|----------------|
-        | 1 | K-Means | 5000 | 0 | 8 | NO |
-        | 2 | K-Means | 5000 | 0 | 199 | YES |
-        | 3 | GMM | 5000 | 0 | 8 | NO |
-        | 4 | GMM | 5000 | 0 | 199 | YES |
-        | 5 | DBSCAN | 5000 | 0 | 8 | NO |
-        | 6 | DBSCAN | 5000 | 0 | 199 | YES |
-        | 7 | Spectral | 5000 | 0 | 8 | NO |
-        | 8 | Spectral | 5000 | 0 | 199 | YES |
-        | 9 | ? | ? | ? | ? | ? |
+      label: "2. Test Parameters (Check the tests you actually ran)"
+      options:
+        - label: "Test 1 – K-Means, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 2 – K-Means, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 3 – GMM, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 4 – GMM, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 5 – DBSCAN, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 6 – DBSCAN, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 7 – Spectral, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 8 – Spectral, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 9 – Custom or Other (describe below)"
 
   - type: textarea
     id: performance-properties
     attributes:
       label: "2.1 Performance Properties"
-      description: "Fill in runtime, scores, and playlist counts for each test"
-      placeholder: |
+      description: "Paste in clustering runtime, best score, and number of playlists created per test."
+      value: |
         | Test # | Runtime | Best Score | num_playlists_created |
         |--------|---------|------------|------------------------|
-        | 1 |       |            |                        |
-        | 2 |       |            |                        |
-        ...
-    validations:
-      required: false
+        | 1      |         |            |                        |
+        | 2      |         |            |                        |
+        | 3      |         |            |                        |
+        | 4      |         |            |                        |
+        | 5      |         |            |                        |
+        | 6      |         |            |                        |
+        | 7      |         |            |                        |
+        | 8      |         |            |                        |
+        | 9      |         |            |                        |
 
   - type: textarea
     id: playlist-evaluation
     attributes:
       label: "3. Playlist Evaluation"
-      description: "Rate quality and diversity of the generated playlists"
-      placeholder: |
+      description: "Rate each test from 1 (worst) to 5 (best), and add any comments."
+      value: |
         | Test # | Genre Diversity | Genre Coherence | Overall Quality | Comments |
         |--------|------------------|------------------|------------------|----------|
-        | 1 |        |        |        |          |
-        | 2 |        |        |        |          |
-        ...
-    validations:
-      required: false
+        | 1      |                  |                  |                  |          |
+        | 2      |                  |                  |                  |          |
+        | 3      |                  |                  |                  |          |
+        | 4      |                  |                  |                  |          |
+        | 5      |                  |                  |                  |          |
+        | 6      |                  |                  |                  |          |
+        | 7      |                  |                  |                  |          |
+        | 8      |                  |                  |                  |          |
+        | 9      |                  |                  |                  |          |
 
   - type: textarea
     id: additional-feedback
     attributes:
       label: "4. Additional Feedback"
-      description: "Bugs, errors, or suggestions? Leave them here."
+      description: "Bugs, unexpected behavior, suggestions? Let us know."
       placeholder: |
-        - UI froze during Test #3
-        - Playlist #6 seemed inconsistent
-        - Idea: Export playlists as M3U
+        - Playlist creation failed after test 4
+        - UI lagged during clustering
+        - Would love a dark theme option
     validations:
       required: false
