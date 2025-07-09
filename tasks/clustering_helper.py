@@ -1138,4 +1138,5 @@ def _perform_single_clustering_iteration(
         return result
     except Exception as e_iter:
         logging.error("%s Iteration %s failed: %s", log_prefix, run_idx, e_iter, exc_info=True)
-        return None # type: ignore
+        # Re-raising the exception is crucial for the calling task to handle it as a failure.
+        raise

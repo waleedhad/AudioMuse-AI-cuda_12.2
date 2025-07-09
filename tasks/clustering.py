@@ -10,6 +10,7 @@ import time
 import random
 import logging
 import uuid
+import traceback
 
 # RQ import
 from rq import get_current_job, Retry
@@ -953,6 +954,10 @@ def run_clustering_task(
         except Exception as e:
             # Log the full traceback on the server for debugging.
             logger.critical("FATAL ERROR: Main clustering task failed: %s", e, exc_info=True)
+            # The with app.app_context() is technically redundant here as we are already in one,
+            # but we'll keep it to be safe and explicit.
+            # The with app.app_context() is technically redundant here as we are already in one,
+            # but we'll keep it to be safe and explicit.
             with app.app_context():
                 # Save a generic error to the DB, without the stack trace.
                 log_and_update_main_clustering(
@@ -962,3 +967,6 @@ def run_clustering_task(
                     task_state=TASK_STATUS_FAILURE,
                     print_console=False
                 )
+
+            # Re-raising the exception is crucial for RQ to handle retries if configured on the task itself
+            raise

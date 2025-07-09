@@ -53,6 +53,7 @@ from ai import get_ai_playlist_name, creative_prompt_template
 from .commons import score_vector
 from .annoy_manager import build_and_store_annoy_index
 
+from psycopg2 import OperationalError
 logger = logging.getLogger(__name__)
 
 # --- Tensor Name Definitions ---
@@ -455,6 +456,11 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
             log_and_update_album_task(f"Album '{album_name}' analysis complete.", 100, task_state=TASK_STATUS_SUCCESS, final_summary_details=summary)
             return {"status": "SUCCESS", **summary}
 
+        except OperationalError as e:
+            logger.error(f"Database connection error during album analysis {album_id}: {e}. This job will be retried.", exc_info=True)
+            log_and_update_album_task(f"Database connection failed for album '{album_name}'. Retrying...", current_progress_val, task_state=TASK_STATUS_FAILURE, final_summary_details={"error": str(e), "traceback": traceback.format_exc()})
+            # Re-raising the exception is crucial for RQ to trigger the retry mechanism
+            raise
         except Exception as e:
             logger.critical(f"Album analysis {album_id} failed: {e}", exc_info=True)
             log_and_update_album_task(f"Failed to analyze album '{album_name}': {e}", current_progress_val, task_state=TASK_STATUS_FAILURE, final_summary_details={"error": str(e), "traceback": traceback.format_exc()})
@@ -562,7 +568,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 checked_album_ids.add(album['Id'])
                 
                 progress = 5 + int(85 * (idx / float(total_albums_to_check)))
-                log_and_update_main(f"Launched: {albums_launched}. Completed: {albums_completed}. Skipped: {albums_skipped}.", progress, checked_album_ids=list(checked_album_ids))
+                log_and_update_main(f"Launched: {albums_launched}. Completed: {albums_completed}/{albums_launched}. Skipped: {albums_skipped}.", progress, checked_album_ids=list(checked_album_ids))
 
             while active_jobs:
                 monitor_and_clear_jobs()
@@ -579,6 +585,11 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
             clean_temp(TEMP_DIR)
             return {"status": "SUCCESS", "message": final_message}
 
+        except OperationalError as e:
+            logger.critical(f"FATAL ERROR: Main analysis task failed due to DB connection issue: {e}", exc_info=True)
+            log_and_update_main(f"❌ Main analysis failed due to a database connection error. The task may be retried.", current_progress, task_state=TASK_STATUS_FAILURE, error_message=str(e), traceback=traceback.format_exc())
+            # Re-raise to allow RQ to handle retries if configured on the task itself
+            raise
         except Exception as e:
             logger.critical(f"FATAL ERROR: Analysis failed: {e}", exc_info=True)
             log_and_update_main(f"❌ Main analysis failed: {e}", current_progress, task_state=TASK_STATUS_FAILURE, error_message=str(e), traceback=traceback.format_exc())
