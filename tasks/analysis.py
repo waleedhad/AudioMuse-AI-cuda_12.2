@@ -547,6 +547,9 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     last_rebuild_count = albums_completed
 
             for idx, album in enumerate(all_albums):
+                # Periodically check for completed jobs to update progress
+                monitor_and_clear_jobs()
+
                 if album['Id'] in checked_album_ids:
                     albums_skipped += 1
                     continue
@@ -568,12 +571,20 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 checked_album_ids.add(album['Id'])
                 
                 progress = 5 + int(85 * (idx / float(total_albums_to_check)))
-                log_and_update_main(f"Launched: {albums_launched}. Completed: {albums_completed}/{albums_launched}. Skipped: {albums_skipped}.", progress, checked_album_ids=list(checked_album_ids))
-
+                status_message = f"Launched: {albums_launched}. Completed: {albums_completed}/{albums_launched}. Active: {len(active_jobs)}. Skipped: {albums_skipped}/{total_albums_to_check}."
+                log_and_update_main(
+                    status_message,
+                    progress,
+                    albums_to_process=albums_launched,
+                    albums_skipped=albums_skipped,
+                    checked_album_ids=list(checked_album_ids)
+                )
+                
             while active_jobs:
                 monitor_and_clear_jobs()
                 progress = 5 + int(85 * ((albums_skipped + albums_completed) / float(total_albums_to_check)))
-                log_and_update_main(f"Finalizing... Completed: {albums_completed}/{albums_launched}", progress)
+                status_message = f"Launched: {albums_launched}. Completed: {albums_completed}/{albums_launched}. Active: {len(active_jobs)}. Skipped: {albums_skipped}/{total_albums_to_check}. (Finalizing)"
+                log_and_update_main(status_message, progress, checked_album_ids=list(checked_album_ids))
                 time.sleep(5)
 
             log_and_update_main("Performing final index rebuild...", 95)
