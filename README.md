@@ -97,6 +97,16 @@ config:
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
 
+How to find **userid**:
+* Log into Jellyfin from your browser as an admin
+* Go to Dashboard > “admin panel” > Users.
+* Click on the user’s name that you are interested
+* The User ID is visible in the URL (is the part just after = ):
+  * http://your-jellyfin-server/web/index.html#!/useredit.html?userId=xxxxx
+
+How to create an the **jellyfin's API token**:
+* The API Token, still as admin you can go to Dashboard > “Admin panel” > API Key and create a new one.
+
 For the full list of supported configuration values, refer to the [values.yaml file](https://github.com/NeptuneHub/AudioMuse-AI-helm/blob/main/values.yaml).
 
 For detailed documentation on each environment variable, have a look at the parameter chapter.
