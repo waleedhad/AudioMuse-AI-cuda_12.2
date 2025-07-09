@@ -22,6 +22,16 @@ body:
 
         While depending on your library size this might take a while, most of the time is just waiting for the clustering to finish; you only have to change some settings, press a button, and evaluate the result every couple hours.
 
+        The process is as follows:
+
+        1. Set up AudioMuse. You can run an analysis and clustering to make sure it works correctly.
+        2. Run at least one analysis task (skip this if you've done this already). You could limit the number of recent albums used for the analysis to speed things up, but this will affect the quality of your results. So if you have the patience, please leave "Number of recent albums" set to `0`.
+        3. Configure the first/next parameter set from the "Test Parameters" section below. Use the "Advanced" tab in AudioMuse for this, and enter the values in the "Clustering Parameters" section. Any parameter that is not explicitly mentioned can be left as the default. **If** you change any other parameter after test 8, please let use know what you changed.
+        4. Start the **clustering** task (button "Start Clustering" in the "Run Tasks" section) and wait for the task to finish
+        5. Enter the results into the "Performance Properties" table (in this survey, below). You can find those values in the "Task Status" section; some of them are in the "Details / Log" area.
+        6. Take a look at the generated playlists (in Jellyfin, or in the "Generated Playlists" section in AudioMuse), or even listen to them. Then evaluate the quality of the playlists in the "Playlist Evaluation" section below. Would you consider these playlists to be good mixes?
+        7. You add any additional notes or feedback at the end. If something isn't working for you and/or you see errors, feel free to [create a bug report on GitHub](https://github.com/NeptuneHub/AudioMuse-AI/issues/new?template=bug_report.md)
+
   - type: textarea
     id: test-setup
     attributes:
