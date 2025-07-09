@@ -30,7 +30,7 @@ from config import (MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
                     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
                     LN_MOOD_DIVERSITY_EMBEDING_STATS, LN_MOOD_PURITY_EMBEDING_STATS, LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
                     OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY,
-                    USE_MINIBATCH_KMEANS, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, DB_FETCH_CHUNK_SIZE) # Added DB_FETCH_CHUNK_SIZE
+                    USE_MINIBATCH_KMEANS, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, DB_FETCH_CHUNK_SIZE, SPECTRAL_N_NEIGHBORS) # Added DB_FETCH_CHUNK_SIZE
 
 # Import from app (for get_job_result_safely and potentially others if they evolve)
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
@@ -884,7 +884,7 @@ def _perform_single_clustering_iteration(
                 n_clusters=n_clusters_param,
                 assign_labels='kmeans',
                 affinity='nearest_neighbors',
-                n_neighbors=30,
+                n_neighbors=SPECTRAL_N_NEIGHBORS,
                 random_state=random_state_param,
                 verbose=True
             )
