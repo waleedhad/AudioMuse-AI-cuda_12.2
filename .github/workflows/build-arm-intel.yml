@@ -51,7 +51,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository | lower }}
+          images: ghcr.io/${{ toLower(github.repository) }}
           tags: |
             # Set 'latest' tag for the main branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
