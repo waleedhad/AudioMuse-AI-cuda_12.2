@@ -44,7 +44,8 @@ from config import (
     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
     LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
     STRATIFIED_SAMPLING_TARGET_PERCENTILE,
-    OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY
+    OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY,
+    AUDIO_LOAD_TIMEOUT # Add this to your config.py, e.g., AUDIO_LOAD_TIMEOUT = 600 (for a 10-minute timeout)
 )
 
 
@@ -54,6 +55,7 @@ from .commons import score_vector
 from .annoy_manager import build_and_store_annoy_index
 
 from psycopg2 import OperationalError
+from redis.exceptions import TimeoutError as RedisTimeoutError # Import with an alias
 logger = logging.getLogger(__name__)
 
 # --- Tensor Name Definitions ---
@@ -197,9 +199,12 @@ def analyze_track(file_path, mood_labels_list, model_paths):
 
     # --- 1. Load Audio and Compute Basic Features ---
     try:
-        audio, sr = librosa.load(file_path, sr=16000, mono=True)
+        # **MODIFIED**: Use a duration limit to prevent loading excessively large files.
+        # The timeout is handled by librosa's internal mechanism when duration is set.
+        duration = AUDIO_LOAD_TIMEOUT / 60 # Convert seconds to minutes for clarity if needed, but librosa uses seconds.
+        audio, sr = librosa.load(file_path, sr=16000, mono=True, duration=AUDIO_LOAD_TIMEOUT)
     except Exception as e:
-        logger.warning(f"Librosa loading error for {os.path.basename(file_path)}: {e}")
+        logger.warning(f"Librosa loading error for {os.path.basename(file_path)} (possibly too large or corrupt): {e}")
         return None, None
 
     tempo, _ = librosa.beat.beat_track(y=audio, sr=sr)
@@ -230,17 +235,9 @@ def analyze_track(file_path, mood_labels_list, model_paths):
     try:
         # Using the spectrogram settings confirmed to work for the main model
         n_mels, hop_length, n_fft, frame_size = 96, 256, 512, 187
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=16000, n_fft=512, hop_length=256, n_mels=96, window='hann', center=True, power=1.0)
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann')   
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=False, power=1.0, norm='slaney', htk=False)
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=True, power=2.0)
-        #mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=False, power=1.0, norm=None, htk=False)
-
         mel_spec = librosa.feature.melspectrogram(y=audio, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels, window='hann', center=False, power=2.0, norm='slaney', htk=False)
 
 
-        #log_mel_spec = np.log(1 + 10000 * mel_spec)
         log_mel_spec = np.log10(1 + 10000 * mel_spec)
 
         spec_patches = [log_mel_spec[:, i:i+frame_size] for i in range(0, log_mel_spec.shape[1] - frame_size + 1, frame_size)]
@@ -431,6 +428,7 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                 try:
                     analysis, embedding = analyze_track(path, MOOD_LABELS, model_paths)
                     if analysis is None:
+                        logger.warning(f"Skipping track {track_name_full} as analysis returned None.")
                         tracks_skipped_count += 1
                         continue
                     
@@ -532,13 +530,19 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 nonlocal albums_completed, last_rebuild_count
                 for job_id in list(active_jobs.keys()):
                     try:
+                        # **MODIFIED**: Added a try-except block to handle Redis timeouts gracefully.
                         job = Job.fetch(job_id, connection=redis_conn)
                         if job.is_finished or job.is_failed or job.is_canceled:
                             del active_jobs[job_id]
                             albums_completed += 1
                     except NoSuchJobError:
+                        logger.warning(f"Job {job_id} not found in Redis. Assuming complete.")
                         del active_jobs[job_id]
                         albums_completed += 1
+                    except RedisTimeoutError:
+                        logger.warning(f"Redis timeout while fetching job {job_id}. Will retry on next loop.")
+                        # We don't remove the job, we'll try fetching it again later.
+                        continue
                 
                 if albums_completed > last_rebuild_count and (albums_completed - last_rebuild_count) >= REBUILD_INDEX_BATCH_SIZE:
                     log_and_update_main(f"Batch of {albums_completed - last_rebuild_count} albums complete. Rebuilding index...", current_progress)
