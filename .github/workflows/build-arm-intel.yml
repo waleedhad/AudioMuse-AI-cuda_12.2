@@ -1,9 +1,12 @@
-name: Build, Test, and Push AudioMuse AI Docker Image
+name: Build, Test, and Push AudioMuse AI Docker Image INTEL and ARM
 
 on:
   push:
     branches:
-      - devel-librosa # Trigger only for 'devel-librosa' branch
+      - main        # Trigger for 'latest'
+      - devel       # Trigger for 'devel'
+    tags:
+      - 'v*.*.*'    # Trigger for version tags like v1.0.0
 
 jobs:
   build-test-and-push: # Combined job for build, test, and final push
