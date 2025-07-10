@@ -45,13 +45,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # This step replaces the custom shell script for determining tags.
-      # It uses docker/metadata-action to automatically generate appropriate tags based on the Git ref.
+      # This new step uses a shell command to reliably convert the repository name to lower case.
+      - name: Set lower-case repository name
+        id: repo_name
+        run: echo "name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      # This step uses the lower-case name from the previous step to generate tags.
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ toLower(github.repository) }}
+          images: ghcr.io/${{ steps.repo_name.outputs.name }}
           tags: |
             # Set 'latest' tag for the main branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
