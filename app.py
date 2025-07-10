@@ -9,6 +9,7 @@ import threading
 import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
 from annoy import AnnoyIndex
+import time
 
 # RQ imports
 
@@ -38,7 +39,8 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     SCORE_WEIGHT_PURITY, SCORE_WEIGHT_OTHER_FEATURE_DIVERSITY, SCORE_WEIGHT_OTHER_FEATURE_PURITY, \
     MIN_SONGS_PER_GENRE_FOR_STRATIFICATION, STRATIFIED_SAMPLING_TARGET_PERCENTILE, \
     CLUSTER_ALGORITHM, NUM_CLUSTERS_MIN, NUM_CLUSTERS_MAX, DBSCAN_EPS_MIN, DBSCAN_EPS_MAX, GMM_COVARIANCE_TYPE, \
-    DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
+    DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
+    SPECTRAL_N_CLUSTERS_MIN, SPECTRAL_N_CLUSTERS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, APP_VERSION, \
     AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
 
@@ -165,6 +167,25 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # --- Migration for start_time and end_time to DOUBLE PRECISION for Unix timestamps ---
+    for col_name in ['start_time', 'end_time']:
+        cur.execute("""
+            SELECT data_type FROM information_schema.columns 
+            WHERE table_name = 'task_status' AND column_name = %s
+        """, (col_name,))
+        result = cur.fetchone()
+        
+        # If column doesn't exist, add it as DOUBLE PRECISION
+        if not result:
+            app.logger.info(f"Adding '{col_name}' column of type DOUBLE PRECISION to 'task_status' table.")
+            cur.execute(f"ALTER TABLE task_status ADD COLUMN {col_name} DOUBLE PRECISION")
+        # If column exists and is a timestamp type, migrate it
+        elif 'timestamp' in result[0]:
+            app.logger.warning(f"'{col_name}' column is of type {result[0]}. Migrating to DOUBLE PRECISION. Historical timing data in this column will be lost.")
+            cur.execute(f"ALTER TABLE task_status DROP COLUMN {col_name}")
+            cur.execute(f"ALTER TABLE task_status ADD COLUMN {col_name} DOUBLE PRECISION")
+
     # Create the embedding table if it doesn't exist
     cur.execute("""
         CREATE TABLE IF NOT EXISTS embedding (
@@ -268,14 +289,14 @@ def clean_successful_task_details_on_new_start():
 # --- DB Utility Functions (used by tasks.py and API) ---
 def save_task_status(task_id, task_type, status=TASK_STATUS_PENDING, parent_task_id=None, sub_type_identifier=None, progress=0, details=None):
     """
-    Saves or updates a task's status in the database.
-    This function is now wrapped in a try/except block to handle transaction errors gracefully.
+    Saves or updates a task's status in the database, using Unix timestamps for start and end times.
     """
     db = get_db()
     cur = db.cursor()
+    current_unix_time = time.time()
 
     if details is not None and isinstance(details, dict):
-        # Log truncation for non-SUCCESS states; 'log' should be a list from tasks.py helpers.
+        # Log truncation logic remains the same
         if status != TASK_STATUS_SUCCESS and 'log' in details and isinstance(details['log'], list):
             log_list = details['log']
             if len(log_list) > MAX_LOG_ENTRIES_STORED:
@@ -283,49 +304,76 @@ def save_task_status(task_id, task_type, status=TASK_STATUS_PENDING, parent_task
                 details['log'] = log_list[-MAX_LOG_ENTRIES_STORED:]
                 details['log_storage_info'] = f"Log in DB truncated to last {MAX_LOG_ENTRIES_STORED} entries. Original length: {original_log_length}."
             else:
-                # If log is not truncated, ensure no old log_storage_info persists
                 details.pop('log_storage_info', None)
         elif status == TASK_STATUS_SUCCESS:
-            # For successful tasks, 'log' should be minimal (set by task). Ensure no log_storage_info.
             details.pop('log_storage_info', None)
             if 'log' not in details or not isinstance(details.get('log'), list) or not details.get('log'):
-                details['log'] = ["Task completed successfully."] # Default minimal log
+                details['log'] = ["Task completed successfully."]
 
     details_json = json.dumps(details) if details is not None else None
     
     try:
+        # This query now handles start_time and end_time using Unix timestamps
         cur.execute("""
-            INSERT INTO task_status (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            INSERT INTO task_status (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp, start_time, end_time)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, CASE WHEN %s IN ('SUCCESS', 'FAILURE', 'REVOKED') THEN %s ELSE NULL END)
             ON CONFLICT (task_id) DO UPDATE SET
                 status = EXCLUDED.status,
                 parent_task_id = EXCLUDED.parent_task_id,
                 sub_type_identifier = EXCLUDED.sub_type_identifier,
                 progress = EXCLUDED.progress,
                 details = EXCLUDED.details,
-                timestamp = NOW()
-        """, (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details_json))
+                timestamp = NOW(),
+                start_time = COALESCE(task_status.start_time, %s),
+                end_time = CASE
+                                WHEN EXCLUDED.status IN ('SUCCESS', 'FAILURE', 'REVOKED') AND task_status.end_time IS NULL
+                                THEN %s
+                                ELSE task_status.end_time
+                           END
+        """, (task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details_json, current_unix_time, status, current_unix_time, current_unix_time, current_unix_time))
         db.commit()
     except psycopg2.Error as e:
-        # If any database error occurs (including InFailedSqlTransaction), log it and roll back.
         app.logger.error(f"DB Error saving task status for {task_id}: {e}")
         try:
             db.rollback()
             app.logger.info(f"DB transaction rolled back for task status update of {task_id}.")
         except psycopg2.Error as rb_e:
             app.logger.error(f"DB Error during rollback for task status {task_id}: {rb_e}")
-        # We don't re-raise the exception, allowing the worker to potentially continue or finish gracefully.
     finally:
         cur.close()
 
 
 def get_task_info_from_db(task_id):
+    """Fetches task info from DB and calculates running time in Python."""
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp FROM task_status WHERE task_id = %s", (task_id,))
+    # Fetch raw columns including the Unix timestamps
+    cur.execute("""
+        SELECT 
+            task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp, start_time, end_time
+        FROM task_status 
+        WHERE task_id = %s
+    """, (task_id,))
     row = cur.fetchone()
     cur.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    
+    row_dict = dict(row)
+    current_unix_time = time.time()
+    
+    start_time = row_dict.get('start_time')
+    end_time = row_dict.get('end_time')
+
+    # If start_time is null (old record or pre-start), duration is 0.
+    if start_time is None:
+        row_dict['running_time_seconds'] = 0.0
+    else:
+        # If end_time is null, task is running. Use current time.
+        effective_end_time = end_time if end_time is not None else current_unix_time
+        row_dict['running_time_seconds'] = max(0, effective_end_time - start_time)
+        
+    return row_dict
 
 def get_child_tasks_from_db(parent_task_id):
     """Fetches all child tasks for a given parent_task_id from the database."""
@@ -410,11 +458,10 @@ def save_track_embedding(item_id, embedding_vector):
     finally:
         cur.close()
 
-def get_all_tracks(): # Removed db_path
+def get_all_tracks():
+    """Fetches all tracks and their embeddings from the database."""
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    # Join with embedding table to get embedding_vector
-    # The column is now named 'embedding' and is of type BYTEA
     cur.execute("""
         SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding
         FROM score s
@@ -422,14 +469,19 @@ def get_all_tracks(): # Removed db_path
     """)
     rows = cur.fetchall()
     cur.close()
-    # Post-process to convert BYTEA back to numpy array
+    
+    # Convert DictRow objects to regular dicts to allow adding new keys.
+    processed_rows = []
     for row in rows:
-        if row['embedding']:
+        row_dict = dict(row)
+        if row_dict.get('embedding'):
             # Use np.frombuffer to convert the binary data back to a numpy array
-            row['embedding_vector'] = np.frombuffer(row['embedding'], dtype=np.float32)
+            row_dict['embedding_vector'] = np.frombuffer(row_dict['embedding'], dtype=np.float32)
         else:
-            row['embedding_vector'] = np.array([]) # Use a consistent name
-    return rows
+            row_dict['embedding_vector'] = np.array([]) # Use a consistent name
+        processed_rows.append(row_dict)
+        
+    return processed_rows
 
 def get_tracks_by_ids(item_ids_list):
     """Fetches full track data (including embeddings) for a specific list of item_ids."""
@@ -437,26 +489,27 @@ def get_tracks_by_ids(item_ids_list):
         return []
     conn = get_db()
     cur = conn.cursor(cursor_factory=DictCursor)
-    # Using a placeholder for a list of IDs
-    # psycopg2 can convert a list to a tuple for the IN operator
-    # The column is now named 'embedding' and is of type BYTEA
     query = """
         SELECT s.item_id, s.title, s.author, s.tempo, s.key, s.scale, s.mood_vector, s.energy, s.other_features, e.embedding
         FROM score s
         LEFT JOIN embedding e ON s.item_id = e.item_id
         WHERE s.item_id IN %s
     """
-    cur.execute(query, (tuple(item_ids_list),)) # Pass list as a tuple for IN clause
+    cur.execute(query, (tuple(item_ids_list),))
     rows = cur.fetchall()
     cur.close()
-    # Post-process to convert BYTEA back to numpy array
+
+    # Convert DictRow objects to regular dicts to allow adding new keys.
+    processed_rows = []
     for row in rows:
-        if row['embedding']:
-            row['embedding_vector'] = np.frombuffer(row['embedding'], dtype=np.float32)
+        row_dict = dict(row)
+        if row_dict.get('embedding'):
+            row_dict['embedding_vector'] = np.frombuffer(row_dict['embedding'], dtype=np.float32)
         else:
-            row['embedding_vector'] = np.array([])
-    # app.logger.debug(f"Fetched {len(rows)} tracks for {len(item_ids_list)} IDs.")
-    return rows
+            row_dict['embedding_vector'] = np.array([])
+        processed_rows.append(row_dict)
+    
+    return processed_rows
 
 def get_score_data_by_ids(item_ids_list):
     """Fetches only score-related data (excluding embeddings) for a specific list of item_ids."""
@@ -549,6 +602,9 @@ def get_task_status_endpoint(task_id):
                 progress:
                   type: integer
                   description: Task progress percentage (0-100).
+                running_time_seconds:
+                  type: number
+                  description: The total running time of the task in seconds. Updates live for running tasks.
                 details:
                   type: object
                   description: Detailed information about the task. Structure varies by task type and state.
@@ -574,7 +630,7 @@ def get_task_status_endpoint(task_id):
                   type: string
                   example: Task ID not found in RQ or DB.
     """
-    response = {'task_id': task_id, 'state': 'UNKNOWN', 'status_message': 'Task ID not found in RQ or DB.', 'progress': 0, 'details': {}, 'task_type_from_db': None}
+    response = {'task_id': task_id, 'state': 'UNKNOWN', 'status_message': 'Task ID not found in RQ or DB.', 'progress': 0, 'details': {}, 'task_type_from_db': None, 'running_time_seconds': 0}
     try:
         job = Job.fetch(task_id, connection=redis_conn)
         response['state'] = job.get_status() # e.g., queued, started, finished, failed
@@ -599,6 +655,7 @@ def get_task_status_endpoint(task_id):
     db_task_info = get_task_info_from_db(task_id)
     if db_task_info:
         response['task_type_from_db'] = db_task_info.get('task_type')
+        response['running_time_seconds'] = db_task_info.get('running_time_seconds', 0)
         # If RQ state is more final (e.g. failed/finished), prefer that, else use DB
         if response['state'] not in [JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED]:
             response['state'] = db_task_info.get('status', response['state']) # Use DB status if RQ is still active
@@ -620,6 +677,11 @@ def get_task_status_endpoint(task_id):
     if response.get('task_type_from_db') and 'analysis' in response['task_type_from_db']:
         if isinstance(response.get('details'), dict):
             response['details'].pop('checked_album_ids', None)
+    
+    # Clean up the final response to remove confusing raw time columns
+    response.pop('timestamp', None)
+    response.pop('start_time', None)
+    response.pop('end_time', None)
 
     return jsonify(response)
 
@@ -808,39 +870,16 @@ def cancel_all_tasks_by_type_endpoint(task_type_prefix):
 def get_last_overall_task_status_endpoint():
     """
     Get the status of the most recent overall main task (analysis or clustering).
-    ---
-    tags:
-      - Status
-    responses:
-      200:
-        description: Status information for the last main task.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                task_id:
-                  type: string
-                  nullable: true
-                task_type:
-                  type: string
-                  nullable: true
-                status:
-                  type: string
-                progress:
-                  type: integer
-                  nullable: true
-                details:
-                  type: object
-                  additionalProperties: true
-                  nullable: true
-      404: # Although current code returns 200 with NO_PREVIOUS_MAIN_TASK
-        description: No previous main task found (current implementation returns 200).
-
     """
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
-    cur.execute("SELECT task_id, task_type, status, progress, details FROM task_status WHERE parent_task_id IS NULL ORDER BY timestamp DESC LIMIT 1")
+    cur.execute("""
+        SELECT task_id, task_type, status, progress, details, start_time, end_time
+        FROM task_status 
+        WHERE parent_task_id IS NULL 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    """)
     last_task_row = cur.fetchone()
     cur.close()
 
@@ -848,50 +887,37 @@ def get_last_overall_task_status_endpoint():
         last_task_data = dict(last_task_row)
         if last_task_data.get('details'):
             try: last_task_data['details'] = json.loads(last_task_data['details'])
-            except json.JSONDecodeError: pass # Keep as string if not valid JSON
+            except json.JSONDecodeError: pass
+
+        # Calculate running time in Python
+        start_time = last_task_data.get('start_time')
+        end_time = last_task_data.get('end_time')
+        if start_time:
+            effective_end_time = end_time if end_time is not None else time.time()
+            last_task_data['running_time_seconds'] = max(0, effective_end_time - start_time)
+        else:
+            last_task_data['running_time_seconds'] = 0.0
+        
+        # Clean up raw time columns before sending response
+        last_task_data.pop('start_time', None)
+        last_task_data.pop('end_time', None)
+        last_task_data.pop('timestamp', None)
+
         return jsonify(last_task_data), 200
+        
     return jsonify({"task_id": None, "task_type": None, "status": "NO_PREVIOUS_MAIN_TASK", "details": {"log": ["No previous main task found."] }}), 200
 
 @app.route('/api/active_tasks', methods=['GET'])
 def get_active_tasks_endpoint():
     """
     Get the status of the currently active main task, if any.
-    An active main task is one that is not in a SUCCESS, FAILURE, or REVOKED state.
-    ---
-    tags:
-      - Status
-    responses:
-      200:
-        description: Status information for the active main task, or an empty object if none.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                task_id:
-                  type: string
-                parent_task_id:
-                  type: string
-                  nullable: true
-                task_type:
-                  type: string
-                sub_type_identifier:
-                  type: string
-                  nullable: true
-                status:
-                  type: string
-                progress:
-                  type: integer
-                details:
-                  type: object
-                  additionalProperties: true
     """
     db = get_db()
     cur = db.cursor(cursor_factory=DictCursor)
     non_terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED,
-                             JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED) # JobStatus for completeness
+                             JobStatus.FINISHED, JobStatus.FAILED, JobStatus.CANCELED)
     cur.execute("""
-        SELECT task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, timestamp
+        SELECT task_id, parent_task_id, task_type, sub_type_identifier, status, progress, details, start_time, end_time
         FROM task_status
         WHERE parent_task_id IS NULL AND status NOT IN ('SUCCESS', 'FAILURE', 'REVOKED', 'FINISHED', 'FAILED', 'CANCELED')
         ORDER BY timestamp DESC
@@ -902,6 +928,14 @@ def get_active_tasks_endpoint():
 
     if active_main_task_row:
         task_item = dict(active_main_task_row)
+        
+        # Calculate running time in Python
+        start_time = task_item.get('start_time')
+        if start_time:
+            task_item['running_time_seconds'] = max(0, time.time() - start_time)
+        else:
+            task_item['running_time_seconds'] = 0.0
+
         if task_item.get('details'):
             try:
                 task_item['details'] = json.loads(task_item['details'])
@@ -919,6 +953,12 @@ def get_active_tasks_endpoint():
 
             except json.JSONDecodeError:
                 task_item['details'] = {"raw_details": task_item['details'], "error": "Failed to parse details JSON."}
+
+        # Clean up raw time columns before sending response
+        task_item.pop('start_time', None)
+        task_item.pop('end_time', None)
+        task_item.pop('timestamp', None)
+
         return jsonify(task_item), 200
     return jsonify({}), 200 # Return empty object if no active main task
 
@@ -968,6 +1008,10 @@ def get_config_endpoint():
                 gmm_n_components_min:
                   type: integer
                 gmm_n_components_max:
+                  type: integer
+                spectral_n_clusters_min:
+                  type: integer
+                spectral_n_clusters_max:
                   type: integer
                 pca_components_min:
                   type: integer
@@ -1040,6 +1084,7 @@ def get_config_endpoint():
         "dbscan_eps_min": DBSCAN_EPS_MIN, "dbscan_eps_max": DBSCAN_EPS_MAX, "gmm_covariance_type": GMM_COVARIANCE_TYPE,
         "dbscan_min_samples_min": DBSCAN_MIN_SAMPLES_MIN, "dbscan_min_samples_max": DBSCAN_MIN_SAMPLES_MAX,
         "gmm_n_components_min": GMM_N_COMPONENTS_MIN, "gmm_n_components_max": GMM_N_COMPONENTS_MAX,
+        "spectral_n_clusters_min": SPECTRAL_N_CLUSTERS_MIN, "spectral_n_clusters_max": SPECTRAL_N_CLUSTERS_MAX,
         "pca_components_min": PCA_COMPONENTS_MIN, "pca_components_max": PCA_COMPONENTS_MAX,
         "min_songs_per_genre_for_stratification": MIN_SONGS_PER_GENRE_FOR_STRATIFICATION,
         "stratified_sampling_target_percentile": STRATIFIED_SAMPLING_TARGET_PERCENTILE,

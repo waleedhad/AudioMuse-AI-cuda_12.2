@@ -82,6 +82,7 @@
                                             <option value="kmeans">K-Means</option>
                                             <option value="dbscan">DBSCAN</option>
                                             <option value="gmm">GMM</option>
+                                            <option value="spectral">Spectral</option>
                                         </select>
                                     </div>
                                     <div>
@@ -138,6 +139,7 @@
                                     </div>
                                     <div class="advanced-param hidden">
                                         <label for="config-score_weight_calinski_harabasz">Calinski-Harabasz Score Weight:</label>
+
                                         <input type="number" step="0.01" id="config-score_weight_calinski_harabasz">
                                     </div>
                                     <div class="advanced-param hidden">
@@ -191,6 +193,18 @@
                                     <div>
                                         <label for="config-gmm_n_components_max">GMM Components Max:</label>
                                         <input type="number" id="config-gmm_n_components_max">
+                                    </div>
+                                </div>
+
+                                <div id="spectral-params" class="advanced-param hidden">
+                                    <h4>Spectral Specific:</h4>
+                                    <div>
+                                        <label for="config-spectral_n_clusters_min">Spectral Clusters Min:</label>
+                                        <input type="number" id="config-spectral_n_clusters_min">
+                                    </div>
+                                    <div>
+                                        <label for="config-spectral_n_clusters_max">Spectral Clusters Max:</label>
+                                        <input type="number" id="config-spectral_n_clusters_max">
                                     </div>
                                 </div>
                             </fieldset>
@@ -248,7 +262,8 @@
                     <section>
                         <h2>Task Status</h2>
                         <div id="task-status-display">
-                             <p><span class="status-label">Task ID:</span> <span id="status-task-id">N/A</span></p>
+                            <p><span class="status-label">Task ID:</span> <span id="status-task-id">N/A</span></p>
+                            <p><span class="status-label">Running Time:</span> <span id="status-running-time">-- : -- : --</span></p>
                             <p><span class="status-label">Type:</span> <span id="status-task-type">N/A</span></p>
                             <p><span class="status-label">Status:</span> <span id="status-status">IDLE</span></p>
                             <p><span class="status-label">Status Message:</span> <span id="status-log">N/A</span></p>

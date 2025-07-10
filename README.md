@@ -1,12 +1,20 @@
+![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
+![Latest Tag](https://img.shields.io/github/v/tag/neptunehub/AudioMuse-AI?label=latest-tag)
+
+
 # **AudioMuse-AI - Let the choice happen, the open-source way**
 
-AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using sonic audio analysis via [Essentia](https://essentia.upf.edu/) and playlist automatic generation using clustering algorithm and AI based feature. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
+AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
 
 
 Addional important information on this project can also be found here:
 * Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
 
 **IMPORTANT:** This is an **BETA** (yes we passed from ALPHA to BETA finally!) open-source project I’m developing just for fun. All the source code is fully open and visible. It’s intended only for testing purposes, not for production environments. Please use it at your own risk. I cannot be held responsible for any issues or damages that may occur.
+
+The **supported architecture** are:
+* **amd64**: Supported
+* **arm64**: Supported
 
 ## **Table of Contents**
 
@@ -25,6 +33,7 @@ Addional important information on this project can also be found here:
   - [1. K-Means](#1-k-means)
   - [2. DBSCAN](#2-dbscan)
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
+  - [4. Spectral Clustering](#4-spectral-clustering)
   - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
@@ -87,6 +96,16 @@ config:
   geminiModelName: "gemini-1.5-flash-latest"
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
+
+How to find **userid**:
+* Log into Jellyfin from your browser as an admin
+* Go to Dashboard > “admin panel” > Users.
+* Click on the user’s name that you are interested
+* The User ID is visible in the URL (is the part just after = ):
+  * http://your-jellyfin-server/web/index.html#!/useredit.html?userId=xxxxx
+
+How to create an the **jellyfin's API token**:
+* The API Token, still as admin you can go to Dashboard > “Admin panel” > API Key and create a new one.
 
 For the full list of supported configuration values, refer to the [values.yaml file](https://github.com/NeptuneHub/AudioMuse-AI-helm/blob/main/values.yaml).
 
@@ -281,7 +300,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
 | `ENABLE_CLUSTERING_EMBEDDINGS`           | Whether to use audio embeddings (True) or score-based features (False) for clustering. | `false`                              |
-| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`.                             | `kmeans`                             |
+| `CLUSTER_ALGORITHM`                      | Default clustering: `kmeans`, `dbscan`, `gmm`, `spectral`.                             | `kmeans`                             |
 | `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `0`                                  |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
@@ -383,7 +402,10 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
 **Important version**
 * **0.1.5-alpha** - Last version with the use of Sqlite and Celery. Only 1 worker admitted.
   * To deploy you can download the source code from here and use the appropriate deployment.yaml example: https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v0.1.5-alpha
+* **0.2.0-alpha** - First version that use PostgreSQL database AND Redis Queue.
 * **v0.3.4-beta** - First version that start to store also embeding in the database. If you pass to this version the analysis will re-scan the entire library
+* **v0.5.0-beta** - Introduce song similarity function with ANNOY. If you pass to this version you need to drop all the table and re-scan the entire library with the analysis;
+* **v0.6.0-beta** - Moved from Essentia to Librosa for audio feature extraction. If you pass to this version you need to drop all the table and re-scan the entire library with the analysis;
 
 ## **Workflow Overview**
 
@@ -395,7 +417,7 @@ This is the main workflow of how this algorithm works. For an easy way to use it
     *   Multiple RQ workers (at least 2 recommended) process tasks in parallel. Main tasks (e.g., full library analysis, entire evolutionary clustering process) often spawn and manage child tasks (e.g., per-album analysis, batches of clustering iterations).
     *   **Analysis Phase:**
         *   Workers fetch metadata and download audio from Jellyfin, processing albums individually.
-        *   Essentia and TensorFlow models analyze tracks for features (tempo, key, energy) and predictions (genres, moods, etc.).
+        *   Librosa and TensorFlow models analyze tracks for features (tempo, key, energy) and predictions (genres, moods, etc.).
         *   Analysis results are saved to PostgreSQL.
     *   **Clustering Phase:**
         *   The option to use embeddings for clustering is currently available in the "Advanced" section of the UI.
@@ -415,24 +437,23 @@ This is the main workflow of how this algorithm works. For an easy way to use it
 
 The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously extracts a rich set of features from each track. This process is foundational for the subsequent clustering and playlist generation.
 1.  **Audio Loading & Preprocessing:**
-    *   Tracks are first downloaded from your Jellyfin library to a temporary local directory. Essentia's `MonoLoader` is then employed to load the audio.
-    *   A crucial preprocessing step involves resampling the audio to a consistent **16000 Hz** sample rate with a `resampleQuality` of 4. This standardization is vital because the subsequent TensorFlow models are trained on and expect audio at this specific sample rate, ensuring accurate feature extraction.
+    *   Tracks are first downloaded from your Jellyfin library to a temporary local directory. Librosa is used then to load the audio.
+    
+2.  **Core Feature Extraction (Librosa):**
+    *   **Tempo:** The `Tempo` algorithm analyzes the rhythmic patterns in the audio to estimate the track's tempo, expressed in Beats Per Minute (BPM).
+    *   **Key & Scale:** The `Key` algorithm identifies the predominant musical key (e.g., C, G#, Bb) and scale (major or minor) of the track. This provides insights into its harmonic structure.
+    *   **Energy:** The `Energy` function calculates the raw total energy of the audio signal. However, to make this feature comparable across tracks of varying lengths and overall loudness, the system computes and stores the **average energy per sample** (total energy divided by the number of samples). This normalized energy value offers a more stable representation of the track's perceived loudness or intensity.
 
-2.  **Core Feature Extraction (Essentia):**
-    *   **Tempo:** The `RhythmExtractor2013` algorithm analyzes the rhythmic patterns in the audio to estimate the track's tempo, expressed in Beats Per Minute (BPM).
-    *   **Key & Scale:** The `KeyExtractor` algorithm identifies the predominant musical key (e.g., C, G#, Bb) and scale (major or minor) of the track. This provides insights into its harmonic structure.
-    *   **Energy:** Essentia's `Energy` function calculates the raw total energy of the audio signal. However, to make this feature comparable across tracks of varying lengths and overall loudness, the system computes and stores the **average energy per sample** (total energy divided by the number of samples). This normalized energy value offers a more stable representation of the track's perceived loudness or intensity.
-
-3.  **Embedding Generation (TensorFlow & Essentia):**
+3.  **Embedding Generation (TensorFlow & Librosa):**
     *   **MusiCNN Embeddings:** The cornerstone of the audio representation is a 200-dimensional embedding vector. This vector is generated using `TensorflowPredictMusiCNN` with the pre-trained model `msd-musicnn-1.pb` (specifically, the output from the `model/dense/BiasAdd` layer). MusiCNN is a Convolutional Neural Network (CNN) architecture that has been extensively trained on large music datasets (like the Million Song Dataset) for tasks such as music tagging. The resulting embedding is a dense, numerical summary that captures high-level semantic information and complex sonic characteristics of the track, going beyond simple acoustic features.
     *   **Important Note:** These embeddings are **always generated and saved** during the analysis phase for every track processed. This ensures they are available if you later choose to use them for clustering.
 
-4.  **Prediction Models (TensorFlow & Essentia):**
-    The rich MusiCNN embeddings serve as the input to several specialized `TensorflowPredict2D` models, each designed to predict specific characteristics of the music:
+4.  **Prediction Models (TensorFlow & Librosa):**
+    The rich MusiCNN embeddings serve as the input to several specialized models, each designed to predict specific characteristics of the music:
     *   **Primary Tag/Genre Prediction:**
         *   Model: `msd-msd-musicnn-1.pb`
         *   Output: This model produces a vector of probability scores. Each score corresponds to a predefined tag or genre from a list (defined by `MOOD_LABELS` in `config.py`, including labels like 'rock', 'pop', 'electronic', 'jazz', 'chillout', '80s', 'instrumental', etc.). These scores indicate the likelihood of each tag/genre being applicable to the track.
-    *   **Other Feature Predictions:** The `predict_other_models` function leverages a suite of distinct `TensorflowPredict2D` models, each targeting a specific musical attribute. These models also take the MusiCNN embedding as input and typically use a `model/Softmax` output layer:
+    *   **Other Feature Predictions:** The `predict_other_models` function leverages a suite of distinct models, each targeting a specific musical attribute. These models also take the MusiCNN embedding as input and typically use a `model/Softmax` output layer:
         *   `danceable`: Predicted using `danceability-msd-musicnn-1.pb`.
         *   `danceable`: Predicted using `danceability-msd-musicnn-1.pb`.
         *   `aggressive`: Predicted using `mood_aggressive-msd-musicnn-1.pb`.
@@ -450,7 +471,7 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
     *   **Vector Assembly:**
         *   The final feature vector for each track is constructed by concatenating: the normalized tempo, the normalized average energy, the vector of primary tag/genre probability scores, and the vector of other predicted feature scores (danceability, aggressive, etc.). This creates a comprehensive numerical profile of the track.
     *   **Standardization:**
-        *   This complete feature vector is then standardized using `sklearn.preprocessing.StandardScaler`. Standardization transforms the data for each feature to have a zero mean and unit variance across the entire dataset. This step is particularly crucial for distance-based clustering algorithms like K-Means. It prevents features with inherently larger numerical ranges from disproportionately influencing the distance calculations, ensuring that all features contribute more equitably to the clustering process. The mean and standard deviation (scale) computed by the `StandardScaler` for each feature are saved. These saved values are essential later for inverse transforming cluster centroids back to an interpretable scale, which aids in understanding the characteristics of each generated cluster.
+        *   This complete feature vector is then standardized using `sklearn.preprocessing.StandardScaler`. Standardization transforms the data for each feature to have a zero mean and unit variance across the entire dataset. This step is particularly crucial for distance-based clustering algorithms like K-Means. It prevents features with inherently larger numerical ranges from disproportionately influencing the distance calculations, ensuring that all features contribute more equitably to the clustering process. The mean and standard deviation (scale) computed by the `StandardScaler` for each feature are saved. These saved values are used later for inverse transforming cluster centroids back to an interpretable scale, which aids in understanding the characteristics of each generated cluster.
 
 6.  **Option to Use Embeddings Directly for Clustering:**
     *   As an alternative to the `score_vector`, AudioMuse-AI now offers the option to use the raw MusiCNN embeddings (200-dimensional vectors) directly as input for the clustering algorithms. This is controlled by the `ENABLE_CLUSTERING_EMBEDDINGS` parameter (configurable via the UI).
@@ -460,6 +481,9 @@ The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously ext
 
 **Persistence:** PostgreSQL database is used for persisting analyzed track metadata, generated playlist structures, and task status.
 
+The use of Librosa for songs preprocessing was introduced in order to improve the compatibility with other platform (eg. `ARM64`). It is configured in order to load the same MusicNN models previously used.
+Librosa loads audio using `librosa.load(file_path, sr=16000, mono=True)`, ensuring the sample rate is exactly `16,000 Hz` and the audio is converted to mono—both strict requirements of the model. It then computes a Mel spectrogram using `librosa.feature.melspectrogram` with parameters precisely matching those used during model training: `n_fft=512, hop_length=256, n_mels=96, window='hann', center=False, power=2.0, norm='slaney', htk=False`. The spectrogram is scaled using `np.log10(1 + 10000 * mel_spec)`, a transformation that must be replicated exactly. These preprocessing steps are crucial: any deviation in parameters results in incompatible input and incorrect model predictions. Once prepared, the data is passed into a frozen TensorFlow model graph using v1 compatibility mode. TensorFlow maps defined input/output tensor names and executes inference with session.run(), first generating embeddings for each patch of the spectrogram, and then passing these to various classifier heads (e.g., mood, genre). The entire pipeline depends on strict adherence to the original preprocessing parameters—without this, the model will fail to produce meaningful results.
+
 ## **Clustering Algorithm Deep Dive**
 
 AudioMuse-AI offers three main clustering algorithms (K-Means, DBSCAN, GMM). A key feature is the ability to choose the input data for these algorithms:
@@ -467,25 +491,37 @@ AudioMuse-AI offers three main clustering algorithms (K-Means, DBSCAN, GMM). A k
 *   **Direct Audio Embeddings:** Using the 200-dimensional MusiCNN embeddings generated during analysis. This can provide a more nuanced clustering based on deeper audio characteristics. This option is controlled by the `ENABLE_CLUSTERING_EMBEDDINGS` parameter in the UI's "Advanced" section and configuration. GMM may perform particularly well with embeddings. When embeddings are used with K-Means, MiniBatchKMeans is employed to handle the larger data size more efficiently.
 
 Regardless of the input data chosen, the selected clustering algorithm is executed multiple times (default 5000) following an Evolutionary Monte Carlo approach. This allows the system to test multiple configurations of parameters and find the best ones.
+
+When chose clustering algorithm consider their complexity (speed, scalability, etc) expecially if you have big song dataset:
+* So K-Means -> GMM -> DBSCAN -> Spectral (from faster to slower)
+
+About quality it really depends from how your song are distributed. K-Means because is faster is always a good choice. GMM give good result in some test with embbeding. Spectral give also good result with embbeding but is very slow.
+
 Here's an explanation of the pros and cons of the different algorithms:
 
 ### **1\. K-Means**
 
 * **Best For:** Speed, simplicity, when clusters are roughly spherical and of similar size.  
 * **Pros:** Very fast (especially MiniBatchKMeans for large datasets/embeddings), scalable, clear "average" cluster profiles.  
-* **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers.
+* **Cons:** Requires knowing cluster count (K), struggles with irregular shapes, sensitive to outliers, and can be slow on large datasets (complexity is O(n*k*d*i), though MiniBatchKMeans helps).
 
 ### **2\. DBSCAN**
 
 * **Best For:** Discovering clusters of arbitrary shapes, handling outliers well, when the number of clusters is unknown.  
 * **Pros:** No need to set K, finds varied shapes, robust to noise.  
-* **Cons:** Sensitive to eps and min\_samples parameters, can struggle with varying cluster densities, no direct "centroids."
+* **Cons:** Sensitive to eps and min_samples parameters, can struggle with varying cluster densities, no direct "centroids," and can be slow on large datasets (complexity is O(n log n) to O(n²)).
 
 ### **3\. GMM (Gaussian Mixture Models)**
 
 * **Best For:** Modeling more complex, elliptical cluster shapes and when a probabilistic assignment of tracks to clusters is beneficial.  
 * **Pros:** Flexible cluster shapes, "soft" assignments, model-based insights.  
-* **Cons:** Requires setting number of components, computationally intensive (can be slow), sensitive to initialization.
+* **Cons:** Requires setting number of components, computationally intensive (can be slow, with complexity of O(n*k*d²) per iteration), sensitive to initialization.
+
+### **4. Spectral Clustering**
+
+* **Best For:** Finding clusters with complex, non-convex shapes (e.g., intertwined genres) when the number of clusters is known beforehand.
+* **Pros:** Very effective for irregular cluster geometries where distance-based algorithms like K-Means fail. It does not assume clusters are spherical.
+* **Cons:** Computationally very expensive (often O(n^3) due to matrix operations), which makes it impractical for large music libraries. It also requires you to specify the number of clusters, similar to K-Means.
 
 **Recommendation:** Start with **K-Means** (which will use MiniBatchKMeans by default if embeddings are enabled) due to its speed in the evolutionary search. MiniBatchKMeans is particularly helpful for larger libraries or when using embeddings. Experiment with **GMM** for more nuanced results, especially when using direct audio embeddings. Use **DBSCAN** if you suspect many outliers or highly irregular cluster shapes. Using a high number of runs (default 5000) helps the integrated evolutionary algorithm to find a good solution.
 
@@ -503,13 +539,13 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
 
 2.  **Data Perturbation:** For subsequent runs after the first, the sampled subset isn't entirely random. A percentage of songs (`SAMPLING_PERCENTAGE_CHANGE_PER_RUN`) are randomly swapped out, while the rest are kept from the previous iteration's sample. This controlled perturbation introduces variability while retaining some continuity between runs.
 
-1.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 5000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
+3.  **Multiple Iterations:** The system performs a large number of clustering runs (defined by `CLUSTERING_RUNS`, e.g., 5000 times). In each run, it experiments with different parameters for the selected clustering algorithm (K-Means, DBSCAN, or GMM) and for Principal Component Analysis (PCA) if enabled. These parameters are initially chosen randomly within pre-defined ranges.
 
-3.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
+4.  **Evolutionary Strategy:** As the runs progress, the system "learns" from good solutions:
     *   **Elite Solutions:** The parameter sets from the best-performing runs (the "elites") are remembered.
     *   **Exploitation & Mutation:** For subsequent runs, there's a chance (`EXPLOITATION_PROBABILITY_CONFIG`) that instead of purely random parameters, the system will take an elite solution and "mutate" its parameters slightly. This involves making small, random adjustments (controlled by `MUTATION_INT_ABS_DELTA`, `MUTATION_FLOAT_ABS_DELTA`, etc.) to the elite's parameters, effectively exploring the "neighborhood" of good solutions to potentially find even better ones.
 
-3.  **Comprehensive Scoring:** Each clustering outcome is evaluated using a composite score. This score is a weighted sum of several factors, designed to balance different aspects of playlist quality:
+5.  **Comprehensive Scoring:** Each clustering outcome is evaluated using a composite score. This score is a weighted sum of several factors, designed to balance different aspects of playlist quality:
     *   **Playlist Diversity:** Measures how varied the predominant characteristics (e.g., moods, danceability) are across all generated playlists.
     *   **Playlist Purity:** Assesses how well the songs within each individual playlist align with that playlist's central theme or characteristic.
     *   **Internal Clustering Metrics:** Standard metrics evaluate the geometric quality of the clusters:
@@ -517,9 +553,86 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
         *   **Davies-Bouldin Index:** How well-separated are the clusters relative to their intra-cluster similarity?
         *   **Calinski-Harabasz Index:** Ratio of between-cluster to within-cluster dispersion.
 
-5.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
 
-5.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
+6.  **How Purity and Diversity Scores Are Calculated**
+
+    The **Purity** and **Diversity** scores are key metrics (created for this songs clustering) used by the evolutionary algorithm to evaluate the quality of a set of playlists. These scores help balance **intra-playlist consistency** (Purity) with **inter-playlist variety** (Diversity). They are calculated in a consistent way, whether you use **interpretable score vectors** or **high-dimensional embeddings** for clustering.
+
+    **a. Determining the Playlist’s "Personality"**
+
+    Each playlist (or cluster) is assigned a **representative profile**—its thematic "personality"—based on how it was formed.
+
+    - **If clustering was done using score vectors:**
+        - The algorithm calculates the **centroid** of the cluster in feature vector space.
+        - This centroid is reverse-mapped into interpretable attributes, such as:  
+          `Tempo: 120bpm`, `Energy: 0.8`, `Mood_Rock: 75%`, `Mood_Happy: 60%`, etc.
+
+    - **If clustering was done using embeddings:**
+        - Embedding dimensions are not human-interpretable.
+        - The algorithm computes the **average score vector** across all songs in the cluster (using their original interpretable features).
+        - This average vector becomes the playlist’s interpretable profile.
+
+    In both cases, the result is a readable "personality profile" that defines the core characteristics of the playlist.
+
+    **b. Purity Score – Intra-Playlist Consistency**
+
+    The **Purity score** answers:  
+    _"How well do the songs within a playlist match its main theme?"_
+
+    - From the playlist’s profile, the algorithm extracts:
+        - The **top K mood labels**
+        - The **predominant non-mood feature** (e.g., tempo, energy)
+    - Each song is evaluated for how strongly it reflects these:
+        - `raw_playlist_purity_component` sums the highest score a song has for any of the top moods.
+        - `raw_other_feature_purity_component` sums the score for the playlist’s predominant other feature.
+
+    These raw values are then:
+
+    - Transformed with the natural logarithm (`np.log1p`)
+    - Normalized using:
+        - `LN_MOOD_PURITY_STATS`
+        - `LN_OTHER_FEATURES_PURITY_STATS`
+
+    A higher Purity score means songs in a playlist are tightly aligned to its theme.
+
+    **c. Diversity Score – Inter-Playlist Variety**
+
+    The **Diversity score** answers:  
+    _"How different are the playlists from each other?"_
+
+    - The algorithm looks at the **personality profiles** of all playlists.
+    - It identifies unique, dominant characteristics across playlists (moods, features).
+    - It then calculates:
+        - `raw_mood_diversity_score`: sum of highest scores for each unique predominant mood
+        - `raw_other_features_diversity_score`: same, for other features
+
+    These scores are also:
+
+    - Log-transformed (`np.log1p`)
+    - Normalized using:
+        - `LN_MOOD_DIVERSITY_STATS`
+        - `LN_OTHER_FEATURES_DIVERSITY_STATS`
+
+    > If using embeddings, alternative normalization constants are used, such as:
+    >
+    > - `LN_MOOD_DIVERSITY_EMBEDDING_STATS`
+    > - `LN_OTHER_FEATURES_DIVERSITY_EMBEDDING_STATS`
+
+    A higher Diversity score means playlists differ significantly from one another in theme and sound.
+
+    **d. Final Scoring**
+
+    The two components are combined using weighted coefficients:
+
+    ```python
+    final_score = (SCORE_WEIGHT_PURITY * purity_score) + (SCORE_WEIGHT_DIVERSITY * diversity_score)
+    ```
+
+    By adjusting `SCORE_WEIGHT_PURITY` and `SCORE_WEIGHT_DIVERSITY`, you can control whether the algorithm favors tightly themed playlists or maximally diverse collections.
+
+7.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
+
+8.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
 
 This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
 
@@ -663,15 +776,11 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * [**Flask:**](https://flask.palletsprojects.com/) Provides the lightweight web interface for user interaction and API endpoints.  
 * [**Redis Queue (RQ):**](https://redis.io/glossary/redis-queue/) A simple Python library for queueing jobs and processing them in the background with Redis. It handles the computationally intensive audio analysis and playlist generation, ensuring the web UI remains responsive.
 * [**Supervisord:**](https://supervisord.org/) Supervisor is a client/server system that allows its users to monitor and control a number of processes on UNIX-like operating systems. Paired with Redis Queue is used to properly handling renquequing for High Avaiability purpose.
-* [**Essentia-tensorflow**](https://essentia.upf.edu/) An open-source library for audio analysis, feature extraction, and music information retrieval. It's used here for:  
-  * MonoLoader: Loading and resampling audio files.  
-  * RhythmExtractor2013: Extracting tempo information.
-  * KeyExtractor: Determining the musical key and scale.  
-  * TensorflowPredictMusiCNN & TensorflowPredict2D: Leveraging pre-trained TensorFlow models (like MusiCNN) for generating rich audio embeddings and predicting mood tags.  
-* [**Essentia Models**](https://essentia.upf.edu/models.html) Leverages pre-trained models for feature extraction and prediction. More details and models.
+* [**Essentia-tensorflow**](https://essentia.upf.edu/) An open-source library for audio analysis, feature extraction, and music information retrieval. (used only until version v0.5.0-beta)
+* [**MusicNN Tensorflow Audio Models from Essentia**](https://essentia.upf.edu/models.html) Leverages pre-trained MusicNN models for feature extraction and prediction. More details and models.
     *   **Embedding Model:**
-        *   `msd-musicnn-1.pb`: Used with `TensorflowPredictMusiCNN` for generating rich audio embeddings that capture high-level semantic information and complex sonic characteristics.
-    *   **Classification Models:** Used with `TensorflowPredict2D` for predicting various musical attributes from the generated embeddings:
+        *   `msd-musicnn-1.pb`: Used for generating rich audio embeddings that capture high-level semantic information and complex sonic characteristics.
+    *   **Classification Models:** Used for predicting various musical attributes from the generated embeddings:
         *   `msd-msd-musicnn-1.pb`: For primary tag/genre prediction (e.g., 'rock', 'pop', 'electronic').
         *   `danceability-msd-musicnn-1.pb`: For predicting danceability.
         *   `mood_aggressive-msd-musicnn-1.pb`: For predicting aggressiveness.
@@ -679,6 +788,8 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
         *   `mood_party-msd-musicnn-1.pb`: For predicting party mood.
         *   `mood_relaxed-msd-musicnn-1.pb`: For predicting relaxed mood.
         *   `mood_sad-msd-musicnn-1.pb`: For predicting sadness.
+* [**Librosa**](https://github.com/librosa/librosa) Library for audio analysis, feature extraction, and music information retrieval. (uded from version v0.6.0-beta)
+* [**Tensorflow**](https://www.tensorflow.org/) Platform developed by Google for building, training, and deploying machine learning and deep learning models.
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
@@ -717,7 +828,7 @@ This is a BETA early release, so expect bugs or functions that are still not imp
 **Important:** From v.0.3.1-beta **GIT LARGE FILE** is **not** used anymore. Model was moved as an attachment of the specific release:
 * https://github.com/NeptuneHub/AudioMuse-AI/releases/tag/v1.0.0-model
 
-If you want to clone this repository remember that **GIT LARGE FILE** is used for the essentia-tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
+If you want to clone this repository remember that **GIT LARGE FILE** is used for the MusicnNN Tensorflow models (the .pb file) so you need first to install it on your local machine (supposing a debian based machine)
 
 ```
 sudo apt-get install git-lfs

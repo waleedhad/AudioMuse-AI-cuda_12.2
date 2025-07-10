@@ -10,7 +10,7 @@ from collections import defaultdict
 
 # Sklearn imports for _perform_single_clustering_iteration
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans, DBSCAN, MiniBatchKMeans
+from sklearn.cluster import KMeans, DBSCAN, MiniBatchKMeans, SpectralClustering
 from sklearn.decomposition import PCA
 from sklearn.mixture import GaussianMixture # type: ignore
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score # type: ignore
@@ -30,7 +30,7 @@ from config import (MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
                     TOP_K_MOODS_FOR_PURITY_CALCULATION, LN_MOOD_DIVERSITY_STATS, LN_MOOD_PURITY_STATS,
                     LN_MOOD_DIVERSITY_EMBEDING_STATS, LN_MOOD_PURITY_EMBEDING_STATS, LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS,
                     OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY,
-                    USE_MINIBATCH_KMEANS, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, DB_FETCH_CHUNK_SIZE) # Added DB_FETCH_CHUNK_SIZE
+                    USE_MINIBATCH_KMEANS, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, DB_FETCH_CHUNK_SIZE, SPECTRAL_N_NEIGHBORS) # Added DB_FETCH_CHUNK_SIZE
 
 # Import from app (for get_job_result_safely and potentially others if they evolve)
 from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
@@ -40,6 +40,7 @@ from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_d
 
 # Import from commons for _perform_single_clustering_iteration
 from .commons import score_vector
+from psycopg2.extras import DictCursor
 
 import logging
 
@@ -252,23 +253,41 @@ def _generate_or_mutate_kmeans_initial_centroids(n_clusters_current, data_for_cl
         if pca_compatible and elite_pca_config_original.get("enabled"): pca_compatible = (elite_pca_config_original.get("components") == new_pca_config_current.get("components"))
         if elite_initial_centroids_list and isinstance(elite_initial_centroids_list, list) and pca_compatible and elite_n_clusters == n_clusters_current:
             use_mutated_elite_centroids = True
+
     if use_mutated_elite_centroids:
         mutated_centroids = []
         elite_centroids_arr = np.array(elite_initial_centroids_list)
-        if data_for_clustering_current.shape[0] > 0 and data_for_clustering_current.shape[1] > 0 and elite_centroids_arr.ndim == 2 and elite_centroids_arr.shape[1] == data_for_clustering_current.shape[1]:
+        
+        # Check if data is available for calculating mutation bounds
+        if data_for_clustering_current is not None and data_for_clustering_current.shape[0] > 0 and data_for_clustering_current.shape[1] == elite_centroids_arr.shape[1]:
             data_min, data_max = np.min(data_for_clustering_current, axis=0), np.max(data_for_clustering_current, axis=0)
             coord_mutation_deltas = (data_max - data_min) * mutation_coord_fraction
             for centroid_coords in elite_centroids_arr:
                 mutated_coord = np.clip(centroid_coords + np.random.uniform(-coord_mutation_deltas, coord_mutation_deltas, size=centroid_coords.shape), data_min, data_max)
                 mutated_centroids.append(mutated_coord.tolist())
             return mutated_centroids
-    if data_for_clustering_current.shape[0] == 0 or n_clusters_current == 0: return []
+        # Fallback for cases like MBK with embeddings where data isn't available at this stage
+        # Use a fixed mutation delta since data is expected to be standardized
+        else:
+            logging.info("%s Mutating elite centroids without data bounds (e.g., for MBK).", log_prefix)
+            coord_mutation_delta = mutation_coord_fraction # Use the fraction directly as the delta
+            for centroid_coords in elite_centroids_arr:
+                # Mutate without clipping to data range, as we don't have it.
+                # The values should be reasonably scaled already (standardized).
+                mutated_coord = centroid_coords + np.random.uniform(-coord_mutation_delta, coord_mutation_delta, size=centroid_coords.shape)
+                mutated_centroids.append(mutated_coord.tolist())
+            return mutated_centroids
+
+    # This part is for generating new centroids from scratch (random exploration)
+    if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0 or n_clusters_current == 0: 
+        return []
     num_available_points = data_for_clustering_current.shape[0]
     actual_n_clusters = min(n_clusters_current, num_available_points)
     if actual_n_clusters == 0 and num_available_points > 0: actual_n_clusters = 1
     if actual_n_clusters == 0: return []
     indices = np.random.choice(num_available_points, actual_n_clusters, replace=(actual_n_clusters > num_available_points))
     return data_for_clustering_current[indices].tolist()
+
 
 def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_type_for_logging="child task"):
     """
@@ -314,7 +333,7 @@ def get_job_result_safely(job_id_for_result, parent_task_id_for_logging, task_ty
 
 def _perform_single_clustering_iteration(
     run_idx, item_ids_for_subset, 
-    clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, pca_params_ranges, active_mood_labels, 
+    clustering_method, num_clusters_min_max, dbscan_params_ranges, gmm_params_ranges, spectral_params_ranges, pca_params_ranges, active_mood_labels, 
     max_songs_per_cluster, log_prefix="",
     elite_solutions_params_list=None, exploitation_probability=0.0, mutation_config=None,
     score_weight_diversity_override=None, score_weight_silhouette_override=None, 
@@ -354,7 +373,6 @@ def _perform_single_clustering_iteration(
                 chunk_ids = item_ids_for_subset[i_chunk : i_chunk + DB_FETCH_CHUNK_SIZE]
                 if chunk_ids:
                     if fetch_embeddings_in_initial_load:
-                        # Fetches score AND embedding columns
                         chunk_rows = get_tracks_by_ids(chunk_ids) 
                     else:
                         # Fetches ONLY score columns
@@ -375,27 +393,11 @@ def _perform_single_clustering_iteration(
                 
                 # Populate X_embed_raw_list_for_non_mbk only if embeddings were fetched in the initial load
                 if fetch_embeddings_in_initial_load: # This implies use_embeddings_for_this_iteration and not USE_MINIBATCH_KMEANS
+                    # The 'embedding_vector' key is now guaranteed to exist by our safe function
                     raw_embedding_value = track_row_data.get('embedding_vector')
-                    parsed_list_for_numpy_non_mbk = None
-                    if isinstance(raw_embedding_value, list):
-                        parsed_list_for_numpy_non_mbk = raw_embedding_value
-                    elif isinstance(raw_embedding_value, str):
-                        if raw_embedding_value.strip() and raw_embedding_value.lower() != 'null':
-                            try:
-                                loaded_from_string = json.loads(raw_embedding_value)
-                                if isinstance(loaded_from_string, list):
-                                    parsed_list_for_numpy_non_mbk = loaded_from_string
-                            except (json.JSONDecodeError, TypeError):
-                                logging.warning("%s Iteration %s: Non-MBK - Failed to parse embedding string for %s. Skipping embedding for this track.", log_prefix, run_idx, track_row_data.get('item_id'))
-                    
-                    if parsed_list_for_numpy_non_mbk is not None:
-                        try:
-                            # Embedding is expected to be 1D from the DB now
-                            emb_vec = np.array(parsed_list_for_numpy_non_mbk) 
-                            if isinstance(emb_vec, np.ndarray) and emb_vec.ndim == 1 and np.issubdtype(emb_vec.dtype, np.number) and emb_vec.size > 0:
-                                X_embed_raw_list_for_non_mbk.append(emb_vec)
-                        except Exception as e_np_non_mbk: # Catch numpy conversion errors
-                            logging.warning("%s Iteration %s: Non-MBK - NumPy error processing embedding for %s. Skipping embedding for this track.", log_prefix, run_idx, track_row_data.get('item_id'))
+                    if raw_embedding_value is not None:
+                        X_embed_raw_list_for_non_mbk.append(raw_embedding_value)
+
             except (json.JSONDecodeError, TypeError) as e: # Error from score_vector
                 logging.warning("%s Iteration %s: Skipping track %s in initial processing due to data parsing error: %s", log_prefix, run_idx, track_row_data.get('item_id', 'Unknown ID'), e)
                 continue
@@ -422,22 +424,8 @@ def _perform_single_clustering_iteration(
 
                 if fetch_embeddings_in_initial_load:
                     raw_embedding_value_align = track_data_align.get('embedding_vector')
-                    parsed_list_align = None
-                    if isinstance(raw_embedding_value_align, list):
-                        parsed_list_align = raw_embedding_value_align
-                    elif isinstance(raw_embedding_value_align, str):
-                        if raw_embedding_value_align.strip() and raw_embedding_value_align.lower() != 'null':
-                            try: 
-                                loaded_str_align = json.loads(raw_embedding_value_align)
-                                if isinstance(loaded_str_align, list): parsed_list_align = loaded_str_align
-                            except: pass # Ignore parsing errors here, will lead to mismatch if critical
-                    if parsed_list_align is not None:
-                        try:
-                            # Embedding is expected to be 1D
-                            emb_vec_align = np.array(parsed_list_align) 
-                            if isinstance(emb_vec_align, np.ndarray) and emb_vec_align.ndim == 1 and np.issubdtype(emb_vec_align.dtype, np.number) and emb_vec_align.size > 0:
-                                temp_aligned_X_embed_raw_list_for_non_mbk.append(emb_vec_align)
-                        except Exception: pass # Ignore numpy errors here during alignment
+                    if raw_embedding_value_align is not None:
+                        temp_aligned_X_embed_raw_list_for_non_mbk.append(raw_embedding_value_align)
             except:
                 pass 
         
@@ -474,6 +462,7 @@ def _perform_single_clustering_iteration(
         data_for_clustering_current = X_to_cluster_standardized 
         
         data_for_param_gen_shape_ref = X_to_cluster_standardized if X_to_cluster_standardized is not None else X_feat_orig
+        
         pca_model_for_this_iteration = None
         method_params_config = {}
         pca_config = {} 
@@ -491,10 +480,7 @@ def _perform_single_clustering_iteration(
             if elite_method_config_original and elite_pca_config_original and scaler_compatible and \
                elite_method_config_original.get("method") == clustering_method:
                 try:
-                    pca_input_data_for_mutation = data_for_clustering_current if data_for_clustering_current is not None else data_for_param_gen_shape_ref
-                    if pca_input_data_for_mutation is None or pca_input_data_for_mutation.shape[0] == 0:
-                        if not (use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS):
-                           raise ValueError("PCA input data for mutation is empty and not MiniBatchKMeans path.")
+                    pca_input_data_for_mutation = data_for_clustering_current if data_for_clustering_current is not None else None
                     
                     data_after_pca_mutation = pca_input_data_for_mutation
                     temp_pca_config = dict(elite_pca_config_original)
@@ -513,9 +499,7 @@ def _perform_single_clustering_iteration(
                             temp_pca_config["components"] = pca_model_for_this_iteration.n_components_
                     
                     temp_method_params_config = None
-                    max_clusters_or_components = data_after_pca_mutation.shape[0] if data_after_pca_mutation is not None else 0
-                    if max_clusters_or_components == 0 and not (use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS and clustering_method == "kmeans"):
-                        raise ValueError("No data points available after PCA (mutation path) to determine cluster parameters.")
+                    max_clusters_or_components = data_after_pca_mutation.shape[0] if data_after_pca_mutation is not None else len(item_ids_for_subset)
 
                     if clustering_method == "kmeans":
                         elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", num_clusters_min_max[0])
@@ -533,10 +517,19 @@ def _perform_single_clustering_iteration(
                         upper_bound_gmm_comps = min(gmm_params_ranges["n_components_max"], max_clusters_or_components) if max_clusters_or_components > 0 else gmm_params_ranges["n_components_max"]
                         mutated_n_components = _mutate_param(elite_n_components, gmm_params_ranges["n_components_min"], upper_bound_gmm_comps, mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA))
                         temp_method_params_config = {"method": "gmm", "params": {"n_components": max(1, mutated_n_components)}}
+                    elif clustering_method == "spectral":
+                        elite_n_clusters = elite_method_config_original.get("params", {}).get("n_clusters", spectral_params_ranges["n_clusters_min"])
+                        upper_bound_n_clusters = min(spectral_params_ranges["n_clusters_max"], max_clusters_or_components) if max_clusters_or_components > 0 else spectral_params_ranges["n_clusters_max"]
+                        mutated_n_clusters = _mutate_param(elite_n_clusters, max(1, spectral_params_ranges["n_clusters_min"]), upper_bound_n_clusters, mutation_config.get("int_abs_delta", MUTATION_INT_ABS_DELTA))
+                        
+                        elite_random_state = elite_method_config_original.get("params", {}).get("random_state", random.randint(0, 10000))
+                        mutated_random_state = _mutate_param(elite_random_state, 0, 10000, mutation_config.get("int_abs_delta", 100))
+                        
+                        temp_method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, mutated_n_clusters), "random_state": mutated_random_state}}
 
                     if temp_method_params_config and temp_pca_config is not None:
                         if clustering_method == "kmeans": # type: ignore
-                            centroid_gen_data = data_after_pca_mutation if data_after_pca_mutation is not None and data_after_pca_mutation.shape[0] > 0 else np.array([]) # type: ignore
+                            centroid_gen_data = data_after_pca_mutation if data_after_pca_mutation is not None else None
                             kmeans_initial_centroids = _generate_or_mutate_kmeans_initial_centroids(
                                 temp_method_params_config["params"]["n_clusters"], centroid_gen_data,
                                 elite_method_config_original.get("params"), elite_pca_config_original, temp_pca_config,           
@@ -553,7 +546,7 @@ def _perform_single_clustering_iteration(
                     data_for_clustering_current = X_to_cluster_standardized
 
         if not params_generated_by_mutation:
-            pca_input_data_for_random = X_to_cluster_standardized if X_to_cluster_standardized is not None else data_for_param_gen_shape_ref
+            pca_input_data_for_random = X_to_cluster_standardized if X_to_cluster_standardized is not None else None
             data_after_pca_random = pca_input_data_for_random
 
             if pca_input_data_for_random is not None and pca_input_data_for_random.shape[0] > 0:
@@ -572,7 +565,7 @@ def _perform_single_clustering_iteration(
                 pca_config = {"enabled": False, "components": 0}
             
             data_for_clustering_current = data_after_pca_random
-            max_clusters_or_components_rand = data_for_clustering_current.shape[0] if data_for_clustering_current is not None else 0
+            max_clusters_or_components_rand = data_for_clustering_current.shape[0] if data_for_clustering_current is not None else len(item_ids_for_subset)
 
             if max_clusters_or_components_rand == 0 and not (use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS and clustering_method == "kmeans"):
                  logging.warning("%s Iteration %s: No data points for random parameter generation.", log_prefix, run_idx)
@@ -582,7 +575,7 @@ def _perform_single_clustering_iteration(
                 upper_bound_k_rand = min(num_clusters_min_max[1], max_clusters_or_components_rand) if max_clusters_or_components_rand > 0 else num_clusters_min_max[1]
                 k_rand = random.randint(max(1, num_clusters_min_max[0]), upper_bound_k_rand) 
                 k_rand = max(1, k_rand)
-                centroid_gen_data_rand = data_for_clustering_current if data_for_clustering_current is not None and data_for_clustering_current.shape[0] > 0 else np.array([])
+                centroid_gen_data_rand = data_for_clustering_current if data_for_clustering_current is not None and data_for_clustering_current.shape[0] > 0 else None
                 kmeans_initial_centroids_rand = _generate_or_mutate_kmeans_initial_centroids(k_rand, centroid_gen_data_rand, None, None, pca_config, log_prefix=f"{log_prefix} Iteration {run_idx} (random)")
                 method_params_config = {"method": "kmeans", "params": {"n_clusters": k_rand, "initial_centroids": kmeans_initial_centroids_rand}}
             elif clustering_method == "dbscan":
@@ -593,6 +586,11 @@ def _perform_single_clustering_iteration(
                 upper_bound_gmm_rand = min(gmm_params_ranges["n_components_max"], max_clusters_or_components_rand) if max_clusters_or_components_rand > 0 else gmm_params_ranges["n_components_max"]
                 gmm_n_rand = random.randint(gmm_params_ranges["n_components_min"], upper_bound_gmm_rand)
                 method_params_config = {"method": "gmm", "params": {"n_components": max(1, gmm_n_rand)}}
+            elif clustering_method == "spectral":
+                upper_bound_spectral_rand = min(spectral_params_ranges["n_clusters_max"], max_clusters_or_components_rand) if max_clusters_or_components_rand > 0 else spectral_params_ranges["n_clusters_max"]
+                spectral_n_rand = random.randint(spectral_params_ranges["n_clusters_min"], upper_bound_spectral_rand)
+                spectral_random_state_rand = random.randint(0, 10000)
+                method_params_config = {"method": "spectral", "params": {"n_clusters": max(1, spectral_n_rand), "random_state": spectral_random_state_rand}}
             else:
                 logging.error("%s Iteration %s: Unsupported clustering method %s", log_prefix, run_idx, clustering_method)
                 return None # type: ignore
@@ -633,9 +631,13 @@ def _perform_single_clustering_iteration(
         if method_from_config == "kmeans":
             initial_centroids_np = None
             if params_from_config.get("initial_centroids"):
-                initial_centroids_np = np.array(params_from_config["initial_centroids"])
-                if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: initial_centroids_np = None 
-                elif initial_centroids_np.shape[0] != params_from_config["n_clusters"]: params_from_config["n_clusters"] = initial_centroids_np.shape[0]
+                initial_centroids_list = params_from_config.get("initial_centroids")
+                if initial_centroids_list and isinstance(initial_centroids_list, list):
+                    initial_centroids_np = np.array(initial_centroids_list)
+                    if initial_centroids_np.ndim == 1 and initial_centroids_np.shape[0] == 0: 
+                        initial_centroids_np = None 
+                    elif initial_centroids_np.shape[0] != params_from_config["n_clusters"]: 
+                        params_from_config["n_clusters"] = initial_centroids_np.shape[0]
 
             if params_from_config["n_clusters"] == 0:
                 logging.warning("%s Iteration %s: n_clusters is 0 for KMeans.", log_prefix, run_idx) # type: ignore
@@ -644,17 +646,21 @@ def _perform_single_clustering_iteration(
             if use_embeddings_for_this_iteration and USE_MINIBATCH_KMEANS:
                 logging.info("%s Iteration %s: Using MiniBatchKMeans with n_clusters=%s.", log_prefix, run_idx, params_from_config['n_clusters'])
                 
-                # CRITICAL FIX for MiniBatchKMeans with embeddings:
-                # The initial_centroids_np (if provided from params_from_config) would be based on X_feat_orig (e.g., 13 features).
-                # However, the data for partial_fit will be the actual embeddings (e.g., 200 features).
-                # This causes a shape mismatch.
-                # Therefore, for MBK with embeddings, we MUST let it initialize its own centroids from the embedding data.
-                mbk_init_strategy = 'k-means++'
+                # Determine initialization strategy: use evolved centroids if available, otherwise fallback
+                mbk_init_strategy = 'k-means++' # Default fallback
+                n_init_param = 'auto'
                 
+                if initial_centroids_np is not None:
+                    mbk_init_strategy = initial_centroids_np
+                    n_init_param = 1 # Must be 1 when providing explicit init centroids
+                    logging.info("%s Iteration %s: MBK - Using evolved initial centroids.", log_prefix, run_idx)
+                else:
+                    logging.info("%s Iteration %s: MBK - No evolved centroids provided. Using '%s' initialization.", log_prefix, run_idx, mbk_init_strategy)
+
                 mbk = MiniBatchKMeans(
                     n_clusters=params_from_config["n_clusters"], 
-                    init=mbk_init_strategy, # Force 'k-means++' or 'random'
-                    n_init='auto', # n_init is ignored if init is callable, but good to keep for other cases
+                    init=mbk_init_strategy,
+                    n_init=n_init_param,
                     random_state=None, 
                     max_no_improvement=10, 
                     batch_size=MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE
@@ -667,20 +673,16 @@ def _perform_single_clustering_iteration(
                 processed_tracks_count_mbk = 0
                 original_indices_of_embedded_tracks = [] 
 
-                # Buffer for accumulating embeddings for the first partial_fit call
                 temp_buffer_for_first_fit = []
-                # No need to buffer original_indices_for_first_fit, as they are globally collected
-                # in original_indices_of_embedded_tracks for final label mapping.
 
                 for chunk_start_idx in range(0, num_total_tracks_for_iter, MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE):
                     chunk_end_idx = min(chunk_start_idx + MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE, num_total_tracks_for_iter)
                     current_chunk_ids = item_ids_for_subset[chunk_start_idx:chunk_end_idx]
                     if not current_chunk_ids: continue
 
-                    # This log remains the same, indicating the DB fetch for the small chunk
                     logging.info("%s Iteration %s: MBK - Fetching embeddings for chunk %s (IDs: %s...).", log_prefix, run_idx, chunk_start_idx // MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE + 1, current_chunk_ids[:3]) # type: ignore
-                    with app.app_context():
-                        chunk_db_data_rows = get_tracks_by_ids(current_chunk_ids) 
+                    
+                    chunk_db_data_rows = get_tracks_by_ids(current_chunk_ids)
                     
                     chunk_embeddings_list = []
                     chunk_original_indices_map = []
@@ -689,35 +691,14 @@ def _perform_single_clustering_iteration(
                         track_data_for_chunk = next((row for row in chunk_db_data_rows if row['item_id'] == track_id_for_chunk), None)
                         
                         if track_data_for_chunk:
-                            raw_embedding_value = track_data_for_chunk.get('embedding_vector')
-                            parsed_list_for_numpy = None
-
-                            if isinstance(raw_embedding_value, list):
-                                parsed_list_for_numpy = raw_embedding_value
-                            elif isinstance(raw_embedding_value, str):
-                                if raw_embedding_value.strip() and raw_embedding_value.lower() != 'null':
-                                    try:
-                                        loaded_from_string = json.loads(raw_embedding_value)
-                                        if isinstance(loaded_from_string, list):
-                                            parsed_list_for_numpy = loaded_from_string # type: ignore
-                                        else:
-                                            logging.warning("%s Iteration %s: MBK - Embedding string for %s parsed to JSON, but not a list. Type: %s. Skipping.", log_prefix, run_idx, track_id_for_chunk, type(loaded_from_string))
-                                    except (json.JSONDecodeError, TypeError) as e_parse:
-                                        logging.warning("%s Iteration %s: MBK - Failed to parse embedding JSON string for %s. Error: %s. Raw string (first 100 chars): '%s'. Skipping.", log_prefix, run_idx, track_id_for_chunk, e_parse, raw_embedding_value[:100])
-                            elif raw_embedding_value is None:
-                                logging.warning("%s Iteration %s: MBK - Embedding for %s is None. This was unexpected after initial filtering. Skipping.", log_prefix, run_idx, track_id_for_chunk)
+                            # The 'embedding_vector' key is now guaranteed to exist by our safe function
+                            emb_vec = track_data_for_chunk.get('embedding_vector')
                             
-                            if parsed_list_for_numpy is not None:
-                                try:
-                                    # Embedding is expected to be 1D
-                                    emb_vec = np.array(parsed_list_for_numpy) 
-                                    if isinstance(emb_vec, np.ndarray) and emb_vec.ndim == 1 and np.issubdtype(emb_vec.dtype, np.number) and emb_vec.size > 0:
-                                        chunk_embeddings_list.append(emb_vec)
-                                        chunk_original_indices_map.append(original_idx_in_subset_loop)
-                                    else:
-                                        logging.warning("%s Iteration %s: MBK - Parsed embedding for %s is not a valid 1D numerical array or is empty. Type: %s, Shape: %s. Skipping.", log_prefix, run_idx, track_id_for_chunk, type(emb_vec), str(emb_vec.shape) if isinstance(emb_vec, np.ndarray) else 'Not a NumPy array')
-                                except Exception as e_np:
-                                    logging.warning("%s Iteration %s: MBK - NumPy error processing embedding for %s. Error: %s. Parsed list (first 100 chars): '%s'. Skipping.", log_prefix, run_idx, track_id_for_chunk, e_np, str(parsed_list_for_numpy)[:100])
+                            if emb_vec is not None and emb_vec.size > 0:
+                                chunk_embeddings_list.append(emb_vec)
+                                chunk_original_indices_map.append(original_idx_in_subset_loop)
+                            else:
+                                logging.warning("%s Iteration %s: MBK - Embedding for %s is None or empty after processing. Skipping.", log_prefix, run_idx, track_id_for_chunk)
                         else:
                             logging.warning("%s Iteration %s: MBK - Track ID %s from item_ids_for_subset not found in chunk_db_data_rows. This is unexpected.", log_prefix, run_idx, track_id_for_chunk)
                     
@@ -737,15 +718,11 @@ def _perform_single_clustering_iteration(
                     all_standardized_embeddings_for_predict.append(standardized_chunk_embeddings)
                     original_indices_of_embedded_tracks.extend(chunk_original_indices_map)
 
-                    # Logic for handling partial_fit:
-                    # hasattr check is a robust way to see if centroids are initialized.
-                    # MiniBatchKMeans initializes self.cluster_centers_ after the first successful partial_fit or fit.
                     if not hasattr(mbk, "cluster_centers_") or mbk.cluster_centers_ is None:
                         temp_buffer_for_first_fit.append(standardized_chunk_embeddings)
                         current_buffered_samples = sum(arr.shape[0] for arr in temp_buffer_for_first_fit)
                         is_last_db_chunk = (chunk_end_idx >= num_total_tracks_for_iter)
 
-                        # Trigger first partial_fit if buffer is large enough OR it's the last chunk and we have some data
                         if current_buffered_samples >= mbk.n_clusters or \
                            (is_last_db_chunk and current_buffered_samples > 0):
                             
@@ -753,21 +730,19 @@ def _perform_single_clustering_iteration(
                             
                             if combined_first_batch.shape[0] < mbk.n_clusters:
                                 logging.warning("%s Iteration %s: MBK - Total valid embeddings (%s) is less than target n_clusters (%s). Skipping MBK for this iteration as it would fail.", log_prefix, run_idx, combined_first_batch.shape[0], mbk.n_clusters)
-                                all_standardized_embeddings_for_predict = [] # Signal failure to get valid labels
-                                break # Exit the chunk processing loop for MBK
+                                all_standardized_embeddings_for_predict = [] 
+                                break 
                             
                             logging.info("%s Iteration %s: MBK - Initializing centroids with first partial_fit using %s accumulated samples.", log_prefix, run_idx, combined_first_batch.shape[0])
-                            mbk.partial_fit(combined_first_batch) # This initializes cluster_centers_
-                            temp_buffer_for_first_fit = [] # Clear the buffer
+                            mbk.partial_fit(combined_first_batch)
+                            temp_buffer_for_first_fit = []
                     else:
-                        # Centroids are already initialized, proceed with normal partial_fit on the current small chunk
-                        if standardized_chunk_embeddings.shape[0] > 0: # Ensure chunk is not empty
-                            # print(f"{log_prefix} Iteration {run_idx}: MBK - Subsequent partial_fit with {standardized_chunk_embeddings.shape[0]} samples.")
+                        if standardized_chunk_embeddings.shape[0] > 0:
                             mbk.partial_fit(standardized_chunk_embeddings)
 
                     processed_tracks_count_mbk += len(current_chunk_ids)
-                    # Reduced verbosity for this line, as the fit calls are now more descriptive
-                    if (chunk_start_idx // MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE + 1) % 10 == 0 or is_last_db_chunk : # Log every 10 chunks or on last # nosec
+                    is_last_chunk = (chunk_end_idx >= num_total_tracks_for_iter)
+                    if (chunk_start_idx // MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE + 1) % 10 == 0 or is_last_chunk : # Log every 10 chunks or on last # nosec
                         logging.info("%s Iteration %s: MBK - Processed DB chunk %s. Total tracks attempted: %s/%s.", log_prefix, run_idx, chunk_start_idx // MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE + 1, processed_tracks_count_mbk, num_total_tracks_for_iter)
 
                 if not all_standardized_embeddings_for_predict:
@@ -840,16 +815,71 @@ def _perform_single_clustering_iteration(
                     cluster_centers_map[cluster_id_val] = center
 
         elif method_from_config == "gmm":
-            if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0: # nosec # type: ignore
+            if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0:
                 logging.warning("%s Iteration %s: Data for GMM is empty. Cannot fit.", log_prefix, run_idx)
                 return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
-            gmm = GaussianMixture(n_components=params_from_config["n_components"], covariance_type=GMM_COVARIANCE_TYPE, random_state=None, max_iter=1000)
-            gmm.fit(data_for_clustering_current)
-            labels = gmm.predict(data_for_clustering_current)
-            cluster_centers_map = {i: gmm.means_[i] for i in range(params_from_config["n_components"])}
-            if data_for_clustering_current.shape[0] > 0 and labels.max() < gmm.means_.shape[0] and len(labels) == data_for_clustering_current.shape[0]:
-                centers_for_points = gmm.means_[labels] 
-                raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
+            
+            if params_from_config["n_components"] > data_for_clustering_current.shape[0]:
+                logging.warning(
+                    f"{log_prefix} Iteration {run_idx}: n_components ({params_from_config['n_components']}) for GMM is greater than n_samples ({data_for_clustering_current.shape[0]}). "
+                    f"Skipping this iteration as it would fail."
+                )
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            try:
+                gmm = GaussianMixture(
+                    n_components=params_from_config["n_components"], 
+                    covariance_type=GMM_COVARIANCE_TYPE, 
+                    random_state=None, 
+                    max_iter=1000,
+                    reg_covar=1e-4 # Add regularization to prevent ill-defined covariance
+                )
+                gmm.fit(data_for_clustering_current)
+                labels = gmm.predict(data_for_clustering_current)
+                cluster_centers_map = {i: gmm.means_[i] for i in range(params_from_config["n_components"])}
+                if data_for_clustering_current.shape[0] > 0 and labels.max() < gmm.means_.shape[0] and len(labels) == data_for_clustering_current.shape[0]:
+                    centers_for_points = gmm.means_[labels] 
+                    raw_distances = np.linalg.norm(data_for_clustering_current - centers_for_points, axis=1)
+            except ValueError as e:
+                logging.warning(f"{log_prefix} Iteration {run_idx} failed during GMM fitting: {e}. This can happen with ill-defined covariance. Skipping this iteration.")
+                labels = None # Mark this iteration as failed so it gets a score of -1.0
+
+        elif method_from_config == "spectral":
+            if data_for_clustering_current is None or data_for_clustering_current.shape[0] == 0:
+                logging.warning("%s Iteration %s: Data for SpectralClustering is empty. Cannot fit.", log_prefix, run_idx)
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+            
+            n_samples = data_for_clustering_current.shape[0]
+            n_clusters_param = params_from_config["n_clusters"]
+            if n_clusters_param >= n_samples:
+                logging.warning("%s Iteration %s: n_clusters (%s) for SpectralClustering is >= n_samples (%s). It will fail. Skipping iteration.", log_prefix, run_idx, n_clusters_param, n_samples)
+                return {"diversity_score": -1.0, "named_playlists": {}, "playlist_centroids": {}, "pca_model_details": None, "scaler_details": scaler_details_for_run, "parameters": {"clustering_method_config": method_params_config, "pca_config": pca_config, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx}}
+
+            random_state_param = params_from_config.get("random_state", None)
+            
+            logging.info("%s Iteration %s: Starting SpectralClustering.fit_predict on %s samples. This may take a very long time.", log_prefix, run_idx, n_samples)
+            spectral = SpectralClustering(
+                n_clusters=n_clusters_param,
+                assign_labels='kmeans',
+                affinity='nearest_neighbors',
+                n_neighbors=SPECTRAL_N_NEIGHBORS,
+                random_state=random_state_param,
+                verbose=True
+            )
+            labels = spectral.fit_predict(data_for_clustering_current)
+            logging.info("%s Iteration %s: SpectralClustering.fit_predict completed.", log_prefix, run_idx)
+
+            raw_distances = np.full(data_for_clustering_current.shape[0], np.inf)
+            for cluster_id_val in set(labels):
+                if cluster_id_val == -1: continue
+                indices = [i for i, lbl in enumerate(labels) if lbl == cluster_id_val]
+                if not indices: continue
+                cluster_points = data_for_clustering_current[indices]
+                if len(cluster_points) > 0:
+                    center = cluster_points.mean(axis=0)
+                    for i_idx in indices:
+                        raw_distances[i_idx] = np.linalg.norm(data_for_clustering_current[i_idx] - center)
+                    cluster_centers_map[cluster_id_val] = center
 
         silhouette_metric_value = 0.0; davies_bouldin_metric_value = 0.0; calinski_harabasz_metric_value = 0.0
         s_score_raw_val_for_log = 0.0; db_score_raw_val_for_log = 0.0; ch_score_raw_val_for_log = 0.0 # nosec
@@ -875,7 +905,6 @@ def _perform_single_clustering_iteration(
                 labels_for_metrics = np.array([])
 
         if num_actual_clusters >= 2 and num_actual_clusters < num_samples_for_metrics and labels_for_metrics.size > 0 and len(np.unique(labels_for_metrics)) >= 2:
-            # Ensure labels_for_metrics corresponds to data_for_clustering_current
             if len(labels_for_metrics) != data_for_clustering_current.shape[0]:
                 logging.warning("%s Iteration %s: Mismatch between metric labels (%s) and data points (%s) for metrics. Skipping metrics.", log_prefix, run_idx, len(labels_for_metrics), data_for_clustering_current.shape[0]) # type: ignore
             else:
@@ -884,11 +913,11 @@ def _perform_single_clustering_iteration(
                         s_score = silhouette_score(data_for_clustering_current, labels_for_metrics, metric='euclidean')
                         s_score_raw_val_for_log = s_score; silhouette_metric_value = (s_score + 1) / 2.0
                     except ValueError as e_sil: logging.warning("%s Iteration %s: Silhouette error: %s", log_prefix, run_idx, e_sil); silhouette_metric_value = 0.0
-                if current_score_weight_davies_bouldin != 0: # Check if weight is non-zero (positive weight is expected now)
+                if current_score_weight_davies_bouldin != 0: 
                     try:
                         db_score_raw = davies_bouldin_score(data_for_clustering_current, labels_for_metrics)
                         db_score_raw_val_for_log = db_score_raw
-                        davies_bouldin_metric_value = 1.0 / (1.0 + db_score_raw) # Higher is better, maps to (0, 1]
+                        davies_bouldin_metric_value = 1.0 / (1.0 + db_score_raw) 
                     except ValueError as e_db: logging.warning("%s Iteration %s: Davies-Bouldin error: %s", log_prefix, run_idx, e_db); davies_bouldin_metric_value = 0.0 
                 if current_score_weight_calinski_harabasz > 0: 
                     try:
@@ -925,16 +954,16 @@ def _perform_single_clustering_iteration(
                 item_id_val, title_val, author_val = t_item_info_final["row"]["item_id"], t_item_info_final["row"]["title"], t_item_info_final["row"]["author"]
                 filtered_clusters[cid].append((item_id_val, title_val, author_val))
 
-        current_named_playlists = {} # Changed from defaultdict(list)
-        current_playlist_centroids = {} # Changed from regular dict
+        current_named_playlists = {} 
+        current_playlist_centroids = {} 
         unique_predominant_mood_scores = {}
-        raw_cluster_base_name_generation_count = defaultdict(int) # To track base name generations
+        raw_cluster_base_name_generation_count = defaultdict(int) 
         unique_predominant_other_feature_scores = {} 
         item_id_to_song_index_map = {track_data['item_id']: i for i, track_data in enumerate(valid_tracks_for_processing)}
 
         for label_val, songs_list in filtered_clusters.items():
             if songs_list: 
-                base_name = ""; top_scores = {} # Initialize base_name
+                base_name = ""; top_scores = {} 
                 if use_embeddings_for_this_iteration:
                     song_feat_indices_in_cluster = [item_id_to_song_index_map[item_id_in_song] for item_id_in_song, _, _ in songs_list if item_id_in_song in item_id_to_song_index_map]
                     if not song_feat_indices_in_cluster: continue
@@ -964,33 +993,26 @@ def _perform_single_clustering_iteration(
                 if predominant_other_feature_key_for_diversity_score_calc:
                      unique_predominant_other_feature_scores[predominant_other_feature_key_for_diversity_score_calc] = max(unique_predominant_other_feature_scores.get(predominant_other_feature_key_for_diversity_score_calc, 0.0), highest_predominant_other_feature_score_this_centroid)
                 
-                # Use the base_name as the key. If multiple raw clusters generate the same base_name,
-                # the last one processed in this loop will overwrite previous ones for this iteration.
                 playlist_key = base_name
 
-                current_named_playlists[playlist_key] = songs_list # Assign directly, do not extend
+                current_named_playlists[playlist_key] = songs_list 
                 current_playlist_centroids[playlist_key] = top_scores
 
-        # Log if any base names were generated by multiple raw clusters, noting potential overwrites.
         for name, count in raw_cluster_base_name_generation_count.items():
             if count > 1:
                 logging.info("%s Iteration %s: Playlist base name '%s' was generated by %s raw clusters. The last processed cluster with this name was used.", log_prefix, run_idx, name, count)
 
         raw_mood_diversity_score = sum(unique_predominant_mood_scores.values())
-        # print(f"{log_prefix} Iteration {run_idx}: Raw Mood Diversity Score: {raw_mood_diversity_score}, Unique Moods: {len(unique_predominant_mood_scores)}")
         base_diversity_score = 0.0  
         if len(active_mood_labels) > 0: 
             ln_mood_diversity = np.log1p(raw_mood_diversity_score) # type: ignore
-            # Select mood diversity stats based on whether embeddings are used for clustering
             if use_embeddings_for_this_iteration:
                 diversity_stats_to_use = LN_MOOD_DIVERSITY_EMBEDING_STATS
-                # print(f"{log_prefix} Iteration {run_idx}: Using EMBEDDING mood diversity stats.")
             else:
                 diversity_stats_to_use = LN_MOOD_DIVERSITY_STATS
-                logging.debug("%s Iteration %s: Using REGULAR mood diversity stats.", log_prefix, run_idx)
             config_mean_ln_diversity = diversity_stats_to_use.get("mean"); config_sd_ln_diversity = diversity_stats_to_use.get("sd")
             if config_mean_ln_diversity is None or config_sd_ln_diversity is None: logging.warning("%s Iteration %s: LN_MOOD_DIVERSITY_STATS missing mean/sd.", log_prefix, run_idx)
-            elif abs(config_sd_ln_diversity) < 1e-9: base_diversity_score = 0.0 # Avoid division by zero or very small SD
+            elif abs(config_sd_ln_diversity) < 1e-9: base_diversity_score = 0.0 
             else: base_diversity_score = (ln_mood_diversity - config_mean_ln_diversity) / config_sd_ln_diversity
         
         raw_playlist_purity_component = 0.0; all_individual_playlist_purities = []
@@ -1023,13 +1045,10 @@ def _perform_single_clustering_iteration(
         if all_individual_playlist_purities: raw_playlist_purity_component = sum(all_individual_playlist_purities)
         ln_mood_purity = np.log1p(raw_playlist_purity_component)
         
-        # Select purity stats based on whether embeddings are used for clustering
         if use_embeddings_for_this_iteration:
             purity_stats_to_use = LN_MOOD_PURITY_EMBEDING_STATS
-            # print(f"{log_prefix} Iteration {run_idx}: Using EMBEDDING mood purity stats.")
         else:
             purity_stats_to_use = LN_MOOD_PURITY_STATS # type: ignore
-            logging.debug("%s Iteration %s: Using REGULAR mood purity stats.", log_prefix, run_idx)
         config_mean_ln_purity = purity_stats_to_use.get("mean"); config_sd_ln_purity = purity_stats_to_use.get("sd")
         playlist_purity_component = 0.0
         if config_mean_ln_purity is None or config_sd_ln_purity is None: logging.warning("%s Iteration %s: LN_MOOD_PURITY_STATS missing mean/sd.", log_prefix, run_idx)
@@ -1100,4 +1119,4 @@ def _perform_single_clustering_iteration(
         return result
     except Exception as e_iter:
         logging.error("%s Iteration %s failed: %s", log_prefix, run_idx, e_iter, exc_info=True)
-        return None # type: ignore
+        raise

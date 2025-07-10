@@ -1,4 +1,4 @@
-# /home/guido/Music/AudioMuse-AI/config.py
+#AudioMuse-AI/config.py
 import os
 
 # --- Jellyfin and DB Constants (Read from Environment Variables first) ---
@@ -13,14 +13,14 @@ TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio
 HEADERS = {"X-Emby-Token": JELLYFIN_TOKEN}
 
 # --- General Constants (Read from Environment Variables where applicable) ---
-APP_VERSION = "v0.5.0-beta"
+APP_VERSION = "v0.6.0-beta"
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
-CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, or gmm
+CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, gmm, or spectral
 AI_MODEL_PROVIDER = os.environ.get("AI_MODEL_PROVIDER", "NONE").upper() # Accepted: OLLAMA, GEMINI, NONE
 ENABLE_CLUSTERING_EMBEDDINGS = os.environ.get("ENABLE_CLUSTERING_EMBEDDINGS", "False").lower() == "true"
 
@@ -37,7 +37,7 @@ DBSCAN_MIN_SAMPLES_MAX = int(os.getenv("DBSCAN_MIN_SAMPLES_MAX", "20"))
 NUM_CLUSTERS_MIN = int(os.getenv("NUM_CLUSTERS_MIN", "40"))
 NUM_CLUSTERS_MAX = int(os.getenv("NUM_CLUSTERS_MAX", "100"))
 # New for MiniBatchKMeans
-USE_MINIBATCH_KMEANS = os.environ.get("USE_MINIBATCH_KMEANS", "True").lower() == "true" # Enable MiniBatchKMeans
+USE_MINIBATCH_KMEANS = os.environ.get("USE_MINIBATCH_KMEANS", "False").lower() == "true" # Enable MiniBatchKMeans
 MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE = int(os.getenv("MINIBATCH_KMEANS_PROCESSING_BATCH_SIZE", "1000")) # Internal batch size for MiniBatchKMeans partial_fit
 
 # --- GMM Only Constants (Ranges for Evolutionary Approach) ---
@@ -46,13 +46,18 @@ GMM_N_COMPONENTS_MIN = int(os.getenv("GMM_N_COMPONENTS_MIN", "40"))
 GMM_N_COMPONENTS_MAX = int(os.getenv("GMM_N_COMPONENTS_MAX", "100"))
 GMM_COVARIANCE_TYPE = os.environ.get("GMM_COVARIANCE_TYPE", "full") # 'full', 'tied', 'diag', 'spherical'
 
+# --- SpectralClustering Only Constants (Ranges for Evolutionary Approach) ---
+SPECTRAL_N_CLUSTERS_MIN = int(os.getenv("SPECTRAL_N_CLUSTERS_MIN", "40"))
+SPECTRAL_N_CLUSTERS_MAX = int(os.getenv("SPECTRAL_N_CLUSTERS_MAX", "100"))
+SPECTRAL_N_NEIGHBORS = int(os.getenv("SPECTRAL_N_NEIGHBORS", "30"))
+
 # --- PCA Constants (Ranges for Evolutionary Approach) ---
 # Default ranges for PCA components
 PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PCA
 PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components for PCA 8 for score vectore, 199 for embeding
 
 # --- Clustering Runs for Diversity (New Constant) ---
-CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "5000")) # Default to 100 runs for evolutionary search
+CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
 MAX_QUEUED_ANALYSIS_JOBS = int(os.environ.get("MAX_QUEUED_ANALYSIS_JOBS", "100")) # Max album analysis jobs to keep in RQ queue
 
 # --- Batching Constants for Clustering Runs ---
@@ -62,6 +67,7 @@ DB_FETCH_CHUNK_SIZE = int(os.environ.get("DB_FETCH_CHUNK_SIZE", "1000")) # Chunk
 
 # --- Batching Constants for Analysis ---
 REBUILD_INDEX_BATCH_SIZE = int(os.environ.get("REBUILD_INDEX_BATCH_SIZE", "10")) # Rebuild Annoy index after this many albums are analyzed.
+AUDIO_LOAD_TIMEOUT = int(os.getenv("AUDIO_LOAD_TIMEOUT", "600")) # Timeout in seconds for loading a single audio file.
 
 # --- Guided Evolutionary Clustering Constants ---
 TOP_N_ELITES = int(os.environ.get("CLUSTERING_TOP_N_ELITES", "10")) # Number of best solutions to keep as elites
