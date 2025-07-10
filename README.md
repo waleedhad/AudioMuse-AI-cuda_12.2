@@ -398,6 +398,10 @@ Our GitHub Actions workflow automatically builds and pushes Docker images. Here'
   * Immutable tags created from **specific Git releases/tags**.  
   * Ensures you're running a precise, versioned build.  
   * **Use for reproducible deployments or locking to a specific version.**
+ 
+Starting from v0.6.0-beta Librosa library is used for reading song in place of Essentia. We will keep the analysis version with essentia adding the suffix **-esstentia** to the tabg for retrocompatibility.
+This **-essentia** version will **not** receive additional implementation or fix on the analysis side BUT it **may** receive the other implementation. This version will be also less tested so avoid it if you don't have any specific reasion to use AudioMuse-AI implementation with essentia.
+
 
 **Important version**
 * **0.1.5-alpha** - Last version with the use of Sqlite and Celery. Only 1 worker admitted.
