@@ -10,6 +10,9 @@ import config  # Import the config module to access server type and settings
 
 logger = logging.getLogger(__name__)
 
+# Define a global timeout for all requests
+REQUESTS_TIMEOUT = 300
+
 # ##############################################################################
 # JELLYFIN IMPLEMENTATION
 # ##############################################################################
@@ -18,10 +21,12 @@ def _jellyfin_get_recent_albums(limit):
     """Fetches a list of the most recently added albums from Jellyfin."""
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending", "Recursive": True}
-    if limit != 0:
+    # If limit is greater than 0, apply it. Otherwise, omit the parameter.
+    # The Jellyfin API will use its default limit if the parameter is omitted.
+    if limit > 0:
         params["Limit"] = limit
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=30)
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         return r.json().get("Items", [])
     except Exception as e:
@@ -33,7 +38,7 @@ def _jellyfin_get_tracks_from_album(album_id):
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"ParentId": album_id, "IncludeItemTypes": "Audio"}
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=30)
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         return r.json().get("Items", [])
     except Exception as e:
@@ -48,7 +53,7 @@ def _jellyfin_download_track(temp_dir, item):
         download_url = f"{config.JELLYFIN_URL}/Items/{track_id}/Download"
         local_filename = os.path.join(temp_dir, f"{track_id}{file_extension}")
 
-        with requests.get(download_url, headers=config.HEADERS, stream=True, timeout=120) as r:
+        with requests.get(download_url, headers=config.HEADERS, stream=True, timeout=REQUESTS_TIMEOUT) as r:
             r.raise_for_status()
             with open(local_filename, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
@@ -64,7 +69,7 @@ def _jellyfin_get_all_albums():
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "MusicAlbum", "Recursive": True}
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=120)
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         return r.json().get("Items", [])
     except Exception as e:
@@ -76,7 +81,7 @@ def _jellyfin_get_all_songs():
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "Audio", "Recursive": True}
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=300)
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         return r.json().get("Items", [])
     except Exception as e:
@@ -88,7 +93,7 @@ def _jellyfin_get_playlist_by_name(playlist_name):
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "Playlist", "Recursive": True, "Name": playlist_name}
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=30)
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         playlists = r.json().get("Items", [])
         return playlists[0] if playlists else None
@@ -101,7 +106,7 @@ def _jellyfin_create_playlist(base_name, item_ids):
     url = f"{config.JELLYFIN_URL}/Playlists"
     body = {"Name": base_name, "Ids": item_ids, "UserId": config.JELLYFIN_USER_ID}
     try:
-        r = requests.post(url, headers=config.HEADERS, json=body, timeout=60)
+        r = requests.post(url, headers=config.HEADERS, json=body, timeout=REQUESTS_TIMEOUT)
         if r.ok:
             logger.info("✅ Created Jellyfin playlist '%s' with %s tracks", base_name, len(item_ids))
     except Exception as e:
@@ -113,7 +118,7 @@ def _jellyfin_create_instant_playlist(playlist_name, item_ids):
     url = f"{config.JELLYFIN_URL}/Playlists"
     body = {"Name": final_playlist_name, "Ids": item_ids, "UserId": config.JELLYFIN_USER_ID}
     try:
-        r = requests.post(url, headers=config.HEADERS, json=body, timeout=60)
+        r = requests.post(url, headers=config.HEADERS, json=body, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         created_playlist = r.json()
         logger.info("✅ Created Jellyfin instant playlist '%s' with ID: %s", final_playlist_name, created_playlist.get('Id'))
@@ -127,7 +132,7 @@ def _jellyfin_get_all_playlists():
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "Playlist", "Recursive": True}
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=60)
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         return r.json().get("Items", [])
     except Exception as e:
@@ -138,7 +143,7 @@ def _jellyfin_delete_playlist(playlist_id):
     """Deletes a playlist on Jellyfin."""
     url = f"{config.JELLYFIN_URL}/Items/{playlist_id}"
     try:
-        r = requests.delete(url, headers=config.HEADERS, timeout=30)
+        r = requests.delete(url, headers=config.HEADERS, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
         logger.info(f"🗑️ Deleted Jellyfin playlist ID: {playlist_id}")
         return True
@@ -187,9 +192,9 @@ def _navidrome_request(endpoint, params=None, method='get', stream=False):
 
     try:
         if method.lower() == 'get':
-            r = requests.get(url, params=all_params, timeout=30, stream=stream)
+            r = requests.get(url, params=all_params, timeout=REQUESTS_TIMEOUT, stream=stream)
         elif method.lower() == 'post':
-            r = requests.post(url, params=all_params, timeout=60)
+            r = requests.post(url, params=all_params, timeout=REQUESTS_TIMEOUT)
         else:
             logger.error(f"Unsupported HTTP method: {method}")
             return None
@@ -237,7 +242,13 @@ def _navidrome_get_recent_albums(limit):
     Fetches a list of the most recently added albums from Navidrome and
     normalizes the keys to match Jellyfin's format for compatibility.
     """
-    params = {"type": "newest", "size": limit if limit != 0 else 500}
+    params = {"type": "newest"}
+    # If limit is greater than 0, apply it. Otherwise, omit the parameter.
+    # The Navidrome API will use its default limit if the 'size' parameter is omitted.
+    # This removes the previous logic that incorrectly defaulted to 500.
+    if limit > 0:
+        params["size"] = limit
+
     response = _navidrome_request("getAlbumList2", params)
     if response and "albumList2" in response and "album" in response["albumList2"]:
         albums = response["albumList2"]["album"]
