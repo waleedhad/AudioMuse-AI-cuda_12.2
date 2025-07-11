@@ -215,7 +215,8 @@ def _navidrome_request(endpoint, params=None, method='get', stream=False):
 def _navidrome_download_track(temp_dir, item):
     """Downloads a single track from Navidrome."""
     try:
-        track_id = item['id']
+        # Use 'id' (original key) for the API call, not the normalized 'Id'
+        track_id = item['id'] 
         file_extension = os.path.splitext(item.get('path', ''))[1] or '.tmp'
         local_filename = os.path.join(temp_dir, f"{track_id}{file_extension}")
         
@@ -232,19 +233,36 @@ def _navidrome_download_track(temp_dir, item):
     return None
 
 def _navidrome_get_recent_albums(limit):
-    """Fetches a list of the most recently added albums from Navidrome."""
+    """
+    Fetches a list of the most recently added albums from Navidrome and
+    normalizes the keys to match Jellyfin's format for compatibility.
+    """
     params = {"type": "newest", "size": limit if limit != 0 else 500}
     response = _navidrome_request("getAlbumList2", params)
     if response and "albumList2" in response and "album" in response["albumList2"]:
-        return response["albumList2"]["album"]
+        albums = response["albumList2"]["album"]
+        # Normalize keys to match Jellyfin's output ('Id', 'Name').
+        # We add the new keys while preserving the original dictionary.
+        return [{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums]
     return []
 
 def _navidrome_get_tracks_from_album(album_id):
-    """Fetches all audio tracks for a given album ID from Navidrome."""
+    """
+    Fetches all audio tracks for a given album ID from Navidrome and
+    normalizes the keys to match Jellyfin's format for compatibility.
+    """
     params = {"id": album_id}
     response = _navidrome_request("getAlbum", params)
     if response and "album" in response and "song" in response["album"]:
-        return response["album"]["song"]
+        songs = response["album"]["song"]
+        # Normalize keys to match Jellyfin ('Id', 'Name', etc.)
+        return [{
+            **s,
+            'Id': s.get('id'),
+            'Name': s.get('title'),
+            'AlbumArtist': s.get('artist'),
+            'Path': s.get('path')
+        } for s in songs]
     return []
 
 def _navidrome_get_all_albums():
@@ -259,7 +277,8 @@ def _navidrome_get_all_albums():
             albums = response["albumList2"]["album"]
             if not albums:
                 break
-            all_albums.extend(albums)
+            # Normalize keys to match Jellyfin's output
+            all_albums.extend([{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums])
             offset += len(albums)
             if len(albums) < limit:
                 break
@@ -281,7 +300,14 @@ def _navidrome_get_all_songs():
             songs = response["searchResult3"]["song"]
             if not songs:
                 break
-            all_songs.extend(songs)
+            # Normalize keys to match Jellyfin's output
+            all_songs.extend([{
+                **s,
+                'Id': s.get('id'),
+                'Name': s.get('title'),
+                'AlbumArtist': s.get('artist'),
+                'Path': s.get('path')
+            } for s in songs])
             offset += len(songs)
             if len(songs) < limit:
                 break
@@ -298,7 +324,9 @@ def _navidrome_get_playlist_by_name(playlist_name):
             if playlist.get("name") == playlist_name:
                 playlist_details_response = _navidrome_request("getPlaylist", {"id": playlist["id"]})
                 if playlist_details_response and "playlist" in playlist_details_response:
-                    return playlist_details_response["playlist"]
+                    # Normalize the playlist object
+                    p = playlist_details_response["playlist"]
+                    return {**p, 'Id': p.get('id'), 'Name': p.get('name')}
     return None
 
 def _navidrome_create_playlist(base_name, item_ids):
@@ -327,7 +355,9 @@ def _navidrome_get_all_playlists():
     """Fetches all playlists from Navidrome."""
     response = _navidrome_request("getPlaylists")
     if response and "playlists" in response and "playlist" in response["playlists"]:
-        return response["playlists"]["playlist"]
+        playlists = response["playlists"]["playlist"]
+        # Normalize keys
+        return [{**p, 'Id': p.get('id'), 'Name': p.get('name')} for p in playlists]
     return []
 
 def _navidrome_delete_playlist(playlist_id):
@@ -362,9 +392,10 @@ def delete_automatic_playlists():
     elif config.MEDIASERVER_TYPE == 'navidrome':
         playlists = _navidrome_get_all_playlists()
         for playlist in playlists:
-            if playlist.get('name', '').endswith('_automatic'):
-                logger.info(f"Found Navidrome playlist to delete: {playlist.get('name')} (ID: {playlist.get('id')})")
-                if _navidrome_delete_playlist(playlist.get('id')):
+            # Use the normalized 'Name' and 'Id' keys
+            if playlist.get('Name', '').endswith('_automatic'):
+                logger.info(f"Found Navidrome playlist to delete: {playlist.get('Name')} (ID: {playlist.get('Id')})")
+                if _navidrome_delete_playlist(playlist.get('id')): # API still needs original 'id'
                     deleted_count += 1
     else:
         logger.error(f"Unsupported media server type for automatic playlist deletion: {config.MEDIASERVER_TYPE}")
