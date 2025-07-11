@@ -170,7 +170,18 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
     *   **Instant Playlist UI:** Access at `http://<EXTERNAL-IP>:8000/chat`  **experimental**
     *   **API Docs (Swagger UI):** Explore the API at `http://<EXTERNAL-IP>:8000/apidocs`
 
-In case you want to deploy AudioMuse-AI on K3S but interacting with Navidrome use **deployment-navidrome.yaml** instead. Take the same attention of change user and password (no api_token used for navidrome)
+In case you want to deploy AudioMuse-AI on K3S but interacting with Navidrome there is just some minimal configuration changes:
+
+*  **Configuration:**
+    *   Navigate to the `deployments/` directory.
+    *   Edit `deployment-yaml.yaml` to configure mandatory parameters:
+        *   **Secrets:**
+            *   `navidrome-credentials`: Update `NAVIDROME_USER` and `NAVIDROME_PASSWORD`.
+            *   `postgres-credentials`: Update `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`.
+            *   `gemini-api-credentials` (if using Gemini for AI Naming): Update `GEMINI_API_KEY`.
+        *   **ConfigMap (`audiomuse-ai-config`):**
+            *   Update `NAVIDROME_URL`.
+            *   Ensure `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL` are correct for your setup (defaults are for in-cluster services).
 
 
 ## **Front-End Quick Start: Analysis and Clustering Parameters**
