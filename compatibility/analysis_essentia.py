@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import requests
 from collections import defaultdict
 import numpy as np
 import json
@@ -27,10 +26,16 @@ from rq.exceptions import NoSuchJobError, InvalidJobOperation
 # NOTE: Top-level 'from app import ...' has been removed to prevent circular dependencies
 # and moved into the functions that require them.
 
+# Import project modules
+from . import mediaserver
+from .commons import score_vector
+from .annoy_manager import build_and_store_annoy_index
+from ai import get_ai_playlist_name, creative_prompt_template
+
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
 from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER_ARTIST,
     GMM_COVARIANCE_TYPE, MOOD_LABELS, EMBEDDING_MODEL_PATH, PREDICTION_MODEL_PATH, ENERGY_MIN, ENERGY_MAX,
-    TEMPO_MIN_BPM, TEMPO_MAX_BPM, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, OTHER_FEATURE_LABELS, REDIS_URL, DATABASE_URL,
+    TEMPO_MIN_BPM, TEMPO_MAX_BPM, OTHER_FEATURE_LABELS, REDIS_URL, DATABASE_URL,
     OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, AI_MODEL_PROVIDER, GEMINI_API_KEY, GEMINI_MODEL_NAME,
     DANCEABILITY_MODEL_PATH, AGGRESSIVE_MODEL_PATH, HAPPY_MODEL_PATH, PARTY_MODEL_PATH, RELAXED_MODEL_PATH, SAD_MODEL_PATH,
     SCORE_WEIGHT_SILHOUETTE, SCORE_WEIGHT_DAVIES_BOULDIN, SCORE_WEIGHT_CALINSKI_HARABASZ, # type: ignore
@@ -43,11 +48,6 @@ from config import (TEMP_DIR, MAX_DISTANCE, MAX_SONGS_PER_CLUSTER, MAX_SONGS_PER
     LN_OTHER_FEATURES_DIVERSITY_STATS, LN_OTHER_FEATURES_PURITY_STATS, # Import new stats for other features
     STRATIFIED_SAMPLING_TARGET_PERCENTILE, # Import new config
     OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY as CONFIG_OTHER_FEATURE_PREDOMINANCE_THRESHOLD_FOR_PURITY) # Import the new config
-
-# Import AI naming function and prompt template
-from ai import get_ai_playlist_name, creative_prompt_template
-from .commons import score_vector
-from .annoy_manager import build_and_store_annoy_index
 
 
 logger = logging.getLogger(__name__)
@@ -65,57 +65,6 @@ def clean_temp(temp_dir):
                 shutil.rmtree(file_path)
         except Exception as e:
             logger.warning("Could not remove %s from %s: %s", file_path, temp_dir, e)
-
-def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
-    """Fetches recent albums from Jellyfin."""
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
-    # Base parameters
-    params = {
-        "IncludeItemTypes": "MusicAlbum",
-        "SortBy": "DateCreated",
-        "SortOrder": "Descending",
-        "Recursive": True,
-    }
-    # If limit is greater than 0, add it to the parameters.
-    # If limit is 0 (or less, though typically 0 means all), omit the Limit parameter to fetch all.
-    if limit > 0:
-        params["Limit"] = limit
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
-        r.raise_for_status()
-        return r.json().get("Items", [])
-    except Exception as e:
-        logger.error("get_recent_albums: %s", e, exc_info=True)
-        return []
-
-def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
-    """Fetches tracks belonging to a specific album from Jellyfin."""
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
-    params = {"ParentId": album_id, "IncludeItemTypes": "Audio"}
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
-        r.raise_for_status()
-        return r.json().get("Items", []) if r.ok else []
-    except Exception as e:
-        logger.error("get_tracks_from_album %s: %s", album_id, e, exc_info=True)
-        return []
-
-def download_track(jellyfin_url, headers, temp_dir, item):
-    """Downloads a track from Jellyfin to a temporary directory."""
-    # Sanitize both track name and artist name to remove invalid characters for filenames
-    sanitized_track_name = item['Name'].replace('/', '_').replace('\\', '_')
-    sanitized_artist_name = item.get('AlbumArtist', 'Unknown').replace('/', '_').replace('\\', '_')
-    filename = f"{sanitized_track_name}-{sanitized_artist_name}.mp3"
-    path = os.path.join(temp_dir, filename)
-    try:
-        r = requests.get(f"{jellyfin_url}/Items/{item['Id']}/Download", headers=headers, timeout=120)
-        r.raise_for_status()
-        with open(path, 'wb') as f:
-            f.write(r.content)
-        return path
-    except Exception as e: # nosec
-            logger.error("download_track %s: %s", item['Name'], e, exc_info=True)
-            return None
 
 def predict_moods(embeddings_input, prediction_model_path, mood_labels_list):
     """
@@ -256,7 +205,7 @@ def analyze_track(file_path, embedding_model_path, prediction_model_path, mood_l
 # --- RQ Task Definitions ---
 
 
-def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, parent_task_id):
+def analyze_album_task(album_id, album_name, top_n_moods, parent_task_id):
     """RQ task to analyze a single album."""
     # --- LOCAL IMPORTS TO PREVENT CIRCULAR DEPENDENCIES ---
     from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
@@ -271,7 +220,6 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
     with app.app_context():
         initial_details = {"album_name": album_name, "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Album analysis task started."]}
         save_task_status(current_task_id, "album_analysis", TASK_STATUS_STARTED, parent_task_id=parent_task_id, sub_type_identifier=album_id, progress=0, details=initial_details)
-        headers = {"X-Emby-Token": jellyfin_token}
         tracks_analyzed_count = 0
         tracks_skipped_count = 0
         current_progress_val = 0
@@ -322,7 +270,7 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
 
         try:
             log_and_update_album_task(f"Fetching tracks for album: {album_name}", 5)
-            tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id)
+            tracks = mediaserver.get_tracks_from_album(album_id)
             if not tracks:
                 log_and_update_album_task(f"No tracks found for album: {album_name}", 100, task_state='SUCCESS')
                 return {"status": "SUCCESS", "message": f"No tracks in album {album_name}", "tracks_analyzed": 0}
@@ -395,7 +343,7 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
                     tracks_skipped_count +=1
                     continue
 
-                path = download_track(jellyfin_url, headers, TEMP_DIR, item)
+                path = mediaserver.download_track(TEMP_DIR, item)
                 log_and_update_album_task(f"Download attempt for '{track_name_full}': {'Success' if path else 'Failed'}", current_progress_val, current_track_name=track_name_full)
                 if not path:
                     log_and_update_album_task(f"Failed to download '{track_name_full}'. Skipping.", current_progress_val, current_track_name=track_name_full)
@@ -493,7 +441,7 @@ def analyze_album_task(album_id, album_name, jellyfin_url, jellyfin_user_id, jel
             )
             raise
 
-def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent_albums, top_n_moods):
+def run_analysis_task(num_recent_albums, top_n_moods):
     """Main RQ task to orchestrate the analysis of multiple albums."""
     # --- LOCAL IMPORTS TO PREVENT CIRCULAR DEPENDENCIES ---
     from app import (app, redis_conn, get_db, save_task_status, get_task_info_from_db,
@@ -523,7 +471,6 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
 
         initial_details = {"message": "Fetching albums...", "log": [f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Main analysis task started."]}
         save_task_status(current_task_id, "main_analysis", TASK_STATUS_STARTED, progress=0, details=initial_details)
-        headers = {"X-Emby-Token": jellyfin_token}
         current_progress = 0
         current_task_logs = initial_details["log"] # Initialize with the first log
 
@@ -564,7 +511,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
         try:
             log_and_update_main_analysis("🚀 Starting main analysis process...", 0)
             clean_temp(TEMP_DIR)
-            all_albums = get_recent_albums(jellyfin_url, jellyfin_user_id, headers, num_recent_albums)
+            all_albums = mediaserver.get_recent_albums(num_recent_albums)
             if not all_albums:
                 log_and_update_main_analysis("⚠️ No new albums to analyze.", 100, {"albums_found": 0}, task_state=TASK_STATUS_SUCCESS)
                 return {"status": "SUCCESS", "message": "No new albums to analyze.", "albums_processed": 0}
@@ -669,7 +616,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                     time.sleep(5)
 
                 # --- Check a single album ---
-                tracks = get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album['Id'])
+                tracks = mediaserver.get_tracks_from_album(album['Id'])
                 if not tracks:
                     albums_skipped_count += 1
                     logger.info(f"Skipping album '{album['Name']}' (no tracks found).")
@@ -689,7 +636,7 @@ def run_analysis_task(jellyfin_url, jellyfin_user_id, jellyfin_token, num_recent
                 sub_task_id = str(uuid.uuid4())
                 job = rq_queue_default.enqueue(
                     'tasks.analysis.analyze_album_task',
-                    args=(album['Id'], album['Name'], jellyfin_url, jellyfin_user_id, jellyfin_token, top_n_moods, current_task_id),
+                    args=(album['Id'], album['Name'], top_n_moods, current_task_id),
                     job_id=sub_task_id,
                     description=f"Analyzing album: {album['Name']}",
                     job_timeout=-1,
