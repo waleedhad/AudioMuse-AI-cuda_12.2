@@ -18,7 +18,6 @@ from config import (
     GEMINI_MODEL_NAME, GEMINI_API_KEY, # Import GEMINI_API_KEY from config
     AI_MODEL_PROVIDER, # Default AI provider
     AI_CHAT_DB_USER_NAME, AI_CHAT_DB_USER_PASSWORD, # Import new config
-    JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN # For creating playlist
 )
 # Import from other project modules
 from tasks.mediaserver import create_instant_playlist
@@ -610,10 +609,10 @@ Original full prompt context (for reference):
                                  "executed_query": final_executed_query_str, # Show last attempted/successful query
                                  "query_results": final_query_results_list}}), 200
 
-@chat_bp.route('/api/createJellyfinPlaylist', methods=['POST'])
+@chat_bp.route('/api/create_playlist', methods=['POST'])
 @swag_from({
     'tags': ['Chat Interaction'],
-    'summary': 'Create a playlist on Jellyfin from a list of song item IDs.',
+    'summary': 'Create a playlist on the media server from a list of song item IDs.',
     'requestBody': {
         'description': 'Playlist name and song item IDs.',
         'required': True,
@@ -625,12 +624,12 @@ Original full prompt context (for reference):
                     'properties': {
                         'playlist_name': {
                             'type': 'string',
-                            'description': 'The desired name for the playlist on Jellyfin.',
+                            'description': 'The desired name for the playlist.',
                             'example': 'My Awesome Mix'
                         },
                         'item_ids': {
                             'type': 'array',
-                            'description': 'A list of Jellyfin item IDs for the songs to include.',
+                            'description': 'A list of item IDs for the songs to include.',
                             'items': {'type': 'string'},
                             'example': ["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"]
                         }
@@ -641,7 +640,7 @@ Original full prompt context (for reference):
     },
     'responses': {
         '200': {
-            'description': 'Playlist successfully created on Jellyfin.',
+            'description': 'Playlist successfully created.',
             'content': {
                 'application/json': {
                     'schema': {
@@ -657,7 +656,7 @@ Original full prompt context (for reference):
             'description': 'Bad Request - Missing parameters or invalid input.'
         },
         '500': {
-            'description': 'Server Error - Failed to create playlist on Jellyfin.',
+            'description': 'Server Error - Failed to create playlist.',
              'content': { # Added content for 400 and 500 for consistency
                 'application/json': {
                     'schema': {'type': 'object', 'properties': {'message': {'type': 'string'}}}
@@ -666,9 +665,9 @@ Original full prompt context (for reference):
         }
     }
 })
-def create_jellyfin_playlist_api():
+def create_media_server_playlist_api():
     """
-    API endpoint to create a playlist on Jellyfin.
+    API endpoint to create a playlist on the configured media server.
     """
     data = request.get_json()
     if not data or 'playlist_name' not in data or 'item_ids' not in data:
@@ -682,20 +681,22 @@ def create_jellyfin_playlist_api():
     if not item_ids:
         return jsonify({"message": "Error: No songs provided to create the playlist."}), 400
 
-    headers = {"X-Emby-Token": JELLYFIN_TOKEN}
     try:
-        created_playlist_info = create_instant_playlist(
-            JELLYFIN_URL, JELLYFIN_USER_ID, headers, user_playlist_name, item_ids
-        )
-        # The created_playlist_info is the full JSON response from Jellyfin
-        return jsonify({"message": f"Successfully created playlist '{created_playlist_info.get('Name')}' on Jellyfin with ID: {created_playlist_info.get('Id')}"}), 200
+        # MODIFIED: Call the simplified create_instant_playlist function
+        created_playlist_info = create_instant_playlist(user_playlist_name, item_ids)
+        
+        if not created_playlist_info:
+            raise Exception("Media server did not return playlist information after creation.")
+            
+        # The created_playlist_info is the full JSON response from the media server
+        return jsonify({"message": f"Successfully created playlist '{created_playlist_info.get('Name')}' on the media server with ID: {created_playlist_info.get('Id')}"}), 200
 
     except Exception as e:
         # Log detailed error on the server
-        error_details_for_server = f"Jellyfin API RequestException: {str(e)}\n"
+        error_details_for_server = f"Media Server API Request Exception: {str(e)}\n"
         if hasattr(e, 'response') and e.response is not None: # type: ignore
-            try: error_details_for_server += f" - Jellyfin Server Response: {e.response.text}\n"
+            try: error_details_for_server += f" - Media Server Response: {e.response.text}\n"
             except: pass # nosec
-        logger.error("Error in create_jellyfin_playlist_api: %s", error_details_for_server, exc_info=True)
+        logger.error("Error in create_media_server_playlist_api: %s", error_details_for_server, exc_info=True)
         # Return generic error to client
         return jsonify({"message": f"An error occurred while creating the playlist: {str(e)}"}), 500

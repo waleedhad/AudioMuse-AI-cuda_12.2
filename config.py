@@ -10,6 +10,12 @@ MEDIASERVER_TYPE = os.environ.get("MEDIASERVER_TYPE", "jellyfin").lower() # Poss
 JELLYFIN_USER_ID = os.environ.get("JELLYFIN_USER_ID", "your_default_user_id")  # Replace with a suitable default or handle missing case
 JELLYFIN_TOKEN = os.environ.get("JELLYFIN_TOKEN", "your_default_token")  # Replace with a suitable default or handle missing case
 
+# --- Navidrome (Subsonic API) Constants ---
+# These are used only if MEDIASERVER_TYPE is "navidrome".
+NAVIDROME_URL = os.environ.get("NAVIDROME_URL", "http://your_navidrome_url:4533")
+NAVIDROME_USER = os.environ.get("NAVIDROME_USER", "your_navidrome_user")
+NAVIDROME_PASSWORD = os.environ.get("NAVIDROME_PASSWORD", "your_navidrome_password") # Use the password directly
+
 # Other variables come from the audiomuse-ai-config ConfigMap
 JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://your_jellyfin_url:8096") # Replace with your default URL
 TEMP_DIR = "/app/temp_audio"  # Always use /app/temp_audio

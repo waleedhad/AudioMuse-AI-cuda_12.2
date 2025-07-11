@@ -38,8 +38,9 @@ from config import (TEMP_DIR, MAX_SONGS_PER_CLUSTER,
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
-# Import from other task modules
-from .mediaserver import create_or_update_playlists_on_jellyfin
+# MODIFIED: Assuming a generic function exists in mediaserver.py for creating/updating playlists.
+# If this function name is different in your version of mediaserver.py, please update it here.
+from .mediaserver import create_playlist, delete_automatic_playlists
 from .clustering_helper import (
     _get_stratified_song_subset,
     get_job_result_safely,
@@ -926,45 +927,59 @@ def run_clustering_task(
                     log_and_update_main_clustering(f"{log_prefix_main_task_ai} AI Naming skipped due to error.", current_progress, print_console=True)
             else:
                 logger.info("%s AI Naming skipped: Provider is '%s'.", log_prefix_main_task_ai, ai_model_provider_for_run)
-            playlists_to_create_on_jellyfin = {}
-            centroids_for_jellyfin_playlists = {}
+            playlists_to_create_on_media_server = {}
+            centroids_for_media_server_playlists = {}
             for name, songs in final_named_playlists.items():
                  final_name_with_suffix = f"{name}_automatic"
-                 playlists_to_create_on_jellyfin[final_name_with_suffix] = songs
+                 playlists_to_create_on_media_server[final_name_with_suffix] = songs
                  if name in final_playlist_centroids:
-                     centroids_for_jellyfin_playlists[final_name_with_suffix] = final_playlist_centroids[name]
+                     centroids_for_media_server_playlists[final_name_with_suffix] = final_playlist_centroids[name]
             current_progress = 96
             log_and_update_main_clustering("Applying '_automatic' suffix to playlist names...", current_progress, print_console=True)
+            
+            log_and_update_main_clustering("Deleting existing '_automatic' playlists...", 97, print_console=True)
+            try:
+                delete_automatic_playlists()
+                log_and_update_main_clustering("Deletion of existing playlists complete.", 98, print_console=True)
+            except Exception as e_delete:
+                logger.error(f"Failed to delete automatic playlists: {e_delete}", exc_info=True)
+                log_and_update_main_clustering(f"Warning: Failed to delete existing playlists: {e_delete}", 98, print_console=True)
+
             current_progress = 98
-            log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", current_progress, print_console=False)
+            log_and_update_main_clustering("Creating/Updating playlists on media server...", current_progress, print_console=False)
             
             # Reformat playlists for the new function signature
-            final_playlists_for_jellyfin = {}
-            for base_name, cluster in playlists_to_create_on_jellyfin.items():
+            final_playlists_for_creation = {}
+            for base_name, cluster in playlists_to_create_on_media_server.items():
                 chunks = []
                 if final_max_songs_per_cluster > 0:
                     chunks = [cluster[i:i+final_max_songs_per_cluster] for i in range(0, len(cluster), final_max_songs_per_cluster)]
                 else:
                     if cluster: chunks = [cluster]
                 for idx, chunk in enumerate(chunks, 1):
-                    playlist_name_on_jellyfin = f"{base_name} ({idx})" if len(chunks) > 1 else base_name
+                    playlist_name_on_server = f"{base_name} ({idx})" if len(chunks) > 1 else base_name
                     item_ids = [item_id for item_id, _, _ in chunk]
                     if item_ids:
-                        final_playlists_for_jellyfin[playlist_name_on_jellyfin] = item_ids
+                        final_playlists_for_creation[playlist_name_on_server] = item_ids
 
-            create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN},
-                                                    final_playlists_for_jellyfin, centroids_for_jellyfin_playlists, active_mood_labels, final_max_songs_per_cluster)
+            # MODIFIED: Loop through playlists and call the simplified create_playlist function
+            for name, ids in final_playlists_for_creation.items():
+                try:
+                    create_playlist(name, ids) # Assuming create_playlist handles both creation and updates
+                except Exception as e_create_playlist:
+                    logger.error(f"Failed to create playlist '{name}' on media server: {e_create_playlist}", exc_info=True)
+
             final_db_summary = {
                 "best_score": best_diversity_score,
                 # "best_params": best_clustering_results.get("parameters"), # Removed
-                "num_playlists_created": len(playlists_to_create_on_jellyfin)
+                "num_playlists_created": len(playlists_to_create_on_media_server)
             }
             current_progress = 100
             log_and_update_main_clustering("Updating playlist database with final suffixed names...", current_progress, print_console=True, task_state=TASK_STATUS_PROGRESS)
-            update_playlist_table(playlists_to_create_on_jellyfin)
+            update_playlist_table(playlists_to_create_on_media_server)
             log_and_update_main_clustering("Playlist database updated.", current_progress, print_console=True, task_state=TASK_STATUS_PROGRESS)
-            log_and_update_main_clustering(f"Playlists generated and updated on Jellyfin! Best diversity score: {best_diversity_score:.2f}.", current_progress, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
-            return {"status": "SUCCESS", "message": f"Playlists generated and updated on Jellyfin! Best run had diversity score of {best_diversity_score:.2f}."}
+            log_and_update_main_clustering(f"Playlists generated and updated on the media server! Best diversity score: {best_diversity_score:.2f}.", current_progress, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
+            return {"status": "SUCCESS", "message": f"Playlists generated and updated on the media server! Best run had diversity score of {best_diversity_score:.2f}."}
         except Exception as e:
             # Log the full traceback on the server for debugging.
             logger.critical("FATAL ERROR: Main clustering task failed: %s", e, exc_info=True)

@@ -2,10 +2,10 @@
 from flask import Blueprint, jsonify, request, render_template
 import logging
 
-# Import the new and existing functions from the manager
+# MODIFIED: Import the renamed and simplified function from the manager.
 from tasks.annoy_manager import (
     find_nearest_neighbors_by_id, 
-    create_jellyfin_playlist_from_ids,
+    create_playlist_from_ids,
     search_tracks_by_title_and_artist,
     get_item_id_by_title_and_artist
 )
@@ -85,7 +85,7 @@ def get_similar_tracks_endpoint():
     parameters:
       - name: item_id
         in: query
-        description: The Jellyfin Item ID of the track. Use this OR title/artist.
+        description: The media server Item ID of the track. Use this OR title/artist.
         schema:
           type: string
       - name: title
@@ -165,9 +165,9 @@ def get_similar_tracks_endpoint():
         return jsonify({"error": "An unexpected error occurred."}), 500
 
 @annoy_bp.route('/api/create_playlist', methods=['POST'])
-def create_jellyfin_playlist():
+def create_media_server_playlist():
     """
-    Creates a new playlist in Jellyfin with the provided tracks.
+    Creates a new playlist in the configured media server with the provided tracks.
     """
     data = request.get_json()
     if not data:
@@ -195,7 +195,8 @@ def create_jellyfin_playlist():
         return jsonify({"error": "No valid track IDs were provided to create the playlist"}), 400
 
     try:
-        new_playlist_id = create_jellyfin_playlist_from_ids(playlist_name, final_track_ids)
+        # MODIFIED: Call the updated, simplified function from annoy_manager
+        new_playlist_id = create_playlist_from_ids(playlist_name, final_track_ids)
         
         logger.info(f"Successfully created playlist '{playlist_name}' with ID {new_playlist_id}.")
         
@@ -205,5 +206,5 @@ def create_jellyfin_playlist():
         }), 201
 
     except Exception as e:
-        logger.error(f"Failed to create Jellyfin playlist '{playlist_name}': {e}", exc_info=True)
-        return jsonify({"error": "An error occurred while creating the playlist on Jellyfin."}), 500
+        logger.error(f"Failed to create media server playlist '{playlist_name}': {e}", exc_info=True)
+        return jsonify({"error": "An error occurred while creating the playlist on the media server."}), 500

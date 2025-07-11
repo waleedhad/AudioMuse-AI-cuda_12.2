@@ -9,8 +9,7 @@ import psycopg2 # type: ignore
 from psycopg2.extras import DictCursor
 
 from config import (
-    EMBEDDING_DIMENSION, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN,
-    INDEX_NAME, NUM_TREES
+    EMBEDDING_DIMENSION, INDEX_NAME, NUM_TREES
 ) # Use a central config for this
 
 # Import from other project modules
@@ -265,28 +264,26 @@ def search_tracks_by_title_and_artist(title_query: str, artist_query: str, limit
     return results
 
 
-def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
+def create_playlist_from_ids(playlist_name: str, track_ids: list):
     """
-    Creates a new playlist in Jellyfin with the provided name and track IDs.
+    Creates a new playlist on the configured media server with the provided name and track IDs.
     """
-    if not all([JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN]):
-        raise ValueError("Jellyfin server URL, User ID, or Token is not configured.")
-
-    headers = {"X-Emby-Token": JELLYFIN_TOKEN}
-
     try:
-        # Call the centralized function in mediaserver.py
-        created_playlist = create_instant_playlist(
-            JELLYFIN_URL, JELLYFIN_USER_ID, headers, playlist_name, track_ids
-        )
-        playlist_id = created_playlist.get('Id')
+        # Call the centralized function in mediaserver.py which handles all server-specific logic
+        created_playlist = create_instant_playlist(playlist_name, track_ids)
+        
+        if not created_playlist:
+            raise Exception("Playlist creation failed. The media server did not return a playlist object.")
+            
 
-        if not playlist_id:
-            raise Exception("Jellyfin API response did not include a playlist ID.")
+            playlist_id = created_playlist.get('Id')
 
-        return playlist_id
+            if not playlist_id:
+                raise Exception("Media server API response did not include a playlist ID.")
+
+            return playlist_id
 
     except Exception as e:
         # The error is already logged by create_instant_playlist.
-        # We just re-raise it to be handled by the API endpoint in app_annoy.py.
+        # We just re-raise it to be handled by the calling function.
         raise e
