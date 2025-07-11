@@ -231,36 +231,40 @@ def _navidrome_get_recent_albums(limit):
     """
     Fetches a list of the most recently added albums from Navidrome.
     If limit is 0, it fetches all albums by paginating.
+    If limit > 0, it fetches up to the specified limit, handling pagination if necessary.
     """
-    if limit == 0:
-        # Paginating to get all albums since limit is 0
-        all_albums = []
-        offset = 0
-        page_size = 500  # Max size per Subsonic API request
-        while True:
-            params = {"type": "newest", "size": page_size, "offset": offset}
-            response = _navidrome_request("getAlbumList2", params)
-            if response and "albumList2" in response and "album" in response["albumList2"]:
-                albums = response["albumList2"]["album"]
-                if not albums:
-                    break  # No more albums to fetch
-                # Normalize and add to the list
-                all_albums.extend([{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums])
-                offset += len(albums)
-                if len(albums) < page_size:
-                    break  # This was the last page
-            else:
-                logger.error("Failed to fetch recent albums page from Navidrome.")
-                break
-        return all_albums
-    else:
-        # Original behavior for a specific limit > 0
-        params = {"type": "newest", "size": limit}
+    all_albums = []
+    offset = 0
+    page_size = 500  # Max size per Subsonic API request
+    fetch_all = (limit == 0)
+
+    while fetch_all or len(all_albums) < limit:
+        # Determine the size for the current page request
+        size_to_fetch = page_size
+        if not fetch_all:
+            size_to_fetch = min(page_size, limit - len(all_albums))
+
+        if size_to_fetch <= 0:
+            break
+
+        params = {"type": "newest", "size": size_to_fetch, "offset": offset}
         response = _navidrome_request("getAlbumList2", params)
+
         if response and "albumList2" in response and "album" in response["albumList2"]:
             albums = response["albumList2"]["album"]
-            return [{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums]
-        return []
+            if not albums:
+                break  # No more albums to fetch
+
+            all_albums.extend([{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums])
+            offset += len(albums)
+
+            if len(albums) < size_to_fetch:
+                break # This was the last page
+        else:
+            logger.error("Failed to fetch recent albums page from Navidrome.")
+            break
+            
+    return all_albums
 
 def _navidrome_get_tracks_from_album(album_id):
     """
