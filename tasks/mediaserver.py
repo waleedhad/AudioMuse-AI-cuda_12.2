@@ -18,12 +18,13 @@ REQUESTS_TIMEOUT = 300
 # ##############################################################################
 
 def _jellyfin_get_recent_albums(limit):
-    """Fetches a list of the most recently added albums from Jellyfin."""
+    """
+    Fetches a list of the most recently added albums from Jellyfin.
+    If limit is 0, the API returns all items.
+    """
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending", "Recursive": True}
-    # If limit is greater than 0, apply it. Otherwise, omit the parameter.
-    # The Jellyfin API will use its default limit if the parameter is omitted.
-    if limit > 0:
+    if limit != 0:
         params["Limit"] = limit
     try:
         r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
@@ -64,17 +65,6 @@ def _jellyfin_download_track(temp_dir, item):
         logger.error(f"Failed to download track {item.get('Name', 'Unknown')}: {e}", exc_info=True)
         return None
 
-def _jellyfin_get_all_albums():
-    """Fetches all music albums from Jellyfin."""
-    url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
-    params = {"IncludeItemTypes": "MusicAlbum", "Recursive": True}
-    try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
-        r.raise_for_status()
-        return r.json().get("Items", [])
-    except Exception as e:
-        logger.error(f"Jellyfin get_all_albums failed: {e}", exc_info=True)
-        return []
 
 def _jellyfin_get_all_songs():
     """Fetches all songs from Jellyfin."""
@@ -239,23 +229,38 @@ def _navidrome_download_track(temp_dir, item):
 
 def _navidrome_get_recent_albums(limit):
     """
-    Fetches a list of the most recently added albums from Navidrome and
-    normalizes the keys to match Jellyfin's format for compatibility.
+    Fetches a list of the most recently added albums from Navidrome.
+    If limit is 0, it fetches all albums by paginating.
     """
-    params = {"type": "newest"}
-    # If limit is greater than 0, apply it. Otherwise, omit the parameter.
-    # The Navidrome API will use its default limit if the 'size' parameter is omitted.
-    # This removes the previous logic that incorrectly defaulted to 500.
-    if limit > 0:
-        params["size"] = limit
-
-    response = _navidrome_request("getAlbumList2", params)
-    if response and "albumList2" in response and "album" in response["albumList2"]:
-        albums = response["albumList2"]["album"]
-        # Normalize keys to match Jellyfin's output ('Id', 'Name').
-        # We add the new keys while preserving the original dictionary.
-        return [{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums]
-    return []
+    if limit == 0:
+        # Paginating to get all albums since limit is 0
+        all_albums = []
+        offset = 0
+        page_size = 500  # Max size per Subsonic API request
+        while True:
+            params = {"type": "newest", "size": page_size, "offset": offset}
+            response = _navidrome_request("getAlbumList2", params)
+            if response and "albumList2" in response and "album" in response["albumList2"]:
+                albums = response["albumList2"]["album"]
+                if not albums:
+                    break  # No more albums to fetch
+                # Normalize and add to the list
+                all_albums.extend([{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums])
+                offset += len(albums)
+                if len(albums) < page_size:
+                    break  # This was the last page
+            else:
+                logger.error("Failed to fetch recent albums page from Navidrome.")
+                break
+        return all_albums
+    else:
+        # Original behavior for a specific limit > 0
+        params = {"type": "newest", "size": limit}
+        response = _navidrome_request("getAlbumList2", params)
+        if response and "albumList2" in response and "album" in response["albumList2"]:
+            albums = response["albumList2"]["album"]
+            return [{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums]
+        return []
 
 def _navidrome_get_tracks_from_album(album_id):
     """
@@ -275,28 +280,6 @@ def _navidrome_get_tracks_from_album(album_id):
             'Path': s.get('path')
         } for s in songs]
     return []
-
-def _navidrome_get_all_albums():
-    """Fetches all albums from Navidrome, paginating through the results."""
-    all_albums = []
-    offset = 0
-    limit = 500
-    while True:
-        params = {"type": "alphabeticalByName", "size": limit, "offset": offset}
-        response = _navidrome_request("getAlbumList2", params)
-        if response and "albumList2" in response and "album" in response["albumList2"]:
-            albums = response["albumList2"]["album"]
-            if not albums:
-                break
-            # Normalize keys to match Jellyfin's output
-            all_albums.extend([{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums])
-            offset += len(albums)
-            if len(albums) < limit:
-                break
-        else:
-            logger.error("Failed to fetch albums page from Navidrome.")
-            break
-    return all_albums
 
 def _navidrome_get_all_songs():
     """Fetches all songs from Navidrome using the search3 endpoint."""
@@ -449,17 +432,7 @@ def download_track(temp_dir, item):
         logger.error(f"Unsupported media server type for download: {config.MEDIASERVER_TYPE}")
         return None
 
-def get_all_albums():
-    """
-    Fetches all music albums from the configured media server.
-    """
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_all_albums()
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_all_albums()
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return []
+
 
 def get_all_songs():
     """
