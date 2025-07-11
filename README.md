@@ -1,5 +1,7 @@
 ![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
 ![Latest Tag](https://img.shields.io/github/v/tag/neptunehub/AudioMuse-AI?label=latest-tag)
+![Media Server Support: Jellyfin, Navidrome](https://img.shields.io/badge/Media%20Server-Jellyfin%20%26%20Navidrome-blue?style=flat-square&logo=server&logoColor=white)
+
 
 
 # **AudioMuse-AI - Let the choice happen, the open-source way** 
