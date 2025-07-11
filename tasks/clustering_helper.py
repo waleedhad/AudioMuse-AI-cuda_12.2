@@ -5,7 +5,6 @@ import random
 import traceback # Added for _perform_single_clustering_iteration
 
 import numpy as np # type: ignore
-import requests
 from collections import defaultdict
 
 # Sklearn imports for _perform_single_clustering_iteration
@@ -192,45 +191,6 @@ def name_cluster(centroid_scaled_vector, pca_model, pca_enabled, mood_labels_lis
     extra_info = {"tempo_normalized": round(tempo_val, 2), "energy_normalized": round(energy_val, 2)}
     comprehensive_centroid_details = {**top_mood_scores, **extra_info, **other_feature_scores_dict}
     return full_name, comprehensive_centroid_details
-
-def delete_old_automatic_playlists(jellyfin_url, jellyfin_user_id, headers):
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
-    params = {"IncludeItemTypes": "Playlist", "Recursive": True}
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
-        r.raise_for_status()
-        for item in r.json().get("Items", []):
-            if "_automatic" in item.get("Name", ""):
-                del_url = f"{jellyfin_url}/Items/{item['Id']}"
-                del_resp = requests.delete(del_url, headers=headers, timeout=10) # nosec
-                if del_resp.ok: logging.info("🗑️ Deleted old playlist: %s", item['Name'])
-    except Exception as e: # nosec
-        logging.error("Failed to clean old playlists: %s", e, exc_info=True)
-
-def create_or_update_playlists_on_jellyfin(jellyfin_url_param, jellyfin_user_id_param, headers_param, playlists, cluster_centers, mood_labels_list, max_songs_per_cluster_param):
-    delete_old_automatic_playlists(jellyfin_url_param, jellyfin_user_id_param, headers_param)
-    for base_name, cluster in playlists.items():
-        chunks = []
-        if max_songs_per_cluster_param > 0:
-            chunks = [cluster[i:i+max_songs_per_cluster_param] for i in range(0, len(cluster), max_songs_per_cluster_param)]
-        else:
-            if cluster: chunks = [cluster]
-        for idx, chunk in enumerate(chunks, 1):
-            playlist_name_on_jellyfin = f"{base_name} ({idx})" if len(chunks) > 1 else base_name
-            item_ids = [item_id for item_id, _, _ in chunk]
-            if not item_ids: continue
-            body = {"Name": playlist_name_on_jellyfin, "Ids": item_ids, "UserId": jellyfin_user_id_param}
-            try:
-                r = requests.post(f"{jellyfin_url_param}/Playlists", headers=headers_param, json=body, timeout=60)
-                if r.ok:
-                    centroid_info = cluster_centers.get(base_name, {})
-                    top_moods = {k: v for k, v in centroid_info.items() if k in mood_labels_list} # Use full MOOD_LABELS for checking
-                    extra_info = {k: v for k, v in centroid_info.items() if k not in mood_labels_list}
-                    centroid_str = ", ".join(f"{k}:{v:.2f}" for k, v in top_moods.items())
-                    extras_str = ", ".join(f"{k}:{v:.2f}" for k, v in extra_info.items()) # type: ignore
-                    logging.info("✅ Created playlist '%s' with %s tracks (Centroid for '%s': %s | %s)", playlist_name_on_jellyfin, len(item_ids), base_name, centroid_str, extras_str)
-            except Exception as e: # nosec
-                logging.error("Exception creating '%s': %s", playlist_name_on_jellyfin, e, exc_info=True)
 
 def _mutate_param(value, min_val, max_val, delta, is_float=False, round_digits=None):
     if is_float:
