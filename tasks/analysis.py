@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import requests
 from collections import defaultdict
 import numpy as np
 import json
@@ -53,6 +52,8 @@ from config import (
 from ai import get_ai_playlist_name, creative_prompt_template
 from .commons import score_vector
 from .annoy_manager import build_and_store_annoy_index
+from .mediaserver import get_recent_albums, get_tracks_from_album, download_track
+
 
 from psycopg2 import OperationalError
 from redis.exceptions import TimeoutError as RedisTimeoutError # Import with an alias
@@ -123,45 +124,6 @@ def clean_temp(temp_dir):
                 shutil.rmtree(file_path)
         except Exception as e:
             logger.warning(f"Could not remove {file_path} from {temp_dir}: {e}")
-
-def get_recent_albums(jellyfin_url, jellyfin_user_id, headers, limit):
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
-    params = {"IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending", "Recursive": True}
-    if limit != 0: # A limit of 0 means get all
-        params["Limit"] = limit
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
-        r.raise_for_status()
-        return r.json().get("Items", [])
-    except Exception as e:
-        logger.error(f"get_recent_albums: {e}", exc_info=True)
-        return []
-
-def get_tracks_from_album(jellyfin_url, jellyfin_user_id, headers, album_id):
-    url = f"{jellyfin_url}/Users/{jellyfin_user_id}/Items"
-    params = {"ParentId": album_id, "IncludeItemTypes": "Audio"}
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=30)
-        r.raise_for_status()
-        return r.json().get("Items", []) if r.ok else []
-    except Exception as e:
-        logger.error(f"get_tracks_from_album {album_id}: {e}", exc_info=True)
-        return []
-
-def download_track(jellyfin_url, headers, temp_dir, item):
-    sanitized_track_name = item['Name'].replace('/', '_').replace('\\', '_')
-    sanitized_artist_name = item.get('AlbumArtist', 'Unknown').replace('/', '_').replace('\\', '_')
-    filename = f"{sanitized_track_name}-{sanitized_artist_name}.mp3"
-    path = os.path.join(temp_dir, filename)
-    try:
-        r = requests.get(f"{jellyfin_url}/Items/{item['Id']}/Download", headers=headers, timeout=120)
-        r.raise_for_status()
-        with open(path, 'wb') as f:
-            f.write(r.content)
-        return path
-    except Exception as e:
-        logger.error(f"download_track {item['Name']}: {e}", exc_info=True)
-        return None
 
 # --- Core Analysis Functions ---
 

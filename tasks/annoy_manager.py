@@ -5,14 +5,16 @@ import tempfile
 import numpy as np
 import time
 from annoy import AnnoyIndex # type: ignore
-import psycopg2
+import psycopg2 # type: ignore
 from psycopg2.extras import DictCursor
-import requests # Added for Jellyfin interaction
 
 from config import (
     EMBEDDING_DIMENSION, JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN,
     INDEX_NAME, NUM_TREES
 ) # Use a central config for this
+
+# Import from other project modules
+from .mediaserver import create_instant_playlist
 
 logger = logging.getLogger(__name__)
 
@@ -270,39 +272,21 @@ def create_jellyfin_playlist_from_ids(playlist_name: str, track_ids: list):
     if not all([JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN]):
         raise ValueError("Jellyfin server URL, User ID, or Token is not configured.")
 
-    if not playlist_name or not playlist_name.strip():
-        raise ValueError("Playlist name must be a non-empty string.")
-    
-    # Append _instant to the playlist name
-    jellyfin_playlist_name = f"{playlist_name.strip()}_instant"
-    
     headers = {"X-Emby-Token": JELLYFIN_TOKEN}
-    body = {
-        "Name": jellyfin_playlist_name,
-        "Ids": track_ids,
-        "UserId": JELLYFIN_USER_ID
-    }
-    
-    url = f"{JELLYFIN_URL}/Playlists"
-    
-    logger.info(f"Attempting to create playlist '{jellyfin_playlist_name}' with {len(track_ids)} tracks on Jellyfin.")
-    
+
     try:
-        response = requests.post(url, headers=headers, json=body, timeout=60)
-        response.raise_for_status()
-        
-        playlist_data = response.json()
-        playlist_id = playlist_data.get('Id')
-        
+        # Call the centralized function in mediaserver.py
+        created_playlist = create_instant_playlist(
+            JELLYFIN_URL, JELLYFIN_USER_ID, headers, playlist_name, track_ids
+        )
+        playlist_id = created_playlist.get('Id')
+
         if not playlist_id:
             raise Exception("Jellyfin API response did not include a playlist ID.")
-            
-        logger.info(f"✅ Successfully created playlist '{jellyfin_playlist_name}' with ID: {playlist_id}")
+
         return playlist_id
 
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error creating Jellyfin playlist '{jellyfin_playlist_name}': {e}", exc_info=True)
-        raise Exception(f"Failed to communicate with Jellyfin: {e}") from e
     except Exception as e:
-        logger.error(f"An unexpected error occurred during playlist creation for '{jellyfin_playlist_name}': {e}", exc_info=True)
-        raise
+        # The error is already logged by create_instant_playlist.
+        # We just re-raise it to be handled by the API endpoint in app_annoy.py.
+        raise e

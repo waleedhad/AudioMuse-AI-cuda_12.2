@@ -1,6 +1,9 @@
 #AudioMuse-AI/config.py
 import os
 
+# --- Media Server Type ---
+MEDIASERVER_TYPE = os.environ.get("MEDIASERVER_TYPE", "jellyfin").lower() # Possible values: jellyfin, navidrome
+
 # --- Jellyfin and DB Constants (Read from Environment Variables first) ---
 
 # JELLYFIN_USER_ID and JELLYFIN_TOKEN come from a Kubernetes Secret

@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import requests
 from collections import defaultdict
 import numpy as np
 import json
@@ -39,9 +38,10 @@ from config import (TEMP_DIR, MAX_SONGS_PER_CLUSTER,
 
 # Import AI naming function and prompt template
 from ai import get_ai_playlist_name, creative_prompt_template
+# Import from other task modules
+from .mediaserver import create_or_update_playlists_on_jellyfin
 from .clustering_helper import (
     _get_stratified_song_subset,
-    create_or_update_playlists_on_jellyfin,
     get_job_result_safely,
     _perform_single_clustering_iteration
 )
@@ -937,9 +937,23 @@ def run_clustering_task(
             log_and_update_main_clustering("Applying '_automatic' suffix to playlist names...", current_progress, print_console=True)
             current_progress = 98
             log_and_update_main_clustering("Creating/Updating playlists on Jellyfin...", current_progress, print_console=False)
+            
+            # Reformat playlists for the new function signature
+            final_playlists_for_jellyfin = {}
+            for base_name, cluster in playlists_to_create_on_jellyfin.items():
+                chunks = []
+                if final_max_songs_per_cluster > 0:
+                    chunks = [cluster[i:i+final_max_songs_per_cluster] for i in range(0, len(cluster), final_max_songs_per_cluster)]
+                else:
+                    if cluster: chunks = [cluster]
+                for idx, chunk in enumerate(chunks, 1):
+                    playlist_name_on_jellyfin = f"{base_name} ({idx})" if len(chunks) > 1 else base_name
+                    item_ids = [item_id for item_id, _, _ in chunk]
+                    if item_ids:
+                        final_playlists_for_jellyfin[playlist_name_on_jellyfin] = item_ids
+
             create_or_update_playlists_on_jellyfin(JELLYFIN_URL, JELLYFIN_USER_ID, {"X-Emby-Token": JELLYFIN_TOKEN},
-                                                    playlists_to_create_on_jellyfin, centroids_for_jellyfin_playlists,
-                                                    active_mood_labels, final_max_songs_per_cluster)
+                                                    final_playlists_for_jellyfin, centroids_for_jellyfin_playlists, active_mood_labels, final_max_songs_per_cluster)
             final_db_summary = {
                 "best_score": best_diversity_score,
                 # "best_params": best_clustering_results.get("parameters"), # Removed
