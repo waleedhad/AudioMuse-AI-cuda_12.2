@@ -34,6 +34,7 @@ services:
       - "8000:8000" # Map host port 8000 to container port 8000
     environment:
       SERVICE_TYPE: "flask" # Tells the container to run the Flask app
+      MEDIASERVER_TYPE: "jellyfin" # Specify the media server type
       JELLYFIN_USER_ID: "0e45c44b3e2e4da7a2be11a72a1c8575" # From jellyfin-credentials secret
       JELLYFIN_TOKEN: "e0b8c325bc1b426c81922b90c0aa2ff1" # From jellyfin-credentials secret
       JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087" # From audiomuse-ai-config ConfigMap
@@ -59,6 +60,7 @@ services:
     container_name: audiomuse-ai-worker-instance
     environment:
       SERVICE_TYPE: "worker" # Tells the container to run the RQ worker
+      MEDIASERVER_TYPE: "jellyfin" # Specify the media server type
       JELLYFIN_USER_ID: "0e45c44b3e2e4da7a2be11a72a1c8575" # From jellyfin-credentials secret
       JELLYFIN_TOKEN: "e0b8c325bc1b426c81922b90c0aa2ff1" # From jellyfin-credentials secret
       JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087" # From audiomuse-ai-config ConfigMap
