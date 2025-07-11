@@ -19,20 +19,61 @@ REQUESTS_TIMEOUT = 300
 
 def _jellyfin_get_recent_albums(limit):
     """
-    Fetches a list of the most recently added albums from Jellyfin.
-    If limit is 0, the API returns all items.
+    Fetches a list of the most recently added albums from Jellyfin using pagination.
+    If limit is 0, it fetches all albums.
+    If limit > 0, it fetches up to the specified limit.
     """
-    url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
-    params = {"IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending", "Recursive": True}
-    if limit != 0:
-        params["Limit"] = limit
-    try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
-        r.raise_for_status()
-        return r.json().get("Items", [])
-    except Exception as e:
-        logger.error(f"Jellyfin get_recent_albums failed: {e}", exc_info=True)
-        return []
+    all_albums = []
+    start_index = 0
+    page_size = 500  # The number of items to request per page
+    fetch_all = (limit == 0)
+
+    while fetch_all or len(all_albums) < limit:
+        # Determine how many items to fetch in the current request
+        size_to_fetch = page_size
+        if not fetch_all:
+            size_to_fetch = min(page_size, limit - len(all_albums))
+
+        if size_to_fetch <= 0:
+            break
+
+        url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
+        params = {
+            "IncludeItemTypes": "MusicAlbum",
+            "SortBy": "DateCreated",
+            "SortOrder": "Descending",
+            "Recursive": True,
+            "Limit": size_to_fetch,
+            "StartIndex": start_index
+        }
+        
+        try:
+            r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
+            r.raise_for_status()
+            response_data = r.json()
+            albums = response_data.get("Items", [])
+            
+            if not albums:
+                # No more albums to fetch, break the loop
+                break
+
+            all_albums.extend(albums)
+            start_index += len(albums)
+
+            # If the number of returned albums is less than requested, it's the last page
+            if len(albums) < size_to_fetch:
+                break
+            
+            # If fetching all, check if we have reached the total record count
+            if fetch_all and start_index >= response_data.get("TotalRecordCount", float('inf')):
+                 break
+
+        except Exception as e:
+            logger.error(f"Jellyfin get_recent_albums failed during pagination: {e}", exc_info=True)
+            # Exit loop on any request error
+            break
+
+    return all_albums
 
 def _jellyfin_get_tracks_from_album(album_id):
     """Fetches all audio tracks for a given album ID from Jellyfin."""
