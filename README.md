@@ -6,7 +6,7 @@
 
 # **AudioMuse-AI - Let the choice happen, the open-source way** 
 
-AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) AND [Navidrome](https://www.navidrome.org/) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
+AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) and [Navidrome](https://www.navidrome.org/) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
 
 **NEWS:** From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
@@ -346,7 +346,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | Parameter                                | Description                                                                  | Default Value                        |
 |------------------------------------------|------------------------------------------------------------------------------|--------------------------------------|
 | **Analysis General**                     |                                                                              |                                      | 
-| `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `3000`                               |
+| `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `0`                               |
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
 | `ENABLE_CLUSTERING_EMBEDDINGS`           | Whether to use audio embeddings (True) or score-based features (False) for clustering. | `false`                              |
@@ -354,19 +354,24 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `0`                                  |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
-| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
+| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `5000`                               |
 | **Similarity General**    |                                                                              |                                      |
 | `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
 | `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
-| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `100`                                |
-| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `5`                                  |
+| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                |
+| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `10`                                  |
 | `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
 | `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
 | `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
 | `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
 | `MUTATION_FLOAT_ABS_DELTA`               | Max absolute change for float parameter mutation.                          | `0.05`                               |
 | `MUTATION_KMEANS_COORD_FRACTION`         | Fractional change for KMeans centroid coordinates.                       | `0.05`                               |
+| **K-Means Ranges**                       |                                                                              |                                      |
+| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `40`                                 |
+| `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
+| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `100`                                |
+| `USE_MINIBATCH_KMEANS`                   | Whether to use MiniBatchKMeans (True) or standard KMeans (False) when clustering embeddings. | `false`                               |
 | **DBSCAN Ranges**                        |                                                                              |                                      |
 | `DBSCAN_EPS_MIN`                         | Min epsilon for DBSCAN.                                                    | `0.1`                                |
 | `DBSCAN_EPS_MAX`                         | Max epsilon for DBSCAN.                             d                       | `0.5`                                |
@@ -376,7 +381,6 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `40`                                 |
 | `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `100`                                 |
 | `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
-| `USE_MINIBATCH_KMEANS`                   | Whether to use MiniBatchKMeans (True) or standard KMeans (False) when clustering embeddings. | `true`                               |
 | **PCA Ranges**                           |                                                                              |                                      |
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
 | `PCA_COMPONENTS_MAX`                     | Max PCA components (e.g., `8` for feature vectors, `199` for embeddings).    | `8`                                  |
@@ -398,10 +402,8 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `SCORE_WEIGHT_SILHOUETTE`                | Weight for Silhouette Score (cluster separation).                          | `0.0`                                |
 | `SCORE_WEIGHT_DAVIES_BOULDIN`            | Weight for Davies-Bouldin Index (cluster separation).                    | `0.0`                                |
 | `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
-| **K-Means Ranges**                       |                                                                              |                                      |
-| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `40`                                 |
-| `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
-| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `100`                                |
+
+
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
 
@@ -715,7 +717,7 @@ AudioMuse-AI leverages Redis Queue (RQ) to manage and execute long-running proce
 3.  **Hierarchical Task Structure & Batching for Efficiency:**
     To minimize the overhead associated with frequent queue interactions (writing/reading task status, small job processing), tasks are structured hierarchically and batched:
     *   **Analysis Tasks:** The `run_analysis_task` acts as a parent task. It fetches a list of albums and then enqueues individual `analyze_album_task` jobs for each album. Each `analyze_album_task` processes all tracks within that single album. This means one "album analysis" job in the queue corresponds to the analysis of potentially many songs, reducing the number of very small, granular tasks.
-    *   **Clustering Tasks:** Similarly, the main `run_clustering_task` orchestrates the evolutionary clustering. It breaks down the total number of requested clustering runs (e.g., 1000) into smaller `run_clustering_batch_task` jobs. Each batch task (e.g., `run_clustering_batch_task`) then executes a subset of these iterations (e.g., 10 iterations per batch). This strategy avoids enqueuing thousands of tiny individual clustering run tasks, again improving efficiency.
+    *   **Clustering Tasks:** Similarly, the main `run_clustering_task` orchestrates the evolutionary clustering. It breaks down the total number of requested clustering runs (e.g., 1000) into smaller `run_clustering_batch_task` jobs. Each batch task (e.g., `run_clustering_batch_task`) then executes a subset of these iterations (e.g., 20 iterations per batch). This strategy avoids enqueuing thousands of tiny individual clustering run tasks, again improving efficiency.
 
 4.  **Advanced Task Monitoring and Cancellation:**
     A key feature implemented in `tasks.py` is the ability to monitor and cancel tasks *even while they are actively running*, not just when they are pending in the queue.
@@ -842,7 +844,7 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
         *   `mood_party-msd-musicnn-1.pb`: For predicting party mood.
         *   `mood_relaxed-msd-musicnn-1.pb`: For predicting relaxed mood.
         *   `mood_sad-msd-musicnn-1.pb`: For predicting sadness.
-* [**Librosa**](https://github.com/librosa/librosa) Library for audio analysis, feature extraction, and music information retrieval. (uded from version v0.6.0-beta)
+* [**Librosa**](https://github.com/librosa/librosa) Library for audio analysis, feature extraction, and music information retrieval. (used from version v0.6.0-beta)
 * [**Tensorflow**](https://www.tensorflow.org/) Platform developed by Google for building, training, and deploying machine learning and deep learning models.
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  

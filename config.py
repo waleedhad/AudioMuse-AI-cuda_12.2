@@ -65,7 +65,7 @@ PCA_COMPONENTS_MIN = int(os.getenv("PCA_COMPONENTS_MIN", "0")) # 0 to disable PC
 PCA_COMPONENTS_MAX = int(os.getenv("PCA_COMPONENTS_MAX", "8")) # Max components for PCA 8 for score vectore, 199 for embeding
 
 # --- Clustering Runs for Diversity (New Constant) ---
-CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "1000")) # Default to 100 runs for evolutionary search
+CLUSTERING_RUNS = int(os.environ.get("CLUSTERING_RUNS", "5000")) # Default to 100 runs for evolutionary search
 MAX_QUEUED_ANALYSIS_JOBS = int(os.environ.get("MAX_QUEUED_ANALYSIS_JOBS", "100")) # Max album analysis jobs to keep in RQ queue
 
 # --- Batching Constants for Clustering Runs ---
