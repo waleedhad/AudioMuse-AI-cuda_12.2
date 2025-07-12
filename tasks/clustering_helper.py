@@ -248,7 +248,7 @@ def _apply_clustering_model(data, method_config, log_prefix, run_idx):
         if method == 'kmeans':
             if params.get('n_clusters', 0) < 2:
                 return None, None, None
-            model = KMeans(n_clusters=params['n_clusters'], n_init='auto')
+            model = KMeans(n_clusters=params['n_clusters'], init='k-means++', n_init=10)
 
         elif method == 'dbscan':
             model = DBSCAN(eps=params['eps'], min_samples=params['min_samples'])
@@ -259,6 +259,8 @@ def _apply_clustering_model(data, method_config, log_prefix, run_idx):
             model = GaussianMixture(
                 n_components=params['n_components'],
                 covariance_type=GMM_COVARIANCE_TYPE,
+                init_params='k-means++',
+                n_init=10,
                 random_state=None,
                 reg_covar=1e-4
             )
@@ -272,6 +274,7 @@ def _apply_clustering_model(data, method_config, log_prefix, run_idx):
                 affinity='nearest_neighbors',
                 n_neighbors=SPECTRAL_N_NEIGHBORS,
                 random_state=params.get("random_state"),
+                n_init=10,
                 verbose=True
             )
         
