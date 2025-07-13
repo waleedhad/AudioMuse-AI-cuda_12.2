@@ -5,6 +5,20 @@ import re
 
 # Update the BASE_URL to point to your running API server
 BASE_URL = 'http://192.168.3.17:8000'
+RETRIES = 3
+RETRY_DELAY = 2  # seconds between retries
+
+
+def get_with_retries(url, **kwargs):
+    """Make an HTTP GET request with retries on connection errors."""
+    for attempt in range(1, RETRIES + 1):
+        try:
+            resp = requests.get(url, **kwargs)
+            return resp
+        except requests.RequestException:
+            if attempt == RETRIES:
+                raise
+            time.sleep(RETRY_DELAY)
 
 
 def wait_for_success(task_id, timeout=1200):  # timeout extended to 20 minutes (1200s)
@@ -12,7 +26,7 @@ def wait_for_success(task_id, timeout=1200):  # timeout extended to 20 minutes (
     start = time.time()
     while time.time() - start < timeout:
         # Check if task is still active
-        act_resp = requests.get(f'{BASE_URL}/api/active_tasks')
+        act_resp = get_with_retries(f'{BASE_URL}/api/active_tasks')
         act_resp.raise_for_status()
         active = act_resp.json()
         # If still active, wait a moment
@@ -20,7 +34,7 @@ def wait_for_success(task_id, timeout=1200):  # timeout extended to 20 minutes (
             time.sleep(1)
             continue
         # No longer active; fetch the final status
-        last_resp = requests.get(f'{BASE_URL}/api/last_task')
+        last_resp = get_with_retries(f'{BASE_URL}/api/last_task')
         last_resp.raise_for_status()
         final = last_resp.json()
         final_id = final.get('task_id')
@@ -42,9 +56,11 @@ def test_analysis_smoke_flow():
     assert data.get('task_type') == 'main_analysis'
     task_id = data.get('task_id')
     assert task_id
+
     final = wait_for_success(task_id, timeout=1200)
     assert final.get('task_type') == 'main_analysis'
     assert final.get('status', final.get('state')) == 'SUCCESS'
+
     elapsed = time.time() - start_time
     print(f"[TIMING] Analysis completed in {elapsed:.2f} seconds")
     time.sleep(10)
@@ -71,7 +87,9 @@ def test_clustering_smoke_flow(algorithm, use_embedding, pca_max):
     if use_embedding:
         payload['pca_components_max'] = pca_max
 
-    resp = requests.post(f'{BASE_URL}/api/clustering/start', json=payload)
+    resp = requests.post(
+        f'{BASE_URL}/api/clustering/start', json=payload
+    )
     assert resp.status_code == 202
     data = resp.json()
     assert data.get('task_type') == 'main_clustering'
@@ -82,13 +100,13 @@ def test_clustering_smoke_flow(algorithm, use_embedding, pca_max):
     assert final.get('task_type') == 'main_clustering'
     assert final.get('status', final.get('state')) == 'SUCCESS'
 
-        # Extract clustering best score and number of playlists created
     details = final.get('details', {})
     best_score = details.get('best_score')
     num_playlists = details.get('num_playlists_created')
 
     assert best_score is not None, "Best score not found in details"
     assert num_playlists is not None, "Number of playlists created not found in details"
+
     elapsed = time.time() - start_time
     print(f"[RESULT] Algorithm={algorithm} | BestScore={best_score} | PlaylistsCreated={num_playlists} | Time={elapsed:.2f}s")
     time.sleep(10)
@@ -96,7 +114,7 @@ def test_clustering_smoke_flow(algorithm, use_embedding, pca_max):
 
 def test_annoy_similarity_and_playlist():
     start_time = time.time()
-    sim_resp = requests.get(
+    sim_resp = get_with_retries(
         f'{BASE_URL}/api/similar_tracks',
         params={'title': 'By the Way', 'artist': 'Red Hot Chili Peppers', 'n': 1}
     )
@@ -113,6 +131,7 @@ def test_annoy_similarity_and_playlist():
     assert pl_resp.status_code == 201
     pl_data = pl_resp.json()
     assert 'playlist_id' in pl_data
+
     elapsed = time.time() - start_time
     print(f"[TIMING] Annoy test completed in {elapsed:.2f} seconds")
 
