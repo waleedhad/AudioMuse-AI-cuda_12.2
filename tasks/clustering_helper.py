@@ -275,7 +275,7 @@ def _apply_clustering_model(data, method_config, log_prefix, run_idx):
                 n_neighbors=SPECTRAL_N_NEIGHBORS,
                 random_state=params.get("random_state"),
                 n_init=10,
-                verbose=True
+                verbose=False
             )
         
         if model is None:
