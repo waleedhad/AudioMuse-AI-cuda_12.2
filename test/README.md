@@ -63,3 +63,39 @@ To run all tests, execute the following command from your terminal (while in the
 ```bash
 python test.py
 ```
+
+## Succesfull result example
+If everything go well, you should have  result output similar to this:
+
+```
+(.venv) user@host:~/project$ python test2.py
+======================================== test session starts =========================================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- ~/project/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: ~/project
+collected 10 items
+
+test2.py::test_analysis_smoke_flow [TIMING] Analysis completed in 268.57 seconds
+PASSED
+test2.py::test_clustering_smoke_flow[kmeans-True-199] [RESULT] Algorithm=kmeans | BestScore=17.439000162267043 | PlaylistsCreated=100 | Time=103.19s
+PASSED
+test2.py::test_clustering_smoke_flow[gmm-True-199] [RESULT] Algorithm=gmm | BestScore=17.70349717246473 | PlaylistsCreated=94 | Time=507.78s
+PASSED
+test2.py::test_clustering_smoke_flow[spectral-True-199] [RESULT] Algorithm=spectral | BestScore=17.58542598899186 | PlaylistsCreated=97 | Time=119.28s
+PASSED
+test2.py::test_clustering_smoke_flow[dbscan-True-199] [RESULT] Algorithm=dbscan | BestScore=6.556085438351011 | PlaylistsCreated=3 | Time=40.87s
+PASSED
+test2.py::test_clustering_smoke_flow[kmeans-False-None] [RESULT] Algorithm=kmeans | BestScore=2.2492027954091296 | PlaylistsCreated=82 | Time=72.09s
+PASSED
+test2.py::test_clustering_smoke_flow[gmm-False-None] [RESULT] Algorithm=gmm | BestScore=2.373805929047702 | PlaylistsCreated=93 | Time=1019.34s
+PASSED
+test2.py::test_clustering_smoke_flow[spectral-False-None] [RESULT] Algorithm=spectral | BestScore=2.391899050948851 | PlaylistsCreated=79 | Time=108.71s
+PASSED
+test2.py::test_clustering_smoke_flow[dbscan-False-None] [RESULT] Algorithm=dbscan | BestScore=-0.1758302493574464 | PlaylistsCreated=8 | Time=34.87s
+PASSED
+test2.py::test_annoy_similarity_and_playlist [TIMING] Annoy test completed in 0.09 seconds
+PASSED
+
+======================================================================================== 10 passed in 2364.92s (0:39:24) ========================================================================================
+(.venv) user@host:~/project$
+```
