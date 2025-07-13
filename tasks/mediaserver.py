@@ -3,9 +3,6 @@
 import requests
 import logging
 import os
-import hashlib
-import string
-import random
 import config  # Import the config module to access server type and settings
 
 logger = logging.getLogger(__name__)
@@ -189,25 +186,22 @@ def _jellyfin_delete_playlist(playlist_id):
 
 def get_navidrome_auth_params():
     """
-    Generates the salt and token for Subsonic API authentication using the password.
+    Generates authentication parameters for the Navidrome (Subsonic) API.
+    Navidrome does not support client-side password hashing (like md5 or pbkdf2)
+    due to its use of secure Argon2 password hashing on the server.
+    The correct method for password-based auth is to send the password hex-encoded.
     Returns a dictionary of parameters required for every Navidrome API call.
     """
     if not config.NAVIDROME_PASSWORD or not config.NAVIDROME_USER:
         logger.warning("Navidrome User or Password is not configured in environment variables.")
         return {}
     
-    salt = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-    token = hashlib.pbkdf2_hmac(
-        'sha256',
-        config.NAVIDROME_PASSWORD.encode('utf-8'),
-        salt.encode('utf-8'),
-        100000  # Number of iterations
-    ).hex()
+    # Hex-encode the password. This is the method Navidrome supports for password auth.
+    hex_encoded_password = config.NAVIDROME_PASSWORD.encode('utf-8').hex()
     
     return {
         "u": config.NAVIDROME_USER,
-        "t": token,
-        "s": salt,
+        "p": f"enc:{hex_encoded_password}", # The 'enc:' prefix is required by the Subsonic API
         "v": "1.16.1",
         "c": config.APP_VERSION,
         "f": "json"
