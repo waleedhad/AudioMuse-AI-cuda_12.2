@@ -1,11 +1,14 @@
 ![GitHub license](https://img.shields.io/github/license/neptunehub/AudioMuse-AI.svg)
 ![Latest Tag](https://img.shields.io/github/v/tag/neptunehub/AudioMuse-AI?label=latest-tag)
+![Media Server Support: Jellyfin 10.10.7, Navidrome 0.57.0](https://img.shields.io/badge/Media%20Server-Jellyfin%2010.10.7%2C%20Navidrome%200.57.0-blue?style=flat-square&logo=server&logoColor=white)
 
 
-# **AudioMuse-AI - Let the choice happen, the open-source way**
 
-AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
+# **AudioMuse-AI - Let the choice happen, the open-source way** 
 
+AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) and [Navidrome](https://www.navidrome.org/) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
+
+**NEWS:** From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
 Addional important information on this project can also be found here:
 * Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
@@ -69,7 +72,7 @@ helm install my-audiomuse audiomuse-ai/audiomuse-ai \
   --values my-custom-values.yaml
 ```
 
-Here is a minimal configuration example for your `my-custom-values.yaml`:
+Here is a minimal configuration example for your `my-custom-values.yaml` for **Jellyfin**:
 
 ```yaml
 postgres:
@@ -90,6 +93,7 @@ gemini:
 # AI Configuration
 # You can use "OLLAMA", "GEMINI", or "NONE" (some features will be disabled if NONE)
 config:
+  mediaServerType: "jellyfin"
   aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
   ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
   ollamaModelName: "mistral:7b"
@@ -97,7 +101,7 @@ config:
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
 
-How to find **userid**:
+How to find jellyfin **userid**:
 * Log into Jellyfin from your browser as an admin
 * Go to Dashboard > “admin panel” > Users.
 * Click on the user’s name that you are interested
@@ -107,6 +111,35 @@ How to find **userid**:
 How to create an the **jellyfin's API token**:
 * The API Token, still as admin you can go to Dashboard > “Admin panel” > API Key and create a new one.
 
+Here is a minimal configuration example for your `my-custom-values.yaml` for **Navidrome**:
+
+```yaml
+postgres:
+  user: "audiomuse"
+  password: "audiomusepassword" # IMPORTANT: Change this for production
+  aiChatDbUser: "ai_user"
+  aiChatDbUserPassword: "ChangeThisSecurePassword123!" # IMPORTANT: Change this for production
+
+# IMPORTANT: Set the correct Navidrome values
+navidrome:
+  user: "YOUR-USER"
+  password: "YOUR-PASSWORD"
+  url: "http://your_navidrome_url:4533"
+
+gemini:
+  apiKey: "YOUR_GEMINI_API_KEY_HERE" # IMPORTANT: Change this for production
+
+# AI Configuration
+# You can use "OLLAMA", "GEMINI", or "NONE" (some features will be disabled if NONE)
+config:
+  mediaServerType: "navidrome"
+  aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
+  ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
+  ollamaModelName: "mistral:7b"
+  geminiModelName: "gemini-1.5-flash-latest"
+  aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
+```
+
 For the full list of supported configuration values, refer to the [values.yaml file](https://github.com/NeptuneHub/AudioMuse-AI-helm/blob/main/values.yaml).
 
 For detailed documentation on each environment variable, have a look at the parameter chapter.
@@ -114,7 +147,7 @@ For detailed documentation on each environment variable, have a look at the para
 
 ## **Quick Start Deployment on K3S**
 
-This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster by using the **deployment.yaml** file.
+This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster by using the **deployment.yaml** file that is designed for **Jellyfin**.
 
 1.  **Prerequisites:**
     *   A running K3S cluster.
@@ -138,6 +171,20 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
     *   **Main UI:** Access at `http://<EXTERNAL-IP>:8000`
     *   **Instant Playlist UI:** Access at `http://<EXTERNAL-IP>:8000/chat`  **experimental**
     *   **API Docs (Swagger UI):** Explore the API at `http://<EXTERNAL-IP>:8000/apidocs`
+
+In case you want to deploy AudioMuse-AI on K3S but interacting with Navidrome there is just some minimal configuration changes:
+
+*  **Configuration:**
+    *   Navigate to the `deployments/` directory.
+    *   Edit `deployment-yaml.yaml` to configure mandatory parameters:
+        *   **Secrets:**
+            *   `navidrome-credentials`: Update `NAVIDROME_USER` and `NAVIDROME_PASSWORD`.
+            *   `postgres-credentials`: Update `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`.
+            *   `gemini-api-credentials` (if using Gemini for AI Naming): Update `GEMINI_API_KEY`.
+        *   **ConfigMap (`audiomuse-ai-config`):**
+            *   Update `NAVIDROME_URL`.
+            *   Ensure `POSTGRES_HOST`, `POSTGRES_PORT`, and `REDIS_URL` are correct for your setup (defaults are for in-cluster services).
+
 
 ## **Front-End Quick Start: Analysis and Clustering Parameters**
 
@@ -207,7 +254,7 @@ For a quick and interactive way to generate playlists without running the full e
 4.  **Review and Create:**
     *   The AI will generate a PostgreSQL query based on your request. This query is then executed against your `score` table.
     *   The results (a list of songs) will be displayed.
-    *   If songs are found, a new section will appear allowing you to name the playlist and click "Let's do it" to create this playlist directly on your Jellyfin server. The playlist name on Jellyfin will have `_instant` appended to the name you provide.
+    *   If songs are found, a new section will appear allowing you to name the playlist and click "Let's do it" to create this playlist directly on your Jellyfin or Navidrome server. The playlist name on Jellyfin or Navidrome will have `_instant` appended to the name you provide.
 
 **Example Queries (Tested with Gemini):**
 *   "Create a playlist that is good for post lunch"
@@ -232,12 +279,12 @@ This new functionality enable you to search the top N similar song that are simi
 3.  **Run the similarity search**
     *   Ask the front-end to find the similar track, it will show to you in the table
 4.  **Review and Create:**
-    *   Input a name for the playlist and ask the interface to create it directly on jellyfin. That's it!
+    *   Input a name for the playlist and ask the interface to create it directly on Jellyfin or Navidrome. That's it!
 
 
 ## **Kubernetes Deployment (K3S Example)**
 
-The Quick Start provided in the `playlist` namespace the following resources:
+The Quick Start provided in the `playlist` namespace the following resources (the same explanetion have sense for both Navidrome and Jellyfin):
 
 **Pods (Workloads):**
 *   **`audiomuse-ai-worker`**: Runs the background job processors using Redis Queue. It's recommended to run a **minimum of 2 replicas** to ensure one worker can handle main tasks while others manage subprocesses, preventing potential stalls. You can scale this based on your cluster size and workload (starting from version **v0.4.0-beta** one worker should be able to handle both main and sub tasks, so a minimum of 1 replica is enough)
@@ -276,6 +323,9 @@ The **mandatory** parameter that you need to change from the example are this:
 | `JELLYFIN_URL`     | (Required) Your Jellyfin server's full URL     | `http://YOUR_JELLYFIN_IP:8096`    |
 | `JELLYFIN_USER_ID` | (Required) Jellyfin User ID.                   | *(N/A - from Secret)* |
 | `JELLYFIN_TOKEN`   | (Required) Jellyfin API Token.                 | *(N/A - from Secret)* |
+| `NAVIDROME_URL`     | (Required) Your Navidrome server's full URL    | `http://YOUR_JELLYFIN_IP:4553`    |
+| `NAVIDROME_USER`    | (Required) Navidrome User ID.                  | *(N/A - from Secret)* |
+| `NAVIDROME_PASSWORD`| (Required) Navidrome user Password.            | *(N/A - from Secret)* |
 | `POSTGRES_USER`    | (Required) PostgreSQL username.                | *(N/A - from Secret)* | # Corrected typo
 | `POSTGRES_PASSWORD`| (Required) PostgreSQL password.                | *(N/A - from Secret)* |
 | `POSTGRES_DB`      | (Required) PostgreSQL database name.           | *(N/A - from Secret)* |
@@ -296,7 +346,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | Parameter                                | Description                                                                  | Default Value                        |
 |------------------------------------------|------------------------------------------------------------------------------|--------------------------------------|
 | **Analysis General**                     |                                                                              |                                      | 
-| `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `3000`                               |
+| `NUM_RECENT_ALBUMS`                      | Number of recent albums to scan (0 for all).                                 | `0`                               |
 | `TOP_N_MOODS`                            | Number of top moods per track for feature vector.                            | `5`                                  |
 | **Clustering General**                   |                                                                              |                                      |
 | `ENABLE_CLUSTERING_EMBEDDINGS`           | Whether to use audio embeddings (True) or score-based features (False) for clustering. | `false`                              |
@@ -304,19 +354,24 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `MAX_SONGS_PER_CLUSTER`                  | Max songs per generated playlist segment.                                  | `0`                                  |
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
-| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `1000`                               |
+| `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `5000`                               |
 | **Similarity General**    |                                                                              |                                      |
 | `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
 | `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
-| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `100`                                |
-| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `5`                                  |
+| `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                |
+| `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `10`                                  |
 | `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
 | `EXPLOITATION_START_FRACTION`            | Fraction of runs before starting to use elites.                            | `0.2`                                |
 | `EXPLOITATION_PROBABILITY_CONFIG`        | Probability of mutating an elite vs. random generation.                | `0.7`                                |
 | `MUTATION_INT_ABS_DELTA`                 | Max absolute change for integer parameter mutation.                        | `3`                                  |
 | `MUTATION_FLOAT_ABS_DELTA`               | Max absolute change for float parameter mutation.                          | `0.05`                               |
 | `MUTATION_KMEANS_COORD_FRACTION`         | Fractional change for KMeans centroid coordinates.                       | `0.05`                               |
+| **K-Means Ranges**                       |                                                                              |                                      |
+| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `40`                                 |
+| `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
+| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `100`                                |
+| `USE_MINIBATCH_KMEANS`                   | Whether to use MiniBatchKMeans (True) or standard KMeans (False) when clustering embeddings. | `false`                               |
 | **DBSCAN Ranges**                        |                                                                              |                                      |
 | `DBSCAN_EPS_MIN`                         | Min epsilon for DBSCAN.                                                    | `0.1`                                |
 | `DBSCAN_EPS_MAX`                         | Max epsilon for DBSCAN.                             d                       | `0.5`                                |
@@ -326,7 +381,6 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `40`                                 |
 | `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `100`                                 |
 | `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
-| `USE_MINIBATCH_KMEANS`                   | Whether to use MiniBatchKMeans (True) or standard KMeans (False) when clustering embeddings. | `true`                               |
 | **PCA Ranges**                           |                                                                              |                                      |
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
 | `PCA_COMPONENTS_MAX`                     | Max PCA components (e.g., `8` for feature vectors, `199` for embeddings).    | `8`                                  |
@@ -348,10 +402,8 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `SCORE_WEIGHT_SILHOUETTE`                | Weight for Silhouette Score (cluster separation).                          | `0.0`                                |
 | `SCORE_WEIGHT_DAVIES_BOULDIN`            | Weight for Davies-Bouldin Index (cluster separation).                    | `0.0`                                |
 | `SCORE_WEIGHT_CALINSKI_HARABASZ`         | Weight for Calinski-Harabasz Index (cluster separation).               | `0.0`                                |
-| **K-Means Ranges**                       |                                                                              |                                      |
-| `NUM_CLUSTERS_MIN`                       | Min $K$ for K-Means.                                                       | `40`                                 |
-| `TOP_K_MOODS_FOR_PURITY_CALCULATION`     | Number of centroid's top moods to consider when calculating playlist purity. | `3`                                  |
-| `NUM_CLUSTERS_MAX`                       | Max $K$ for K-Means.                                                       | `100`                                |
+
+
 
 **(*)** For using GEMINI API you need to have a Google account, a free account can be used if needed. Instead if you want to self-host Ollama here you can find a deployment example:
 
@@ -359,7 +411,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 
 ## **Local Deployment with Docker Compose**
 
-For a quick local setup or for users not using Kubernetes, a `docker-compose.yaml` file is provided in the `deployment/` directory.
+For a quick local setup or for users not using Kubernetes, a `docker-compose.yaml` file is provided in the `deployment/` directory for interacting with **Jellyfin**. `docker-compose-navidrome.yaml` is instead pre-compiled to interact with **Navidrome**.
 
 **Prerequisites:**
 *   Docker and Docker Compose installed.
@@ -370,7 +422,7 @@ For a quick local setup or for users not using Kubernetes, a `docker-compose.yam
     cd deployment
     ```
 2.  **Review and Customize (Optional):**
-    The `docker-compose.yaml` file is pre-configured with default credentials and settings suitable for local testing. You can edit environment variables within this file directly if needed (e.g., `JELLYFIN_URL`, `JELLYFIN_USER_ID`, `JELLYFIN_TOKEN`).
+    The `docker-compose.yaml` and `docker-compose-navidrome.yaml` files are pre-configured with default credentials and settings suitable for local testing. You can edit environment variables within this file directly (e.g., `JELLYFIN_URL`, `JELLYFIN_USER_ID`, `JELLYFIN_TOKEN` for **Jellyfin** or `NAVIDROME_URL`, `NAVIDROME_USER` and `NAVIDROME_PASSWORD` for **Navidrome**).
 3.  **Start the Services:**
     ```bash
     docker compose up -d --scale audiomuse-ai-worker=2
@@ -420,7 +472,7 @@ This is the main workflow of how this algorithm works. For an easy way to use it
 *   **Parallel Worker Execution:**
     *   Multiple RQ workers (at least 2 recommended) process tasks in parallel. Main tasks (e.g., full library analysis, entire evolutionary clustering process) often spawn and manage child tasks (e.g., per-album analysis, batches of clustering iterations).
     *   **Analysis Phase:**
-        *   Workers fetch metadata and download audio from Jellyfin, processing albums individually.
+        *   Workers fetch metadata and download audio from Jellyfin or Navidrome, processing albums individually.
         *   Librosa and TensorFlow models analyze tracks for features (tempo, key, energy) and predictions (genres, moods, etc.).
         *   Analysis results are saved to PostgreSQL.
     *   **Clustering Phase:**
@@ -430,7 +482,7 @@ This is the main workflow of how this algorithm works. For an easy way to use it
 *   **Playlist Generation & Naming:**
     *   Playlists are formed from the best clustering solution found by the evolutionary process.
     *   Optionally, AI models (Ollama or Gemini) can be used to generate creative, human-readable names for these playlists.
-    *   Finalized playlists are created directly in your Jellyfin library.
+    *   Finalized playlists are created directly in your Jellyfin or Navidrome library.
 *   **Advanced Task Management:**
     *   The web UI offers real-time monitoring of task progress, including main and sub-tasks.
     *   **Worker Supervision and High Availability:** In scenarios with multiple worker container instances, the system incorporates mechanisms to maintain high availability. HA is achived using **supervisord** and re-enquequing configuration in Redis Queue. For HA Redis and PostgreSQL must also be deployed in HA (deployment example in this repository don't cover this possibility ad the moment, so you need to change it)
@@ -441,7 +493,7 @@ This is the main workflow of how this algorithm works. For an easy way to use it
 
 The audio analysis in AudioMuse-AI, orchestrated by `tasks.py`, meticulously extracts a rich set of features from each track. This process is foundational for the subsequent clustering and playlist generation.
 1.  **Audio Loading & Preprocessing:**
-    *   Tracks are first downloaded from your Jellyfin library to a temporary local directory. Librosa is used then to load the audio.
+    *   Tracks are first downloaded from your Jellyfin or Navidrome library to a temporary local directory. Librosa is used then to load the audio.
     
 2.  **Core Feature Extraction (Librosa):**
     *   **Tempo:** The `Tempo` algorithm analyzes the rhythmic patterns in the audio to estimate the track's tempo, expressed in Beats Per Minute (BPM).
@@ -636,7 +688,7 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
 
 7.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
 
-8.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin.
+8.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin or Navidrome.
 
 This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
 
@@ -665,7 +717,7 @@ AudioMuse-AI leverages Redis Queue (RQ) to manage and execute long-running proce
 3.  **Hierarchical Task Structure & Batching for Efficiency:**
     To minimize the overhead associated with frequent queue interactions (writing/reading task status, small job processing), tasks are structured hierarchically and batched:
     *   **Analysis Tasks:** The `run_analysis_task` acts as a parent task. It fetches a list of albums and then enqueues individual `analyze_album_task` jobs for each album. Each `analyze_album_task` processes all tracks within that single album. This means one "album analysis" job in the queue corresponds to the analysis of potentially many songs, reducing the number of very small, granular tasks.
-    *   **Clustering Tasks:** Similarly, the main `run_clustering_task` orchestrates the evolutionary clustering. It breaks down the total number of requested clustering runs (e.g., 1000) into smaller `run_clustering_batch_task` jobs. Each batch task (e.g., `run_clustering_batch_task`) then executes a subset of these iterations (e.g., 10 iterations per batch). This strategy avoids enqueuing thousands of tiny individual clustering run tasks, again improving efficiency.
+    *   **Clustering Tasks:** Similarly, the main `run_clustering_task` orchestrates the evolutionary clustering. It breaks down the total number of requested clustering runs (e.g., 1000) into smaller `run_clustering_batch_task` jobs. Each batch task (e.g., `run_clustering_batch_task`) then executes a subset of these iterations (e.g., 20 iterations per batch). This strategy avoids enqueuing thousands of tiny individual clustering run tasks, again improving efficiency.
 
 4.  **Advanced Task Monitoring and Cancellation:**
     A key feature implemented in `tasks.py` is the ability to monitor and cancel tasks *even while they are actively running*, not just when they are pending in the queue.
@@ -722,7 +774,7 @@ The "Instant Playlist" feature, accessible via `chat.html`, provides a direct wa
 7.  **Response to Frontend (`chat.html`):**
     *   The results (list of songs: `item_id`, `title`, `author`) or any errors are sent back to `chat.html`.
     *   The frontend displays the AI's textual response (including the generated SQL and any processing messages) and the list of songs.
-    *   If songs are returned, a form appears allowing the user to name the playlist. Submitting this form calls another endpoint (`/api/createJellyfinPlaylist`) in `app_chat.py` which uses the Jellyfin API to create the playlist with the chosen name (appended with `_instant`) and the retrieved song IDs.
+    *   If songs are returned, a form appears allowing the user to name the playlist. Submitting this form calls another endpoint (`/api/createJellyfinPlaylist`) in `app_chat.py` which uses the Jellyfin or Navidrome API to create the playlist with the chosen name (appended with `_instant`) and the retrieved song IDs.
 
 ## Playlist from Similar song - Deep dive
 
@@ -746,7 +798,7 @@ The "Playlist from Similar Song" feature provides an interactive way to discover
 4. **Playlist Creation (/api/create\_playlist):**  
    * The list of similar tracks, along with their distance from the seed song, is displayed to the user.  
    * The user can then enter a desired playlist name and click a button.  
-   * This action calls the /api/create\_playlist endpoint, which takes the list of similar track IDs and the new name, and then uses the Jellyfin API to create the playlist directly on the server.
+   * This action calls the /api/create\_playlist endpoint, which takes the list of similar track IDs and the new name, and then uses the Jellyfin or Navidrome API to create the playlist directly on the server.
 
 This entire workflow provides a fast and intuitive method for music discovery, moving beyond simple genre or tag-based recommendations to find songs that truly *sound* alike.
 
@@ -792,7 +844,7 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
         *   `mood_party-msd-musicnn-1.pb`: For predicting party mood.
         *   `mood_relaxed-msd-musicnn-1.pb`: For predicting relaxed mood.
         *   `mood_sad-msd-musicnn-1.pb`: For predicting sadness.
-* [**Librosa**](https://github.com/librosa/librosa) Library for audio analysis, feature extraction, and music information retrieval. (uded from version v0.6.0-beta)
+* [**Librosa**](https://github.com/librosa/librosa) Library for audio analysis, feature extraction, and music information retrieval. (used from version v0.6.0-beta)
 * [**Tensorflow**](https://www.tensorflow.org/) Platform developed by Google for building, training, and deploying machine learning and deep learning models.
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
@@ -805,6 +857,7 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * [**Ollama**](https://ollama.com/) Enables self-hosting of various open-source Large Language Models (LLMs) for tasks like intelligent playlist naming.
 * [**Google Gemini API:**](https://ai.google.dev/) Provides access to Google's powerful generative AI models, used as an alternative for intelligent playlist naming.
 * [**Jellyfin API**](https://jellyfin.org/) Integrates directly with your Jellyfin server to fetch media, download audio, and create/manage playlists.  
+* [**Navidrome Susbsonic API**](https://www.navidrome.org/) Integrates directly with your Navidrome (or Subsonic like) server to fetch media, download audio, and create/manage playlists.  
 * [**Docker / OCI-compatible Containers**](https://www.docker.com/) – The entire application is packaged as a container, ensuring consistent and portable deployment across environments.
 
 ## **Additional Documentation**
@@ -819,7 +872,7 @@ In **audiomuse-ai/docs** you can find additional documentation for this project,
 
 This MVP lays the groundwork for further development:
 
-* 💡 **Integration into Music Clients:** Directly used in Music Player that interacts with Jellyfin media server, for playlist creation OR instant mix;  
+* 💡 **Integration into Music Clients:** Directly used in Music Player that interacts with Jellyfin andmedia server, for playlist creation OR instant mix;  
 * 🖥️ **Jellyfin Plugin:** Integration as a Jellyfin plugin to have only one and easy-to-use front-end.  
 * 🔁 **Cross-Platform Sync** Export playlists to .m3u or sync to external platforms.
 

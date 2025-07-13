@@ -82,20 +82,20 @@
                 <div id="responseArea">
                     <p class="italic">Your generated playlist will appear here...</p>
                 </div>
-                <!-- New section for creating playlist on Jellyfin -->
+                <!-- MODIFIED: Changed section title and form details to be more generic -->
                 <div id="createPlaylistSection" class="hidden">
-                    <h3>Create Playlist on Jellyfin</h3>
+                    <h3>Create Playlist on Media Server</h3>
                     <form id="createPlaylistForm">
                         <input type="hidden" id="playlistItemIds" name="item_ids">
                         <div class="param-group">
                             <div>
-                                <label for="jellyfinPlaylistName">Playlist Name:</label>
-                                <input type="text" id="jellyfinPlaylistName" name="playlist_name" placeholder="Enter playlist name" required>
+                                <label for="mediaServerPlaylistName">Playlist Name:</label>
+                                <input type="text" id="mediaServerPlaylistName" name="playlist_name" placeholder="Enter playlist name" required>
                             </div>
                         </div>
-                        <button type="submit" id="submitJellyfinPlaylist">Let's do it</button>
+                        <button type="submit" id="submitMediaServerPlaylist">Create Playlist</button>
                     </form>
-                    <div id="jellyfinResponseArea"></div>
+                    <div id="mediaServerResponseArea"></div>
                 </div>
             </section>
         </div>
@@ -122,7 +122,7 @@
             const submitButtonText = submitButton.querySelector('span');
             const createPlaylistSection = document.getElementById('createPlaylistSection');
             const createPlaylistForm = document.getElementById('createPlaylistForm');
-            const jellyfinResponseArea = document.getElementById('jellyfinResponseArea');
+            const mediaServerResponseArea = document.getElementById('mediaServerResponseArea');
 
             // --- Core Functions ---
 
@@ -254,7 +254,7 @@
                 responseArea.innerHTML = '';
                 responseArea.classList.remove('text-red-600');
                 createPlaylistSection.classList.add('hidden'); // Hide by default
-                jellyfinResponseArea.textContent = ''; // Clear previous Jellyfin responses
+                mediaServerResponseArea.textContent = ''; // Clear previous responses
 
                 // --- 1. AI Interaction Log (Collapsible) ---
                 const detailsElement = document.createElement('details');
@@ -347,25 +347,25 @@
             }
 
             /**
-             * Handles the submission of the "Create Playlist on Jellyfin" form.
+             * Handles the submission of the "Create Playlist on Media Server" form.
              * @param {Event} event - The form submission event.
              */
-            async function handleCreateJellyfinPlaylist(event) {
+            async function handleCreateMediaServerPlaylist(event) {
                 event.preventDefault();
-                jellyfinResponseArea.textContent = 'Creating playlist on Jellyfin...';
-                jellyfinResponseArea.className = '';
+                mediaServerResponseArea.textContent = 'Creating playlist...';
+                mediaServerResponseArea.className = '';
 
-                const playlistNameInput = document.getElementById('jellyfinPlaylistName');
+                const playlistNameInput = document.getElementById('mediaServerPlaylistName');
                 const itemIdsInput = document.getElementById('playlistItemIds');
 
                 if (!playlistNameInput.value.trim()) {
-                    jellyfinResponseArea.textContent = 'Error: Playlist name cannot be empty.';
-                    jellyfinResponseArea.className = 'status-error';
+                    mediaServerResponseArea.textContent = 'Error: Playlist name cannot be empty.';
+                    mediaServerResponseArea.className = 'status-error';
                     return;
                 }
                 if (!itemIdsInput.value) {
-                    jellyfinResponseArea.textContent = 'Error: No song IDs found to create the playlist.';
-                    jellyfinResponseArea.className = 'status-error';
+                    mediaServerResponseArea.textContent = 'Error: No song IDs found to create the playlist.';
+                    mediaServerResponseArea.className = 'status-error';
                     return;
                 }
 
@@ -375,21 +375,22 @@
                 };
 
                 try {
-                    const response = await fetch('/chat/api/createJellyfinPlaylist', {
+                    // MODIFIED: Changed API endpoint to be more generic
+                    const response = await fetch('/chat/api/create_playlist', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)
                     });
                     const data = await response.json();
-                    jellyfinResponseArea.textContent = data.message;
+                    mediaServerResponseArea.textContent = data.message;
                     if(response.ok) {
-                        jellyfinResponseArea.className = 'status-success';
+                        mediaServerResponseArea.className = 'status-success';
                     } else {
-                        jellyfinResponseArea.className = 'status-error';
+                        mediaServerResponseArea.className = 'status-error';
                     }
                 } catch (error) {
-                    jellyfinResponseArea.textContent = `Error: ${error.message}`;
-                    jellyfinResponseArea.className = 'status-error';
+                    mediaServerResponseArea.textContent = `Error: ${error.message}`;
+                    mediaServerResponseArea.className = 'status-error';
                 }
             }
 
@@ -397,7 +398,7 @@
             document.addEventListener('DOMContentLoaded', fetchConfig);
             aiProviderSelect.addEventListener('change', updateAIProviderVisibility);
             playlistForm.addEventListener('submit', handleChatSubmit);
-            createPlaylistForm.addEventListener('submit', handleCreateJellyfinPlaylist);
+            createPlaylistForm.addEventListener('submit', handleCreateMediaServerPlaylist);
         })();
     </script>
     <script src="/static/menu.js"></script>

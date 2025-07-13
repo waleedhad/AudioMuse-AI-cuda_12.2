@@ -113,10 +113,7 @@ async function fetchConfig() {
 }
 
 function renderConfig(config) {
-    // General
-    document.getElementById('config-jellyfin_url').value = config.jellyfin_url || '';
-    document.getElementById('config-jellyfin_user_id').value = config.jellyfin_user_id || '';
-    document.getElementById('config-jellyfin_token').value = config.jellyfin_token || '';
+    // MODIFIED: Removed rendering for Jellyfin config as the inputs are gone.
 
     // Analysis
     document.getElementById('config-num_recent_albums').value = config.num_recent_albums || 0;
@@ -340,11 +337,9 @@ async function startTask(taskType) {
     disableTaskButtons(true);
     updateCancelButtonState(true);
 
-    const payload = {
-        jellyfin_url: document.getElementById('config-jellyfin_url').value,
-        jellyfin_user_id: document.getElementById('config-jellyfin_user_id').value,
-        jellyfin_token: document.getElementById('config-jellyfin_token').value
-    };
+    // MODIFIED: Removed Jellyfin parameters from the payload.
+    // The backend now gets these from its own configuration.
+    const payload = {};
 
     if (taskType === 'analysis') {
         payload.num_recent_albums = parseInt(document.getElementById('config-num_recent_albums').value);

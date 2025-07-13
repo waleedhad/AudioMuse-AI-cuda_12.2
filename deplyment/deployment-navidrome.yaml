@@ -1,4 +1,4 @@
-# audiomuse-ai-deployment.yaml
+# deployment-navidrome.yaml
 
 ---
 apiVersion: v1
@@ -9,12 +9,12 @@ metadata:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: jellyfin-credentials
+  name: navidrome-credentials
   namespace: playlist
 type: Opaque
 stringData:
-  user_id: "0e45c44b3e2e4da7a2be11a72a1c8575" # Your Jellyfin User ID
-  api_token: "e0b8c325bc1b426c81922b90c0aa2ff1" # Your Jellyfin API Token
+  NAVIDROME_USER: "YOUR-USER"
+  NAVIDROME_PASSWORD: "YOUR-PASSWORD"
 ---
 apiVersion: v1
 kind: Secret
@@ -23,9 +23,9 @@ metadata:
   namespace: playlist
 type: Opaque
 stringData:
-  POSTGRES_USER: "audiomuse" # As used in app.py
-  POSTGRES_PASSWORD: "audiomusepassword" # As used in app.py
-  POSTGRES_DB: "audiomusedb" # As used in app.py
+  POSTGRES_USER: "audiomuse"
+  POSTGRES_PASSWORD: "audiomusepassword"
+  POSTGRES_DB: "audiomusedb"
 ---
 apiVersion: v1
 kind: Secret
@@ -42,12 +42,12 @@ metadata:
   name: audiomuse-ai-config
   namespace: playlist
 data:
-  MEDIASERVER_TYPE: "jellyfin"
-  JELLYFIN_URL: "http://jellyfin.192.168.3.131.nip.io:8087"
-  POSTGRES_HOST: "postgres-service.playlist" # Database host
-  POSTGRES_PORT: "5432" # Database port
+  MEDIASERVER_TYPE: "navidrome"
+  NAVIDROME_URL: "http://192.168.3.13:4533/"
+  POSTGRES_HOST: "postgres-service.playlist"
+  POSTGRES_PORT: "5432"
   REDIS_URL: "redis://redis-service.playlist:6379/0"
-  TEMP_DIR: "/app/temp_audio" # Updated to match code changes
+  TEMP_DIR: "/app/temp_audio"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -71,7 +71,7 @@ spec:
     spec:
       containers:
       - name: master
-        image: redis:7-alpine # Lightweight Redis image
+        image: redis:7-alpine
         resources:
           limits:
             cpu: 2000m
@@ -97,7 +97,7 @@ spec:
   selector:
     app: redis
     tier: backend
-  type: ClusterIP # Internal service only
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -106,11 +106,10 @@ metadata:
   namespace: playlist
 spec:
   accessModes:
-    - ReadWriteOnce # Suitable for a single PostgreSQL instance
+    - ReadWriteOnce
   resources:
     requests:
-      storage: 5Gi # Adjust storage size as needed
-  # storageClassName: "your-storage-class" # Uncomment and specify if you have a specific storage class
+      storage: 5Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -134,7 +133,7 @@ spec:
     spec:
       containers:
       - name: postgres
-        image: postgres:15-alpine # Using PostgreSQL 15
+        image: postgres:15-alpine
         imagePullPolicy: "IfNotPresent"
         ports:
         - containerPort: 5432
@@ -159,16 +158,16 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgres-service # Service name used in DATABASE_URL
+  name: postgres-service
   namespace: playlist
 spec:
   selector:
     app: postgres
   ports:
   - protocol: TCP
-    port: 5432 # Default PostgreSQL port
+    port: 5432
     targetPort: 5432
-  type: ClusterIP # Internal service
+  type: ClusterIP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -191,29 +190,29 @@ spec:
         component: flask
     spec:
       securityContext:
-        runAsUser: 0 # Or a non-root user if your image supports it
-        runAsGroup: 0 # Added fsGroup for consistency if needed by volumes
+        runAsUser: 0
+        runAsGroup: 0
         fsGroup: 0
       containers:
       - name: flask-app
-        image: ghcr.io/neptunehub/audiomuse-ai:0.6.1-beta # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.6.1-beta
         imagePullPolicy: Always
         ports:
-        - containerPort: 8000 # Flask app listens on 8000
+        - containerPort: 8000
         env:
         - name: SERVICE_TYPE
-          value: "flask" # Tells the container to run the Flask app
-        # --- Load Jellyfin Credentials from Secret ---
-        - name: JELLYFIN_USER_ID
+          value: "flask"
+        # --- Load Navidrome Credentials from Secret ---
+        - name: NAVIDROME_USER
           valueFrom:
             secretKeyRef:
-              name: jellyfin-credentials
-              key: user_id
-        - name: JELLYFIN_TOKEN
+              name: navidrome-credentials
+              key: NAVIDROME_USER
+        - name: NAVIDROME_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: jellyfin-credentials
-              key: api_token
+              name: navidrome-credentials
+              key: NAVIDROME_PASSWORD
         # --- Load PostgreSQL Credentials from Secret ---
         - name: POSTGRES_USER
           valueFrom:
@@ -277,9 +276,9 @@ spec:
     component: flask
   ports:
   - protocol: TCP
-    port: 8000 # Service port (what you connect to)
-    targetPort: 8000 # Container port (what the app listens on)
-  type: LoadBalancer # Or NodePort/ClusterIP depending on your K3S setup
+    port: 8000
+    targetPort: 8000
+  type: LoadBalancer
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -290,7 +289,7 @@ metadata:
     app: audiomuse-ai
     component: worker
 spec:
-  replicas: 3 # Scale as needed. Each replica runs both a high-priority and a default-priority worker process.
+  replicas: 3
   selector:
     matchLabels:
       app: audiomuse-ai
@@ -307,22 +306,22 @@ spec:
         fsGroup: 0
       containers:
       - name: rq-worker
-        image: ghcr.io/neptunehub/audiomuse-ai:0.6.1-beta # Your image from GHCR
+        image: ghcr.io/neptunehub/audiomuse-ai:0.6.1-beta
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE
-          value: "worker" # Tells the container to run the RQ worker
-        # --- Load Jellyfin Credentials from Secret ---
-        - name: JELLYFIN_USER_ID
+          value: "worker"
+        # --- Load Navidrome Credentials from Secret ---
+        - name: NAVIDROME_USER
           valueFrom:
             secretKeyRef:
-              name: jellyfin-credentials
-              key: user_id
-        - name: JELLYFIN_TOKEN
+              name: navidrome-credentials
+              key: NAVIDROME_USER
+        - name: NAVIDROME_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: jellyfin-credentials
-              key: api_token
+              name: navidrome-credentials
+              key: NAVIDROME_PASSWORD
         # --- Load PostgreSQL Credentials from Secret ---
         - name: POSTGRES_USER
           valueFrom:

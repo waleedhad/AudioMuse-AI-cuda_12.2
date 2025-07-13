@@ -17,6 +17,19 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
 
 # RQ import
 from rq import Retry
+# Import app-level components here to avoid circular imports at module level
+from app import (
+    rq_queue_high,
+    clean_successful_task_details_on_new_start,
+    save_task_status,
+    get_db,
+    TASK_STATUS_PENDING,
+    TASK_STATUS_SUCCESS,
+    TASK_STATUS_FAILURE,
+    TASK_STATUS_REVOKED
+)
+from psycopg2.extras import DictCursor
+
 
 logger = logging.getLogger(__name__)
 
@@ -208,15 +221,24 @@ def start_clustering_endpoint():
                         status:
                             type: string
     """
-    # Import app-level components here to avoid circular imports at module level
-    from app import (
-        rq_queue_high,
-        clean_successful_task_details_on_new_start,
-        save_task_status,
-        TASK_STATUS_PENDING
-    )
+    # Check for an existing active task to prevent parallel runs
+    db = get_db()
+    cur = db.cursor(cursor_factory=DictCursor)
+    non_terminal_statuses = (TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED)
+    cur.execute("""
+        SELECT task_id, status FROM task_status 
+        WHERE task_type = 'main_clustering' AND status NOT IN %s
+    """, (non_terminal_statuses,))
+    active_task = cur.fetchone()
+    cur.close()
 
-    # Enqueue by string to avoid circular imports
+    if active_task:
+        return jsonify({
+            "error": "An active clustering task is already in progress.",
+            "task_id": active_task['task_id'],
+            "status": active_task['status']
+        }), 409
+
     data = request.json
     job_id = str(uuid.uuid4())
 
