@@ -197,7 +197,12 @@ def get_navidrome_auth_params():
         return {}
     
     salt = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-    token = hashlib.md5((config.NAVIDROME_PASSWORD + salt).encode('utf-8')).hexdigest()
+    token = hashlib.pbkdf2_hmac(
+        'sha256',
+        config.NAVIDROME_PASSWORD.encode('utf-8'),
+        salt.encode('utf-8'),
+        100000  # Number of iterations
+    ).hex()
     
     return {
         "u": config.NAVIDROME_USER,
