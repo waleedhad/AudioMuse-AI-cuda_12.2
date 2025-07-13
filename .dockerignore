@@ -13,6 +13,7 @@ Dockerfile
 # Deployment files
 # These are for deploying the container, not for running the code inside it.
 deployments/
+test/
 
 # Python virtual environment and cache
 __pycache__/
@@ -34,4 +35,5 @@ docs/
 screenshot/
 .pytest_cache/
 htmlcov/
+.coverage
 *.log
