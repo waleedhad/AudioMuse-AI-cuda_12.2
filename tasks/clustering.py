@@ -200,6 +200,12 @@ def run_clustering_task(
     logger.info(f"Starting main clustering task {current_task_id}")
 
     with app.app_context():
+        # IDEMPOTENCY CHECK
+        task_info = get_task_info_from_db(current_task_id)
+        if task_info and task_info.get('status') in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+            logger.info(f"Main clustering task {current_task_id} is already in a terminal state ('{task_info.get('status')}'). Skipping execution.")
+            return {"status": task_info.get('status'), "message": f"Task already in terminal state '{task_info.get('status')}'.", "details": json.loads(task_info.get('details', '{}'))}
+
         # This dictionary will hold the state and be passed to the logging function.
         _main_task_accumulated_details = {
             "log": [],
@@ -263,8 +269,18 @@ def run_clustering_task(
             next_batch_to_launch = 0
             batches_completed_count = 0
 
-            initial_subset_data = _get_stratified_song_subset(genre_map, target_songs_per_genre)
-            _main_task_accumulated_details["last_subset_ids"] = [t['item_id'] for t in initial_subset_data]
+            # STATE RECOVERY
+            child_tasks_from_db = get_child_tasks_from_db(current_task_id)
+            if child_tasks_from_db:
+                logger.info(f"Found {len(child_tasks_from_db)} existing child tasks. Attempting state recovery.")
+                _monitor_and_process_batches(_main_task_accumulated_details, current_task_id, initial_check=True)
+                batches_completed_count = len([j for j in child_tasks_from_db if j['status'] in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE]])
+                next_batch_to_launch = batches_completed_count
+                logger.info(f"Recovery complete. Resuming. Batches completed: {batches_completed_count}, Next batch: {next_batch_to_launch}")
+
+            if not _main_task_accumulated_details["last_subset_ids"]:
+                initial_subset_data = _get_stratified_song_subset(genre_map, target_songs_per_genre)
+                _main_task_accumulated_details["last_subset_ids"] = [t['item_id'] for t in initial_subset_data]
 
             while batches_completed_count < num_total_batches:
                 if current_job and (current_job.is_stopped or get_task_info_from_db(current_task_id).get('status') == TASK_STATUS_REVOKED):
@@ -354,11 +370,18 @@ def _calculate_target_songs_per_genre(genre_map, percentile, min_songs):
     target = np.percentile(counts, np.clip(percentile, 0, 100))
     return max(min_songs, int(np.floor(target)))
 
-def _monitor_and_process_batches(state_dict, parent_task_id):
+def _monitor_and_process_batches(state_dict, parent_task_id, initial_check=False):
     """Checks status of active jobs, processes results of finished ones."""
+    if initial_check:
+        # On recovery, check all child tasks from DB, not just ones in memory
+        job_ids_to_check = [task['task_id'] for task in get_child_tasks_from_db(parent_task_id)]
+    else:
+        job_ids_to_check = list(state_dict["active_jobs"].keys())
+
     finished_job_ids = []
-    for job_id, job in list(state_dict["active_jobs"].items()):
+    for job_id in job_ids_to_check:
         try:
+            job = Job.fetch(job_id, connection=redis_conn)
             if job.is_finished or job.is_failed or job.get_status() == JobStatus.CANCELED:
                 finished_job_ids.append(job_id)
         except NoSuchJobError:
