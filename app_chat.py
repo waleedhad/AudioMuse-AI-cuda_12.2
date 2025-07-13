@@ -699,4 +699,4 @@ def create_media_server_playlist_api():
             except: pass # nosec
         logger.error("Error in create_media_server_playlist_api: %s", error_details_for_server, exc_info=True)
         # Return generic error to client
-        return jsonify({"message": f"An error occurred while creating the playlist: {str(e)}"}), 500
+        return jsonify({"message": "An internal error occurred while creating the playlist."}), 500
