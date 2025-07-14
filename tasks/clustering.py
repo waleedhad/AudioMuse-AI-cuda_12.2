@@ -199,6 +199,33 @@ def run_clustering_task(
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
     logger.info(f"Starting main clustering task {current_task_id}")
 
+    # Capture initial parameters for the final report
+    initial_params = {
+        "clustering_method": clustering_method,
+        "pca_components_min": pca_components_min,
+        "pca_components_max": pca_components_max,
+        "use_embeddings": enable_clustering_embeddings_param,
+        "stratification_percentile": stratified_sampling_target_percentile_param,
+        "score_weights": {
+            "mood_diversity": score_weight_diversity_param,
+            "silhouette": score_weight_silhouette_param,
+            "davies_bouldin": score_weight_davies_bouldin_param,
+            "calinski_harabasz": score_weight_calinski_harabasz_param,
+            "mood_purity": score_weight_purity_param,
+            "other_feature_diversity": score_weight_other_feature_diversity_param,
+            "other_feature_purity": score_weight_other_feature_purity_param
+        }
+    }
+    if clustering_method == 'kmeans':
+        initial_params["num_clusters_min"] = num_clusters_min
+        initial_params["num_clusters_max"] = num_clusters_max
+    elif clustering_method == 'gmm':
+        initial_params["num_clusters_min"] = gmm_n_components_min
+        initial_params["num_clusters_max"] = gmm_n_components_max
+    elif clustering_method == 'spectral':
+        initial_params["num_clusters_min"] = spectral_n_clusters_min
+        initial_params["num_clusters_max"] = spectral_n_clusters_max
+
     with app.app_context():
         # IDEMPOTENCY CHECK
         task_info = get_task_info_from_db(current_task_id)
@@ -337,12 +364,37 @@ def run_clustering_task(
 
             update_playlist_table(final_playlists_with_details)
 
+            # --- Final Success Reporting ---
+            final_message = "Clustering task completed successfully!"
+            
+            # Add final message to the log before preparing the summary
+            log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {final_message}"
+            _main_task_accumulated_details["log"].append(log_entry)
+            logger.info(f"[MainClusteringTask-{current_task_id}] {final_message}")
+
+            final_log = _main_task_accumulated_details.get('log', [])
+            truncated_log = final_log[-10:]
+
+            # This dictionary is the final, clean state for the DB.
+            # It includes running parameters, excludes elite solutions, and has a truncated log.
             final_db_summary = {
+                "status_message": final_message,
+                "running_parameters": initial_params,
                 "best_score": _main_task_accumulated_details["best_score"],
                 "best_params": _main_task_accumulated_details["best_result"].get("parameters"),
-                "num_playlists_created": len(final_playlists_with_details)
+                "num_playlists_created": len(final_playlists_with_details),
+                "log": truncated_log,
+                "log_storage_info": f"Log truncated to last {len(truncated_log)} entries. Original length: {len(final_log)}." if len(final_log) > 10 else "Full log."
             }
-            _log_and_update("Clustering task completed successfully!", 100, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
+            
+            if current_job:
+                current_job.meta['progress'] = 100
+                current_job.meta['status_message'] = final_message
+                current_job.save_meta()
+
+            # Direct call to save_task_status with the clean details object
+            save_task_status(current_task_id, "main_clustering", TASK_STATUS_SUCCESS, progress=100, details=final_db_summary)
+
             return {"status": "SUCCESS", "message": f"Playlists created. Best score: {_main_task_accumulated_details['best_score']:.2f}"}
 
         except Exception as e:
