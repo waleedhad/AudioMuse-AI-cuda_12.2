@@ -82,11 +82,13 @@ body:
     id: playlist-evaluation
     attributes:
       label: "3. Playlist Evaluation"
-      description: "Genre Diversity = how well were the different genres within your library represented by the generated playlists? "
+      description: "Genre Diversity = how well were the different genres within your library represented by the generated playlists? ((1 = worst, 5 = best) 
+      Amount of Playlist (1=too few, 2=just right, 3=too many) 
+      Overall Quality (from 1 to 5"
       value: |
-        | Test # | Genre Diversity (1 = worst, 5 = best)      | Amount of Playlist (1=too few, 2=just right, 3=too many)| Overall Quality (from 1 to 5)| Comments  |
-        |-------:|:------------------------------------------:|:-------------------------------------------------:|:-----------------------------:|:--------:|
-        | 1      |                                            |                                                   |                               |          |
+        | Test # | Genre Diversity | Amount of Playlist | Overall Quality| Comments  |
+        |-------:|:------------------------------------------:|:---------------------------------:|:------------------:|:--------:|
+        | 1      |                                            |                      |                               |          |
         | 2      |                                            |                                                   |                               |          |
         | 3      |                                            |                                                   |                               |          |
         | 4      |                                            |                                                   |                               |          |
