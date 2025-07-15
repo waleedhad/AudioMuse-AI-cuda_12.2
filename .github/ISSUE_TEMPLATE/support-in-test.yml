@@ -96,7 +96,7 @@ body:
         | 8      |                  |                  |                  |          |
         | 9      |                  |                  |                  |          |
 
-  - type: radio
+  - type: dropdown
     id: genre-representation
     attributes:
       label: "4. How well were the different genres within your library represented by the generated playlists?"
@@ -109,7 +109,7 @@ body:
     validations:
       required: false
 
-  - type: radio
+  - type: dropdown
     id: playlist-quantity
     attributes:
       label: "5. How was the amount of playlists?"
