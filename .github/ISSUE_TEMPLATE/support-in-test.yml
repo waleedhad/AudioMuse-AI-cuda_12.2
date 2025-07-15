@@ -5,7 +5,7 @@ labels:
   - "Support in Test"
 
 body:
-  # Introductory markdown
+  # Introductory section
   - type: markdown
     attributes:
       value: |
@@ -29,10 +29,10 @@ body:
         1. Set up AudioMuse. You can run an analysis and clustering to make sure it works correctly.
         2. Run at least one analysis task (skip this if you've done this already). You could limit the number of recent albums used for the analysis to speed things up, but this will affect the quality of your results. So if you have the patience, please leave "Number of recent albums" set to `0`.
         3. Configure the first/next parameter set from the "Test Parameters" section below. Use the "Advanced" tab in AudioMuse for this, and enter the values in the "Clustering Parameters" section. Any parameter that is not explicitly mentioned can be left as the default. **If** you change any other parameter after test 8, please let use know what you changed.
-        4. Start the **clustering** task (button "Start Clustering" in the "Run Tasks" section) and wait for the task to finish
+        4. Start the **clustering** task (button "Start Clustering" in the "Run Tasks" section) and wait for the task to finish.
         5. Enter the results into the "Performance Properties" table (in this survey, below). You can find those values in the "Task Status" section; some of them are in the "Details / Log" area.
-        6. Take a look at the generated playlists (in Jellyfin, or in the "Generated Playlists" section in AudioMuse), or even listen to them. Then evaluate the quality of the playlists in the "Playlist Evaluation" section below. Would you consider these playlists to be good mixes?
-        7. You add any additional notes or feedback at the end. If something isn't working for you and/or you see errors, feel free to [create a bug report on GitHub](https://github.com/NeptuneHub/AudioMuse-AI/issues/new?template=bug_report.md)
+        6. Review the generated playlists (in Jellyfin or in AudioMuse’s "Generated Playlists" section), then evaluate their quality below.
+        7. Add any additional notes or feedback at the end. If something isn't working or you see errors, feel free to [create a bug report on GitHub](https://github.com/NeptuneHub/AudioMuse-AI/issues/new?template=bug_report.md)
 
   # 1. Test Setup
   - type: textarea
@@ -69,77 +69,301 @@ body:
     id: performance-properties
     attributes:
       label: "2.1 Performance Properties"
-      description: "Paste in clustering runtime, best score, and number of playlists created per test."
+      description: "Paste clustering runtime, best score, and number of playlists created per test."
       value: |
-        | Test # | Runtime | Best Score | num_playlists_created |
-        |--------|---------|------------|------------------------|
-        | 1      |         |            |                        |
-        | 2      |         |            |                        |
-        | 3      |         |            |                        |
-        | 4      |         |            |                        |
-        | 5      |         |            |                        |
-        | 6      |         |            |                        |
-        | 7      |         |            |                        |
-        | 8      |         |            |                        |
-        | 9      |         |            |                        |
+        | Test # | Runtime | Best Score | # Playlists |
+        |--------|---------|------------|-------------|
+        | 1      |         |            |             |
+        | 2      |         |            |             |
+        | 3      |         |            |             |
+        | 4      |         |            |             |
+        | 5      |         |            |             |
+        | 6      |         |            |             |
+        | 7      |         |            |             |
+        | 8      |         |            |             |
+        | 9      |         |            |             |
 
-  # 3. Playlist Evaluation (per test)
-  # Repeat these four fields for tests 1 through 9
-  - type: dropdown
-    id: test1_genre_diversity
+  # 3. Playlist Evaluation
+  - type: markdown
     attributes:
-      label: "Test 1 – Genre Diversity (1=worst, 5=best)"
-      options: ["1", "2", "3", "4", "5"]
-    validations:
-      required: true
+      value: |
+        ## 3. Playlist Evaluation
+        For each test below, rate Genre Diversity, Genre Coherence, and Overall Quality (1=worst to 5=best), then add comments.
 
-  - type: dropdown
-    id: test1_genre_coherence
+  # Group each test in a collapsible section
+  - type: details
     attributes:
-      label: "Test 1 – Genre Coherence (1=worst, 5=best)"
-      options: ["1", "2", "3", "4", "5"]
-    validations:
-      required: true
+      summary: "Test 1 Evaluation"
+    body:
+      - type: dropdown
+        id: test1_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test1_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test1_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test1_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
 
-  - type: dropdown
-    id: test1_overall_quality
+  - type: details
     attributes:
-      label: "Test 1 – Overall Quality (1=worst, 5=best)"
-      options: ["1", "2", "3", "4", "5"]
-    validations:
-      required: true
+      summary: "Test 2 Evaluation"
+    body:
+      - type: dropdown
+        id: test2_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test2_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test2_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test2_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
 
-  - type: textarea
-    id: test1_comments
+  # …repeat details blocks through Test 9…
+  - type: details
     attributes:
-      label: "Test 1 – Comments"
-      description: "Any observations or notes?"
-
-  # …repeat Test 2 through Test 9 fields similarly…
-
-  - type: dropdown
-    id: genre-representation
+      summary: "Test 3 Evaluation"
+    body:
+      - type: dropdown
+        id: test3_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test3_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test3_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test3_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
+  - type: details
     attributes:
-      label: "4. How well were the different genres within your library represented by the generated playlists?"
-      options:
-        - "Not at all"
-        - "Slightly"
-        - "Moderately"
-        - "Well"
-        - "Very well"
-    validations:
-      required: false
-
-  - type: dropdown
-    id: playlist-quantity
+      summary: "Test 4 Evaluation"
+    body:
+      - type: dropdown
+        id: test4_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test4_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test4_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test4_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
+  - type: details
     attributes:
-      label: "5. How was the amount of playlists?"
-      options:
-        - "Too few"
-        - "Just right"
-        - "Too many"
-    validations:
-      required: false
+      summary: "Test 5 Evaluation"
+    body:
+      - type: dropdown
+        id: test5_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test5_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test5_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test5_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
+  - type: details
+    attributes:
+      summary: "Test 6 Evaluation"
+    body:
+      - type: dropdown
+        id: test6_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test6_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test6_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test6_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
+  - type: details
+    attributes:
+      summary: "Test 7 Evaluation"
+    body:
+      - type: dropdown
+        id: test7_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test7_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test7_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test7_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
+  - type: details
+    attributes:
+      summary: "Test 8 Evaluation"
+    body:
+      - type: dropdown
+        id: test8_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test8_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test8_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test8_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
+  - type: details
+    attributes:
+      summary: "Test 9 Evaluation"
+    body:
+      - type: dropdown
+        id: test9_genre_diversity
+        attributes:
+          label: "Genre Diversity"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test9_genre_coherence
+        attributes:
+          label: "Genre Coherence"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: dropdown
+        id: test9_overall_quality
+        attributes:
+          label: "Overall Quality"
+          options: ["1", "2", "3", "4", "5"]
+        validations:
+          required: true
+      - type: textarea
+        id: test9_comments
+        attributes:
+          label: "Comments"
+          description: "Any observations?"
 
   - type: textarea
     id: additional-feedback
