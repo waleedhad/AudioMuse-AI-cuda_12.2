@@ -20,8 +20,8 @@ The **supported architecture** are:
 * **arm64**: Supported
 
 **Related repository:** 
-  * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm):
-  * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin):
+  * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm)
+  * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin)
 
 ## **Table of Contents**
 
