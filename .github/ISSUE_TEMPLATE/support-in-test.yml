@@ -101,11 +101,11 @@ body:
     attributes:
       label: "4. How well were the different genres within your library represented by the generated playlists?"
       options:
-        - label: "Not at all"
-        - label: "Slightly"
-        - label: "Moderately"
-        - label: "Well"
-        - label: "Very well"
+        - "Not at all"
+        - "Slightly"
+        - "Moderately"
+        - "Well"
+        - "Very well"
     validations:
       required: false
 
@@ -114,9 +114,9 @@ body:
     attributes:
       label: "5. How was the amount of playlists?"
       options:
-        - label: "Too few"
-        - label: "Just right"
-        - label: "Too many"
+        - "Too few"
+        - "Just right"
+        - "Too many"
     validations:
       required: false
       
