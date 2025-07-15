@@ -66,7 +66,8 @@ body:
       label: "2.1 Performance Properties"
       description: "Paste runtime, best score, and number of playlists created for each test."
       value: |
-        | Test # | Runtime | Best Score | Playlists Created |
+        | Test # | Runtime | Best Score | #Playlists Created|
+        | Test # | HH:MM:SS|xx.xx       | Just the number   |
         |-------:|:-------:|:----------:|:-----------------:|
         | 1      |         |            |                   |
         | 2      |         |            |                   |
@@ -82,21 +83,21 @@ body:
     id: playlist-evaluation
     attributes:
       label: "3. Playlist Evaluation"
-      description: "Genre Diversity = how well were the different genres within your library represented by the generated playlists? ((1 = worst, 5 = best) 
-      Amount of Playlist (1=too few, 2=just right, 3=too many) 
-      Overall Quality (from 1 to 5"
+      description: "Genre Diversity = how well were the different genres within your library represented by the generated playlists?  
+      Amount of Playlist = how was the amount of playlists? 1=too few, 2=ok, 3= too many"
       value: |
         | Test # | Genre Diversity | Amount of Playlist | Overall Quality| Comments  |
-        |-------:|:------------------------------------------:|:---------------------------------:|:------------------:|:--------:|
-        | 1      |                                            |                      |                               |          |
-        | 2      |                                            |                                                   |                               |          |
-        | 3      |                                            |                                                   |                               |          |
-        | 4      |                                            |                                                   |                               |          |
-        | 5      |                                            |                                                   |                               |          |
-        | 6      |                                            |                                                   |                               |          |
-        | 7      |                                            |                                                   |                               |          |
-        | 8      |                                            |                                                   |                               |          |
-        | 9      |                                            |                                                   |                               |          |
+        |        | 1=worst, 5=best | 1,2 or 3           | 1=worst, 5=best|           |
+        |-------:|:---------------:|:------------------:|:--------------:|:---------:|
+        | 1      |                 |                    |                |           |
+        | 2      |                 |                    |                |           |
+        | 3      |                 |                    |                |           |
+        | 4      |                 |                    |                |           |
+        | 5      |                 |                    |                |           |
+        | 6      |                 |                    |                |           |
+        | 7      |                 |                    |                |           |
+        | 8      |                 |                    |                |           |
+        | 9      |                 |                    |                |           |
 
   - type: textarea
     id: additional-feedback
