@@ -19,6 +19,10 @@ The **supported architecture** are:
 * **amd64**: Supported
 * **arm64**: Supported
 
+**Related repository:** 
+  * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm):
+  * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin):
+
 ## **Table of Contents**
 
 - [Quick Start Deployment on K3S WITH HELM](#quick-start-deployment-on-k3s-with-helm)
