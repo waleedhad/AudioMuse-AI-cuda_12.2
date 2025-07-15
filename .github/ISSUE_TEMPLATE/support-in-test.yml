@@ -96,10 +96,34 @@ body:
         | 8      |                  |                  |                  |          |
         | 9      |                  |                  |                  |          |
 
+  - type: radio
+    id: genre-representation
+    attributes:
+      label: "4. How well were the different genres within your library represented by the generated playlists?"
+      options:
+        - label: "Not at all"
+        - label: "Slightly"
+        - label: "Moderately"
+        - label: "Well"
+        - label: "Very well"
+    validations:
+      required: false
+
+  - type: radio
+    id: playlist-quantity
+    attributes:
+      label: "5. How was the amount of playlists?"
+      options:
+        - label: "Too few"
+        - label: "Just right"
+        - label: "Too many"
+    validations:
+      required: false
+      
   - type: textarea
     id: additional-feedback
     attributes:
-      label: "4. Additional Feedback"
+      label: "6. Additional Feedback"
       description: "Bugs, unexpected behavior, suggestions? Let us know."
       value: |
         - Playlist creation failed after test 4
