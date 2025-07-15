@@ -1,9 +1,11 @@
 name: "Support in Test"
 description: Help test clustering algorithms and evaluate playlists with AudioMuse
 title: "[Test] Your Library Name / Date"
-labels: ["Support in Test"]
+labels:
+  - "Support in Test"
 
 body:
+  # Introductory markdown
   - type: markdown
     attributes:
       value: |
@@ -32,6 +34,7 @@ body:
         6. Take a look at the generated playlists (in Jellyfin, or in the "Generated Playlists" section in AudioMuse), or even listen to them. Then evaluate the quality of the playlists in the "Playlist Evaluation" section below. Would you consider these playlists to be good mixes?
         7. You add any additional notes or feedback at the end. If something isn't working for you and/or you see errors, feel free to [create a bug report on GitHub](https://github.com/NeptuneHub/AudioMuse-AI/issues/new?template=bug_report.md)
 
+  # 1. Test Setup
   - type: textarea
     id: test-setup
     attributes:
@@ -45,6 +48,7 @@ body:
     validations:
       required: true
 
+  # 2. Test Parameters
   - type: checkboxes
     id: test-parameters
     attributes:
@@ -60,6 +64,7 @@ body:
         - label: "Test 8 – Spectral, 5000 runs, PCA 0–199, Embeddings: YES"
         - label: "Test 9 – Custom or Other (describe below)"
 
+  # 2.1 Performance Properties
   - type: textarea
     id: performance-properties
     attributes:
@@ -78,23 +83,39 @@ body:
         | 8      |         |            |                        |
         | 9      |         |            |                        |
 
-  - type: textarea
-    id: playlist-evaluation
+  # 3. Playlist Evaluation (per test)
+  # Repeat these four fields for tests 1 through 9
+  - type: dropdown
+    id: test1_genre_diversity
     attributes:
-      label: "3. Playlist Evaluation"
-      description: "Rate each test from 1 (worst) to 5 (best), and add any comments."
-      value: |
-        | Test # | Genre Diversity | Genre Coherence | Overall Quality | Comments |
-        |--------|------------------|------------------|------------------|----------|
-        | 1      |                  |                  |                  |          |
-        | 2      |                  |                  |                  |          |
-        | 3      |                  |                  |                  |          |
-        | 4      |                  |                  |                  |          |
-        | 5      |                  |                  |                  |          |
-        | 6      |                  |                  |                  |          |
-        | 7      |                  |                  |                  |          |
-        | 8      |                  |                  |                  |          |
-        | 9      |                  |                  |                  |          |
+      label: "Test 1 – Genre Diversity (1=worst, 5=best)"
+      options: ["1", "2", "3", "4", "5"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: test1_genre_coherence
+    attributes:
+      label: "Test 1 – Genre Coherence (1=worst, 5=best)"
+      options: ["1", "2", "3", "4", "5"]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: test1_overall_quality
+    attributes:
+      label: "Test 1 – Overall Quality (1=worst, 5=best)"
+      options: ["1", "2", "3", "4", "5"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: test1_comments
+    attributes:
+      label: "Test 1 – Comments"
+      description: "Any observations or notes?"
+
+  # …repeat Test 2 through Test 9 fields similarly…
 
   - type: dropdown
     id: genre-representation
@@ -119,15 +140,11 @@ body:
         - "Too many"
     validations:
       required: false
-      
+
   - type: textarea
     id: additional-feedback
     attributes:
       label: "6. Additional Feedback"
       description: "Bugs, unexpected behavior, suggestions? Let us know."
-      value: |
-        - Playlist creation failed after test 4
-        - UI lagged during clustering
-        - Would love a dark theme option
     validations:
       required: false
