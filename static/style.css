@@ -1,0 +1,592 @@
+/* --- Base & Typography --- */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    margin: 0;
+    background-color: #F9FAFB; /* Light mode background */
+    color: #1F2937; /* Default text color */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Main Container --- */
+.container {
+    width: 100%;
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0 1rem; /* Add horizontal padding for smaller screens */
+}
+
+/* --- Headers --- */
+h1 {
+    font-size: 1.875rem; /* text-3xl equivalent */
+    color: #111827; /* Darker text for titles */
+    font-weight: 700;
+}
+
+h2 {
+    font-size: 1.5rem;
+    color: #111827;
+    margin: 0;
+    font-weight: 600;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+h3 {
+    color: #1F2937;
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+h4 {
+    font-size: 1.125rem;
+    color: #374151;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+/* --- Sections --- */
+section {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background-color: #FFFFFF; /* White background for sections */
+    border-radius: 1rem; /* Softer, larger radius */
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); /* Subtle shadow */
+    border: 1px solid #E5E7EB;
+}
+
+/* --- Configuration Header & View Switcher (for index.html) --- */
+#config-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.config-title-group {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.config-title-group .subtitle {
+    margin-top: 0;
+    color: #4B5563;
+}
+
+#config-header h1 {
+    border: none;
+    padding: 0;
+    margin-bottom: 0.5rem;
+}
+
+.header-controls {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.view-switcher button {
+    background-color: #FFFFFF;
+    color: #374151;
+    border: 1px solid #D1D5DB;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.view-switcher button.active {
+    background-color: #2563EB;
+    color: #FFFFFF;
+    border-color: #2563EB;
+}
+
+.view-switcher button:not(.active):hover {
+    background-color: #F9FAFB;
+}
+
+/* --- Form Styling --- */
+form {
+    color: #374151;
+}
+
+fieldset {
+    border: 1px solid #D1D5DB;
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+legend {
+    color: #111827;
+    font-size: 1.25rem;
+    font-weight: 500;
+    padding: 0 0.5rem;
+}
+
+.param-group {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+}
+
+label {
+    display: block;
+    font-size: 0.875rem;
+    color: #4B5563;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+select,
+textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    background-color: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    color: #111827;
+    box-sizing: border-box;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    font-size: 1rem; /* Ensure consistent font size */
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+textarea {
+    min-height: 120px;
+    resize: vertical;
+}
+
+/* --- AI Provider Specific Config Groups --- */
+#ollama-config-group,
+#gemini-config-group {
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    margin-top: 1rem;
+    background-color: #F9FAFB;
+}
+
+/* --- Buttons --- */
+.task-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.task-buttons button,
+#cancel-task-btn,
+#playlistForm button,
+#similarity-form button,
+#playlist-form button,
+#createPlaylistForm button {
+    flex-grow: 1;
+    color: white;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    width: 100%;
+    font-size: 1rem;
+    margin-top: 1rem; /* Add space above buttons */
+}
+
+#start-analysis-btn,
+#start-clustering-btn,
+#fetch-playlists-btn,
+#playlistForm button,
+#similarity-form button {
+    background-color: #2563EB;
+}
+
+#start-analysis-btn:hover,
+#start-clustering-btn:hover,
+#fetch-playlists-btn:hover,
+#playlistForm button:hover,
+#similarity-form button:hover {
+    background-color: #1D4ED8;
+}
+
+#createPlaylistForm button,
+#playlist-form button[style*="background-color: #16A34A"] {
+    background-color: #16A34A !important; /* Green */
+}
+#createPlaylistForm button:hover,
+#playlist-form button[style*="background-color: #16A34A"]:hover {
+    background-color: #15803D !important;
+}
+
+
+#cancel-task-btn {
+    background-color: #DC2626;
+}
+#cancel-task-btn:hover {
+    background-color: #B91C1C;
+}
+
+button:disabled,
+#cancel-task-btn:disabled {
+    background-color: #93C5FD !important;
+    cursor: not-allowed !important;
+    opacity: 1 !important;
+}
+#cancel-task-btn:disabled {
+    background-color: #FCA5A5 !important;
+}
+
+
+/* --- Task Status --- */
+#task-status-display {
+    background-color: #F3F4F6;
+    padding: 1rem;
+    border-radius: 0.5rem;
+}
+
+#task-status-display p {
+    margin: 0.5rem 0;
+    color: #4B5563;
+    word-break: break-all;
+}
+
+#task-status-display .status-label {
+    color: #1F2937;
+    font-weight: 500;
+}
+
+#status-status {
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    display: inline-block;
+}
+
+.status-idle {
+    color: #374151;
+    background-color: #E5E7EB;
+}
+.status-pending {
+    color: #9A3412;
+    background-color: #FEF0C7;
+}
+.status-success {
+    color: #166534;
+    background-color: #D1FAE5;
+}
+.status-failure {
+    color: #991B1B;
+    background-color: #FEE2E2;
+}
+
+.progress-bar-container {
+    width: 100%;
+    background-color: #E5E7EB;
+    border-radius: 9999px;
+    height: 0.625rem;
+    margin-top: 0.5rem;
+    overflow: hidden;
+}
+
+#progress-bar {
+    background-color: #2563EB;
+    height: 100%;
+    border-radius: 9999px;
+    width: 0%;
+    transition: width 0.3s ease-in-out;
+}
+
+#status-details {
+    background-color: #E5E7EB;
+    padding: 1rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    overflow: auto;
+    max-height: 15rem;
+    color: #1F2937;
+    white-space: pre-wrap;
+    margin-top: 1rem;
+}
+
+/* --- Playlists Section --- */
+#playlists-section {
+    display: none;
+}
+
+#playlists-container {
+    color: #374151;
+}
+
+.playlist-item {
+    background-color: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.playlist-header {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.playlist-name {
+    color: #111827;
+    font-weight: 600;
+}
+
+.playlist-song-count {
+    color: #4B5563;
+    font-size: 0.875rem;
+}
+
+.show-songs-btn {
+    margin-left: auto;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.song-list {
+    margin-top: 0.75rem;
+    list-style-type: decimal;
+    padding-left: 1.5rem;
+    color: #4B5563;
+}
+
+/* --- App Version in Sidebar --- */
+.app-version {
+    /* This will now appear directly after the navigation links */
+    padding: 2rem 1rem 1rem 1rem; /* Extra top padding to space it from the last link */
+    font-size: 0.8rem; /* Smaller font */
+    color: #6B7280; /* Grey text color */
+    text-align: center;
+    /* Ensure long text wraps and doesn't get truncated */
+    overflow-wrap: break-word;
+}
+
+/* --- Utility --- */
+.hidden {
+    display: none !important;
+}
+
+/* --- Styles for Chat & Similarity Pages --- */
+
+/* General page header for chat/similarity */
+.page-header {
+    text-align: center;
+    padding-bottom: 1.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+.page-header h1 {
+    margin-bottom: 0.5rem;
+}
+
+.page-header p {
+    color: #4B5563;
+    margin-top: 0;
+}
+
+/* Chat page specific */
+#responseArea {
+    background-color: #F3F4F6;
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    min-height: 100px;
+    color: #374151;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-top: 1rem;
+}
+
+#responseArea .italic {
+    color: #6B7280;
+    font-style: italic;
+}
+
+#responseArea .text-red-600 {
+    color: #DC2626;
+    font-weight: 600;
+}
+
+#createPlaylistSection {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    background-color: #F9FAFB;
+}
+
+/* Similarity page specific */
+.autocomplete-container {
+    position: relative;
+}
+
+.autocomplete-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: white;
+    border: 1px solid #D1D5DB;
+    border-top: none;
+    border-radius: 0 0 0.5rem 0.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+.autocomplete-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+}
+
+.autocomplete-item:hover, .autocomplete-item.active {
+    background-color: #F3F4F6;
+}
+
+.autocomplete-item .title {
+    font-weight: 600;
+    color: #111827;
+}
+
+.autocomplete-item .artist {
+    font-size: 0.875rem;
+    color: #4B5563;
+}
+
+#results-table-wrapper {
+    background-color: #F9FAFB;
+    padding: 0; /* Remove padding to let table be full width */
+    border-radius: 0.5rem;
+    overflow-x: auto; /* For responsive tables */
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #E5E7EB;
+    white-space: nowrap; /* Prevent text wrapping */
+}
+
+th {
+    background-color: #F3F4F6;
+    font-weight: 600;
+    color: #374151;
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr:hover {
+    background-color: #f3f4f6;
+}
+
+#playlist-creator {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid #E5E7EB;
+    border-radius: 0.5rem;
+    background-color: #F9FAFB;
+}
+
+/* Status messages */
+#status, #playlist-status, #jellyfinResponseArea {
+    margin-top: 1rem;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    text-align: center;
+    border-radius: 0.375rem;
+}
+
+#jellyfinResponseArea.text-green-600, .status-success {
+    color: #166534;
+    background-color: #D1FAE5;
+}
+
+#jellyfinResponseArea.text-red-600, .status-error {
+    color: #991B1B;
+    background-color: #FEE2E2;
+}
+
+
+/* --- Responsive Design --- */
+@media (max-width: 768px) {
+    .main-content {
+        padding-top: 5rem; /* More space for fixed menu button */
+    }
+}
+
+@media (max-width: 640px) {
+    .container {
+        padding: 0 0.5rem;
+    }
+    
+    section, fieldset {
+        padding: 1rem;
+    }
+
+    h1 {
+        font-size: 1.5rem;
+    }
+
+    h2 {
+        font-size: 1.25rem;
+    }
+
+    #config-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+
+    .config-title-group {
+        text-align: center;
+    }
+
+    .header-controls {
+        display: flex;
+        justify-content: center;
+    }
+
+    .view-switcher {
+        display: inline-flex;
+    }
+
+    .view-switcher button {
+        flex: 1;
+    }
+}

@@ -1,0 +1,109 @@
+name: "Support in Test"
+description: Help test clustering algorithms and evaluate playlists with AudioMuse
+title: "[Test] Your Library Name / Date"
+labels: ["Support in Test"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Audiomuse Testing Form
+
+        Thanks for helping us improve automatic mixes for Jellyfin with AudioMuse!  
+        Our goal with this survey is to understand which algorithms and parameter sets are the most reliable for creating solid mixes across different libraries.  
+        Eventually we would like for Jellyfin to have similar capabilities as Plex's "Sonic Analysis", but for free!
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Your Task
+
+        Your job is to set up AudioMuse (easily done via Docker, [instructions here](https://neptunehub.github.io/AudioMuse-AI/#local-deployment-with-docker-compose)), run the analysis once, and then run multiple clustering tests using different algorithms and parameters.
+
+        While depending on your library size this might take a while, most of the time is just waiting for the clustering to finish; you only have to change some settings, press a button, and evaluate the result every couple hours.
+
+        The process is as follows:
+
+        1. Set up AudioMuse. You can run an analysis and clustering to make sure it works correctly.
+        2. Run at least one analysis task (skip this if you've done this already). You could limit the number of recent albums used for the analysis to speed things up, but this will affect the quality of your results. So if you have the patience, please leave "Number of recent albums" set to `0`.
+        3. Configure the first/next parameter set from the "Test Parameters" section below. Use the "Advanced" tab in AudioMuse for this, and enter the values in the "Clustering Parameters" section. Any parameter that is not explicitly mentioned can be left as the default. **If** you change any other parameter after test 8, please let use know what you changed.
+        4. Start the **clustering** task (button "Start Clustering" in the "Run Tasks" section) and wait for the task to finish
+        5. Enter the results into the "Performance Properties" table (in this survey, below). You can find those values in the "Task Status" section; some of them are in the "Details / Log" area.
+        6. Take a look at the generated playlists (in Jellyfin, or in the "Generated Playlists" section in AudioMuse), or even listen to them. Then evaluate the quality of the playlists in the "Playlist Evaluation" section below. Would you consider these playlists to be good mixes?
+        7. You add any additional notes or feedback at the end. If something isn't working for you and/or you see errors, feel free to [create a bug report on GitHub](https://github.com/NeptuneHub/AudioMuse-AI/issues/new?template=bug_report.md)
+
+  - type: textarea
+    id: test-setup
+    attributes:
+      label: "1. Test Setup"
+      description: "Fill in your environment details."
+      value: |
+        1. Docker Image: e.g. `devel@2c541573eb15e...`
+        2. System Specs: e.g. `x86, TrueNAS SCALE, Ryzen 5600G`
+        3. Albums/Tracks Analyzed: e.g. `250 albums, 2138 tracks`
+        4. Analysis Duration: e.g. `2h 37m`
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: test-parameters
+    attributes:
+      label: "2. Test Parameters (Check the tests you actually ran)"
+      options:
+        - label: "Test 1 – K-Means, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 2 – K-Means, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 3 – GMM, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 4 – GMM, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 5 – DBSCAN, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 6 – DBSCAN, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 7 – Spectral, 5000 runs, PCA 0–8, Embeddings: NO"
+        - label: "Test 8 – Spectral, 5000 runs, PCA 0–199, Embeddings: YES"
+        - label: "Test 9 – Custom or Other (describe below)"
+
+  - type: textarea
+    id: performance-properties
+    attributes:
+      label: "2.1 Performance Properties"
+      description: "Paste in clustering runtime, best score, and number of playlists created per test."
+      value: |
+        | Test # | Runtime | Best Score | num_playlists_created |
+        |--------|---------|------------|------------------------|
+        | 1      |         |            |                        |
+        | 2      |         |            |                        |
+        | 3      |         |            |                        |
+        | 4      |         |            |                        |
+        | 5      |         |            |                        |
+        | 6      |         |            |                        |
+        | 7      |         |            |                        |
+        | 8      |         |            |                        |
+        | 9      |         |            |                        |
+
+  - type: textarea
+    id: playlist-evaluation
+    attributes:
+      label: "3. Playlist Evaluation"
+      description: "Rate each test from 1 (worst) to 5 (best), and add any comments."
+      value: |
+        | Test # | Genre Diversity | Genre Coherence | Overall Quality | Comments |
+        |--------|------------------|------------------|------------------|----------|
+        | 1      |                  |                  |                  |          |
+        | 2      |                  |                  |                  |          |
+        | 3      |                  |                  |                  |          |
+        | 4      |                  |                  |                  |          |
+        | 5      |                  |                  |                  |          |
+        | 6      |                  |                  |                  |          |
+        | 7      |                  |                  |                  |          |
+        | 8      |                  |                  |                  |          |
+        | 9      |                  |                  |                  |          |
+
+  - type: textarea
+    id: additional-feedback
+    attributes:
+      label: "4. Additional Feedback"
+      description: "Bugs, unexpected behavior, suggestions? Let us know."
+      value: |
+        - Playlist creation failed after test 4
+        - UI lagged during clustering
+        - Would love a dark theme option
+    validations:
+      required: false

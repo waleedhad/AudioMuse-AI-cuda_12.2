@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="app-version" content="{{ app_version }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioMuse-AI - Instant Playlist</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/menu.css">
+</head>
+<body>
+
+<div class="page-container">
+    <aside class="sidebar">
+        <nav>
+            <ul class="sidebar-nav">
+                <!-- Menu items are dynamically inserted by menu.js -->
+            </ul>
+        </nav>
+    </aside>
+
+    <div class="main-content" id="main-content">
+        <button class="menu-toggle">&#9776;</button>
+        <div class="container">
+            <section>
+                <header class="page-header">
+                    <h1>AudioMuse-AI - Instant Playlist</h1>
+                    <p>Tell me your mood, and I'll craft the perfect playlist for you.</p>
+                </header>
+
+                <!-- Main Form -->
+                <form id="playlistForm">
+                    <!-- AI Configuration Section -->
+                    <fieldset>
+                        <legend>AI Configuration</legend>
+                        <div class="param-group">
+                            <div>
+                                <label for="aiProvider">AI Provider</label>
+                                <select id="aiProvider">
+                                    <option value="NONE">None</option>
+                                    <option value="OLLAMA">Ollama</option>
+                                    <option value="GEMINI">Gemini</option>
+                                </select>
+                            </div>
+                            <div id="ollamaConfig" class="hidden">
+                                <label for="ollamaModel">Ollama Model</label>
+                                <input type="text" id="ollamaModel" placeholder="e.g., mistral:7b">
+                                <div style="margin-top: 1.5rem;">
+                                    <label for="ollamaServerUrl">Ollama Server URL</label>
+                                    <input type="text" id="ollamaServerUrl" placeholder="e.g., http://localhost:11434/api/generate">
+                                </div>
+                            </div>
+                            <div id="geminiConfig" class="hidden">
+                                <label for="geminiModel">Gemini Model</label>
+                                <input type="text" id="geminiModel" placeholder="e.g., gemini-1.5-flash-latest">
+                                <div style="margin-top: 1.5rem;">
+                                    <label for="geminiApiKey">Gemini API Key (for testing)</label>
+                                    <input type="password" id="geminiApiKey" placeholder="Enter Gemini API Key">
+                                </div>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- User Input Section -->
+                    <div class="param-group" style="margin-top: 2rem;">
+                        <div>
+                           <label for="userInput">What kind of music are you in the mood for?</label>
+                           <textarea id="userInput" placeholder="e.g., Upbeat indie rock for a summer road trip" rows="4" required></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="submitChat">
+                        <span>Get Playlist Idea</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Response Section -->
+            <section>
+                <h2>AI Response</h2>
+                <div id="responseArea">
+                    <p class="italic">Your generated playlist will appear here...</p>
+                </div>
+                <!-- MODIFIED: Changed section title and form details to be more generic -->
+                <div id="createPlaylistSection" class="hidden">
+                    <h3>Create Playlist on Media Server</h3>
+                    <form id="createPlaylistForm">
+                        <input type="hidden" id="playlistItemIds" name="item_ids">
+                        <div class="param-group">
+                            <div>
+                                <label for="mediaServerPlaylistName">Playlist Name:</label>
+                                <input type="text" id="mediaServerPlaylistName" name="playlist_name" placeholder="Enter playlist name" required>
+                            </div>
+                        </div>
+                        <button type="submit" id="submitMediaServerPlaylist">Create Playlist</button>
+                    </form>
+                    <div id="mediaServerResponseArea"></div>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+    
+    <script>
+        // --- Self-Executing Anonymous Function to Encapsulate Code ---
+        (() => {
+            let globalConfig = {};
+
+            // --- DOM Element References ---
+            const aiProviderSelect = document.getElementById('aiProvider');
+            const ollamaConfigDiv = document.getElementById('ollamaConfig');
+            const geminiConfigDiv = document.getElementById('geminiConfig');
+            const ollamaModelSelect = document.getElementById('ollamaModel');
+            const ollamaServerUrlInput = document.getElementById('ollamaServerUrl'); // Added Ollama Server URL input
+            const geminiApiKeyInput = document.getElementById('geminiApiKey'); // Added API key input
+            const geminiModelSelect = document.getElementById('geminiModel');
+            const playlistForm = document.getElementById('playlistForm');
+            const userInput = document.getElementById('userInput');
+            const submitButton = document.getElementById('submitChat');
+            const responseArea = document.getElementById('responseArea');
+            const submitButtonText = submitButton.querySelector('span');
+            const createPlaylistSection = document.getElementById('createPlaylistSection');
+            const createPlaylistForm = document.getElementById('createPlaylistForm');
+            const mediaServerResponseArea = document.getElementById('mediaServerResponseArea');
+
+            // --- Core Functions ---
+
+            /**
+             * Fetches the initial AI configuration from the server.
+             */
+            async function fetchConfig() {
+                try {
+                    const response = await fetch('/chat/api/config_defaults'); // Changed to new chat-specific config endpoint
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    globalConfig = await response.json();
+                    populateAIConfigSelectors();
+                    updateAIProviderVisibility(); // Call this after populating
+                } catch (error) {
+                    console.error("Failed to fetch config:", error);
+                    showError('Error: Could not load AI configuration.');
+                }
+            }
+
+            /**
+             * Populates the model dropdowns based on the fetched configuration.
+             */
+            function populateAIConfigSelectors() {
+                if (globalConfig.default_ai_provider) {
+                    aiProviderSelect.value = globalConfig.default_ai_provider.toUpperCase();
+                }
+
+                // ollamaModelSelect.innerHTML = ''; // Not needed for input field
+                ollamaModelSelect.value = globalConfig.default_ollama_model_name || ""; // Set default value for input
+                ollamaServerUrlInput.value = globalConfig.ollama_server_url || "http://localhost:11434/api/generate"; // Pre-fill Ollama Server URL
+                
+                geminiModelSelect.value = globalConfig.default_gemini_model_name || "gemini-1.5-flash-latest";
+                // Pre-fill Gemini API key from config if available and not the placeholder
+                // User can still override this in the form.
+                geminiApiKeyInput.value = globalConfig.default_gemini_api_key || "";
+            }
+
+            /**
+             * Shows or hides model selection based on the chosen provider.
+             * This function now uses classList to avoid conflicts with CSS !important.
+             */
+            function updateAIProviderVisibility() {
+                const provider = aiProviderSelect.value;
+                if (provider === 'OLLAMA') {
+                    ollamaConfigDiv.classList.remove('hidden');
+                    geminiConfigDiv.classList.add('hidden');
+                } else if (provider === 'GEMINI') {
+                    ollamaConfigDiv.classList.add('hidden');
+                    geminiConfigDiv.classList.remove('hidden');
+                } else {
+                    ollamaConfigDiv.classList.add('hidden');
+                    geminiConfigDiv.classList.add('hidden');
+                }
+            }
+
+            /**
+             * Handles the form submission to the chat API.
+             * @param {Event} event - The form submission event.
+             */
+            async function handleChatSubmit(event) {
+                event.preventDefault(); // Prevent default form submission
+
+                if (!userInput.value.trim()) {
+                    showError('Please enter your music preference.');
+                    return;
+                }
+
+                setLoadingState(true);
+
+                const payload = {
+                    userInput: userInput.value,
+                    ai_provider: aiProviderSelect.value,
+                    ai_model: null
+                };
+
+                if (payload.ai_provider === 'OLLAMA') {
+                    payload.ai_model = ollamaModelSelect.value;
+                    payload.ollama_server_url = ollamaServerUrlInput.value; // Include Ollama Server URL
+                } else if (payload.ai_provider === 'GEMINI') {
+                    payload.ai_model = geminiModelSelect.value;
+                    payload.gemini_api_key = geminiApiKeyInput.value; // Include API key for Gemini
+                }
+                try {
+                    const response = await fetch('/chat/api/chatPlaylist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: "An unknown error occurred." }));
+                        throw new Error(`API Error: ${response.status} - ${errorData.detail || "Failed to get details"}`);
+                    }
+
+                    const data = await response.json();
+                    renderResponse(data.response); // Pass the whole response object
+
+                } catch (error) {
+                    console.error('Error submitting chat:', error);
+                    showError(`Error: ${error.message}`);
+                } finally {
+                    setLoadingState(false);
+                }
+            }
+            
+            // --- UI Helper Functions ---
+
+            /**
+             * Toggles the loading state of the submit button.
+             * @param {boolean} isLoading - Whether the app is in a loading state.
+             */
+            function setLoadingState(isLoading) {
+                submitButton.disabled = isLoading;
+                if (isLoading) {
+                    submitButtonText.textContent = 'Processing...';
+                } else {
+                    submitButtonText.textContent = 'Get Playlist Idea';
+                }
+            }
+
+            /**
+             * Renders the AI's playlist response in a formatted way.
+             * @param {object} responseData - The response object from the API.
+             * Expected structure: { message: "...", query_results: [{title: "...", artist: "..."}, ...] }
+             */
+            function renderResponse(responseData) {
+                responseArea.innerHTML = '';
+                responseArea.classList.remove('text-red-600');
+                createPlaylistSection.classList.add('hidden'); // Hide by default
+                mediaServerResponseArea.textContent = ''; // Clear previous responses
+
+                // --- 1. AI Interaction Log (Collapsible) ---
+                const detailsElement = document.createElement('details');
+                detailsElement.style.marginBottom = '1rem';
+
+                const summaryElement = document.createElement('summary');
+                summaryElement.style.cursor = 'pointer';
+                summaryElement.style.fontWeight = '500';
+                summaryElement.textContent = 'Show/Hide AI Interaction Log';
+                detailsElement.appendChild(summaryElement);
+
+                const logContentDiv = document.createElement('div');
+                logContentDiv.style.padding = '1rem';
+                logContentDiv.style.marginTop = '0.5rem';
+                logContentDiv.style.border = '1px solid #E5E7EB';
+                logContentDiv.style.borderRadius = '0.5rem';
+                logContentDiv.style.backgroundColor = '#F9FAFB';
+                
+                const messageParagraph = document.createElement('p');
+                messageParagraph.textContent = responseData.message || "No message from AI.";
+                logContentDiv.appendChild(messageParagraph);
+
+                detailsElement.appendChild(logContentDiv);
+                responseArea.appendChild(detailsElement);
+
+                // --- 2. Executed Query (Collapsible) ---
+                if (responseData.executed_query) {
+                    const queryDetailsElement = document.createElement('details');
+                    queryDetailsElement.style.marginBottom = '1rem';
+
+                    const querySummaryElement = document.createElement('summary');
+                    querySummaryElement.style.cursor = 'pointer';
+                    querySummaryElement.style.fontWeight = '500';
+                    querySummaryElement.textContent = 'Show/Hide Executed SQL Query';
+                    queryDetailsElement.appendChild(querySummaryElement);
+
+                    const queryContentDiv = document.createElement('div');
+                    queryContentDiv.style.padding = '1rem';
+                    queryContentDiv.style.marginTop = '0.5rem';
+                    queryContentDiv.style.border = '1px solid #E5E7EB';
+                    queryContentDiv.style.borderRadius = '0.5rem';
+                    queryContentDiv.style.backgroundColor = '#F9FAFB';
+                    queryContentDiv.style.whiteSpace = 'pre-wrap';
+                    queryContentDiv.style.wordBreak = 'break-all';
+                    
+                    const queryCodeElement = document.createElement('code');
+                    queryCodeElement.textContent = responseData.executed_query;
+                    queryContentDiv.appendChild(queryCodeElement);
+
+                    queryDetailsElement.appendChild(queryContentDiv);
+                    responseArea.appendChild(queryDetailsElement);
+                }
+
+                // --- 3. Playlist Results ---
+                if (responseData.query_results && responseData.query_results.length > 0) {
+                    const title = document.createElement('h3');
+                    title.textContent = 'Generated Playlist';
+                    responseArea.appendChild(title);
+
+                    const songList = document.createElement('ol');
+                    songList.className = 'song-list';
+                    
+                    document.getElementById('playlistItemIds').value = ''; // Clear previous item IDs
+
+                    responseData.query_results.forEach(song => {
+                        const listItem = document.createElement('li');
+                        listItem.textContent = `${song.title || 'Unknown Title'} by ${song.artist || 'Unknown Artist'}`;
+                        songList.appendChild(listItem);
+                        const currentItemIds = document.getElementById('playlistItemIds').value;
+                        document.getElementById('playlistItemIds').value = currentItemIds ? `${currentItemIds},${song.item_id}` : song.item_id;
+                    });
+                    responseArea.appendChild(songList);
+                    createPlaylistSection.classList.remove('hidden'); // Show the create playlist form
+                } else if (responseData.executed_query) {
+                     const noResultsMessage = document.createElement('p');
+                    noResultsMessage.className = 'italic';
+                    noResultsMessage.textContent = "The query returned no songs.";
+                    responseArea.appendChild(noResultsMessage);
+                }
+            }
+            
+            /**
+             * Displays an error message in the response area.
+             * @param {string} message - The error message to display.
+             */
+            function showError(message) {
+                responseArea.innerHTML = '';
+                responseArea.classList.add('text-red-600');
+                responseArea.textContent = message;
+            }
+
+            /**
+             * Handles the submission of the "Create Playlist on Media Server" form.
+             * @param {Event} event - The form submission event.
+             */
+            async function handleCreateMediaServerPlaylist(event) {
+                event.preventDefault();
+                mediaServerResponseArea.textContent = 'Creating playlist...';
+                mediaServerResponseArea.className = '';
+
+                const playlistNameInput = document.getElementById('mediaServerPlaylistName');
+                const itemIdsInput = document.getElementById('playlistItemIds');
+
+                if (!playlistNameInput.value.trim()) {
+                    mediaServerResponseArea.textContent = 'Error: Playlist name cannot be empty.';
+                    mediaServerResponseArea.className = 'status-error';
+                    return;
+                }
+                if (!itemIdsInput.value) {
+                    mediaServerResponseArea.textContent = 'Error: No song IDs found to create the playlist.';
+                    mediaServerResponseArea.className = 'status-error';
+                    return;
+                }
+
+                const payload = {
+                    playlist_name: playlistNameInput.value,
+                    item_ids: itemIdsInput.value.split(',') // Send as an array
+                };
+
+                try {
+                    // MODIFIED: Changed API endpoint to be more generic
+                    const response = await fetch('/chat/api/create_playlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json();
+                    mediaServerResponseArea.textContent = data.message;
+                    if(response.ok) {
+                        mediaServerResponseArea.className = 'status-success';
+                    } else {
+                        mediaServerResponseArea.className = 'status-error';
+                    }
+                } catch (error) {
+                    mediaServerResponseArea.textContent = `Error: ${error.message}`;
+                    mediaServerResponseArea.className = 'status-error';
+                }
+            }
+
+            // --- Event Listeners ---
+            document.addEventListener('DOMContentLoaded', fetchConfig);
+            aiProviderSelect.addEventListener('change', updateAIProviderVisibility);
+            playlistForm.addEventListener('submit', handleChatSubmit);
+            createPlaylistForm.addEventListener('submit', handleCreateMediaServerPlaylist);
+        })();
+    </script>
+    <script src="/static/menu.js"></script>
+</body>
+</html>

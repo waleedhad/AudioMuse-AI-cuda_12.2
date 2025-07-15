@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="app-version" content="{{ app_version }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioMuse-AI - Playlist from Similar Song</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/menu.css">
+</head>
+<body>
+
+<div class="page-container">
+    <aside class="sidebar">
+        <nav>
+            <ul class="sidebar-nav">
+                <!-- Menu items are dynamically inserted by menu.js -->
+            </ul>
+        </nav>
+    </aside>
+
+    <div class="main-content" id="main-content">
+        <button class="menu-toggle">&#9776;</button>
+        <div class="container">
+            <section>
+                <header class="page-header">
+                    <h1>AudioMuse-AI - Playlist from Similar Song</h1>
+                    <p>Find tracks similar to a given song and create a playlist.</p>
+                </header>
+
+                <form id="similarity-form">
+                    <input type="hidden" id="selected_item_id" name="item_id">
+                    <div class="param-group">
+                        <div class="autocomplete-container">
+                            <label for="artist_search">Artist:</label>
+                            <input type="text" id="artist_search" name="artist_search" placeholder="Start typing artist name..." autocomplete="off">
+                        </div>
+
+                        <div class="autocomplete-container">
+                            <label for="title_search">Track Title:</label>
+                            <input type="text" id="title_search" name="title_search" placeholder="Start typing track title..." autocomplete="off">
+                            <div id="autocomplete-results" class="autocomplete-results hidden"></div>
+                        </div>
+
+                        <div>
+                            <label for="n">Number of results:</label>
+                            <input type="number" id="n" name="n" value="10" min="1" max="100">
+                        </div>
+                    </div>
+                    <button type="submit">
+                        Find Similar Tracks
+                    </button>
+                </form>
+            </section>
+
+            <section id="results-container" class="hidden">
+                <h2>Results</h2>
+                <div id="status"></div>
+                <div id="results-table-wrapper"></div>
+            </section>
+
+            <section id="playlist-creator" class="hidden">
+                <h3>Create a Playlist from Results</h3>
+                <form id="playlist-form">
+                    <div class="param-group">
+                        <div>
+                           <label for="playlist_name">Playlist Name:</label>
+                           <input type="text" id="playlist_name" name="playlist_name" required placeholder="e.g., My Awesome Mix">
+                        </div>
+                    </div>
+                    <!-- MODIFIED: Changed button text to be more generic -->
+                    <button type="submit" style="background-color: #16A34A;">
+                        Create Playlist on Media Server
+                    </button>
+                </form>
+                <div id="playlist-status"></div>
+            </section>
+        
+        </div>
+    </div>
+</div>
+
+    <script>
+        (() => {
+            let currentTrackIds = [];
+            let searchTimeout;
+
+            const similarityForm = document.getElementById('similarity-form');
+            const playlistForm = document.getElementById('playlist-form');
+            const artistInput = document.getElementById('artist_search');
+            const titleInput = document.getElementById('title_search');
+            const selectedItemIdInput = document.getElementById('selected_item_id');
+            const autocompleteResults = document.getElementById('autocomplete-results');
+            const resultsContainer = document.getElementById('results-container');
+            const playlistCreator = document.getElementById('playlist-creator');
+            const statusDiv = document.getElementById('status');
+            const resultsTableWrapper = document.getElementById('results-table-wrapper');
+            const playlistStatusDiv = document.getElementById('playlist-status');
+
+            // --- Autocomplete Logic ---
+            const handleSearchInput = () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(async () => {
+                    const artistQuery = artistInput.value.trim();
+                    const titleQuery = titleInput.value.trim();
+
+                    if (artistQuery.length < 3 && titleQuery.length < 3) {
+                        hideAutocomplete();
+                        return;
+                    }
+
+                    try {
+                        const params = new URLSearchParams({ artist: artistQuery, title: titleQuery });
+                        const response = await fetch(`/api/search_tracks?${params}`);
+                        const tracks = await response.json();
+                        showAutocomplete(tracks);
+                    } catch (error) {
+                        console.error('Autocomplete search error:', error);
+                        hideAutocomplete();
+                    }
+                }, 300); // Debounce requests by 300ms
+            };
+            
+            const showAutocomplete = (tracks) => {
+                autocompleteResults.innerHTML = '';
+                if (tracks.length === 0) {
+                    autocompleteResults.innerHTML = '<div class="autocomplete-item"><em>No results found</em></div>';
+                } else {
+                    tracks.forEach(track => {
+                        const itemDiv = document.createElement('div');
+                        itemDiv.className = 'autocomplete-item';
+                        itemDiv.innerHTML = `<div class="title">${track.title}</div><div class="artist">${track.author}</div>`;
+                        itemDiv.addEventListener('click', () => selectTrack(track));
+                        autocompleteResults.appendChild(itemDiv);
+                    });
+                }
+                autocompleteResults.classList.remove('hidden');
+            };
+
+            const hideAutocomplete = () => {
+                autocompleteResults.classList.add('hidden');
+            };
+
+            const selectTrack = (track) => {
+                artistInput.value = track.author;
+                titleInput.value = track.title;
+                selectedItemIdInput.value = track.item_id;
+                hideAutocomplete();
+            };
+
+            artistInput.addEventListener('input', handleSearchInput);
+            titleInput.addEventListener('input', handleSearchInput);
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.autocomplete-container')) {
+                    hideAutocomplete();
+                }
+            });
+
+            // --- Main Form Submission ---
+            similarityForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+
+                const itemId = selectedItemIdInput.value;
+                const n = document.getElementById('n').value;
+
+                resultsContainer.classList.remove('hidden');
+                playlistCreator.classList.add('hidden');
+                statusDiv.textContent = 'Searching...';
+                statusDiv.className = '';
+                resultsTableWrapper.innerHTML = '';
+
+                if (!itemId) {
+                    statusDiv.textContent = 'Please select a track from the autocomplete suggestions.';
+                    statusDiv.className = 'status-error';
+                    return;
+                }
+
+                try {
+                    const params = new URLSearchParams({ item_id: itemId, n: n });
+                    const response = await fetch(`/api/similar_tracks?${params}`);
+                    const data = await response.json();
+
+                    if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                    
+                    if (data.length === 0) {
+                        statusDiv.textContent = 'No similar tracks found.';
+                        return;
+                    }
+
+                    currentTrackIds = [itemId, ...data.map(track => track.item_id)];
+
+                    statusDiv.textContent = `Found ${data.length} similar tracks.`;
+                    const tableHTML = `
+                        <table>
+                            <thead>
+                                <tr><th>Title</th><th>Artist</th><th>Distance</th></tr>
+                            </thead>
+                            <tbody>
+                                ${data.map(track => `
+                                    <tr>
+                                        <td>${track.title || 'N/A'}</td>
+                                        <td>${track.author || 'N/A'}</td>
+                                        <td>${track.distance.toFixed(4)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>`;
+                    resultsTableWrapper.innerHTML = tableHTML;
+                    playlistCreator.classList.remove('hidden');
+                    playlistStatusDiv.textContent = '';
+                    document.getElementById('playlist_name').value = `Similar to ${titleInput.value}`;
+
+                } catch (error) {
+                    statusDiv.textContent = `Error: ${error.message}`;
+                    statusDiv.className = 'status-error';
+                    console.error('Fetch error:', error);
+                }
+            });
+
+            // --- Playlist Creation ---
+            playlistForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                const playlistName = document.getElementById('playlist_name').value;
+                
+                playlistStatusDiv.className = '';
+                if (!playlistName) {
+                    playlistStatusDiv.textContent = 'Please enter a playlist name.';
+                    playlistStatusDiv.className = 'status-error';
+                    return;
+                }
+                if (currentTrackIds.length === 0) {
+                    playlistStatusDiv.textContent = 'No tracks to add. Please perform a search first.';
+                    playlistStatusDiv.className = 'status-error';
+                    return;
+                }
+                playlistStatusDiv.textContent = 'Creating playlist...';
+                
+                try {
+                    const response = await fetch('/api/create_playlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            playlist_name: playlistName,
+                            track_ids: currentTrackIds
+                        }),
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    playlistStatusDiv.textContent = result.message;
+                    playlistStatusDiv.className = 'status-success';
+                } catch (error) {
+                    playlistStatusDiv.textContent = `Error: ${error.message}`;
+                    playlistStatusDiv.className = 'status-error';
+                    console.error('Playlist creation error:', error);
+                }
+            });
+        })();
+    </script>
+    <script src="/static/menu.js"></script>
+</body>
+</html>
