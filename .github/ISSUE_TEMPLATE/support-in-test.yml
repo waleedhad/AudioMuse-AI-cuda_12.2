@@ -104,7 +104,7 @@ body:
     attributes:
       label: "4. Additional Feedback"
       description: "Any bugs, unexpected behavior, or suggestions? Let us know!"
-      value: |
+      placeholder: |
         - Playlist creation failed after Test 4
         - UI lag during clustering
         - Would love a dark theme option
