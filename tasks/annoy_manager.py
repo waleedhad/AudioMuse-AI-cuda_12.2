@@ -10,7 +10,7 @@ from psycopg2.extras import DictCursor
 
 from config import (
     EMBEDDING_DIMENSION, INDEX_NAME, NUM_TREES, ANNOY_METRIC
-) # Use a central config for this
+) # Use a central config for this 
 
 # Import from other project modules
 from .mediaserver import create_instant_playlist
