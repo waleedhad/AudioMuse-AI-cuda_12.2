@@ -9,7 +9,7 @@ import psycopg2 # type: ignore
 from psycopg2.extras import DictCursor
 
 from config import (
-    EMBEDDING_DIMENSION, INDEX_NAME, NUM_TREES
+    EMBEDDING_DIMENSION, INDEX_NAME, NUM_TREES, ANNOY_METRIC
 ) # Use a central config for this
 
 # Import from other project modules
@@ -42,7 +42,7 @@ def build_and_store_annoy_index(db_conn):
 
         logger.info(f"Found {len(all_embeddings)} embeddings to index.")
 
-        annoy_index = AnnoyIndex(EMBEDDING_DIMENSION, 'angular')
+        annoy_index = AnnoyIndex(EMBEDDING_DIMENSION, ANNOY_METRIC)
         id_map = {}
         annoy_item_index = 0
         for item_id, embedding_blob in all_embeddings:
@@ -150,7 +150,7 @@ def load_annoy_index_for_querying(force_reload=False):
             temp_file_path = tmp.name
         
         logger.info(f"Loading index from temporary file: {temp_file_path}")
-        loaded_index = AnnoyIndex(EMBEDDING_DIMENSION, 'angular')
+        loaded_index = AnnoyIndex(EMBEDDING_DIMENSION, ANNOY_METRIC)
         loaded_index.load(temp_file_path)
         os.remove(temp_file_path)
 

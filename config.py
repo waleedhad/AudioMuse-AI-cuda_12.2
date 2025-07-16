@@ -191,7 +191,7 @@ EMBEDDING_DIMENSION = 200 # *** ADDED THIS LINE ***
 # --- Annoy Index Constants ---
 INDEX_NAME = os.environ.get("ANNOY_INDEX_NAME", "music_library") # The primary key for our index in the DB
 NUM_TREES = int(os.environ.get("ANNOY_NUM_TREES", "50")) # More trees = higher accuracy, larger index, longer build time. 50 means aroudn 1,5GB for 1 millions songs
-
+ANNOY_METRIC = os.environ.get("ANNOY_METRIC", "angular")  # Options: 'angular', 'euclidean', 'manhattan', 'hamming', 'dot'
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)
