@@ -28,7 +28,8 @@ If applicable, add screenshots to help explain your problem.
  - OS: [e.g. Debian, Windows]
  - Deployment: [e.g. Docker Compose, K3s, Helm]
  - AudioMuse-AI Version: [e.g. v0.4.0-beta, latest]
+ - Jellyfin/Navidrome Version: [e.g. Navidrome 0.57.0]
  - Browser [e.g. chrome, safari]
 
 **Additional context**
-Add any other context about the problem here. For example, logs from the `audiomuse-ai-worker` or `audiomuse-ai-flask` containers can be very helpful.
+Add any other context about the problem here. For example, logs from the `audiomuse-ai-worker` or `audiomuse-ai-flask` containers can be very helpful. Also logs from the Browser could help too (on Chrome > right mouse button > click on inspect > go to Network tab > click on call that is in red/fail and copy the content)
