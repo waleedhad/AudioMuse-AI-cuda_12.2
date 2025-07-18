@@ -568,6 +568,8 @@ When chose clustering algorithm consider their complexity (speed, scalability, e
 
 About quality it really depends from how your song are distributed. K-Means because is faster is always a good choice. GMM give good result in some test with embbeding. Spectral give also good result with embbeding but is very slow.
 
+The TOP Playlist Number parameter was added to find the top different playlist. In short after the clustering is executed, only the N most diverse playlist are keep to avoid to have hundred of playlist created. If you put this parameter to 0, it will keep all.
+
 Here's an explanation of the pros and cons of the different algorithms:
 
 ### **1\. K-Means**
