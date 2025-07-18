@@ -630,8 +630,8 @@ def _name_and_prepare_playlists(best_result, ai_provider, ollama_url, ollama_mod
 
 def _select_top_n_diverse_playlists(best_result, n):
     """
-    Selects the N most diverse playlists from a clustering result using a greedy approach.
-    It works by iteratively picking the playlist that is farthest from the already selected set.
+    Selects the N most diverse playlists from a clustering result by weighting
+    both distance (diversity) and size (usefulness).
     """
     playlist_to_vector = best_result.get("playlist_to_centroid_vector_map", {})
     original_playlists = best_result.get("named_playlists", {})
@@ -652,40 +652,54 @@ def _select_top_n_diverse_playlists(best_result, n):
 
     selected_indices = []
     
-    # 1. Start with a random playlist
-    first_idx = random.choice(range(len(available_names)))
+    # 1. Start with the largest playlist to anchor the selection
+    playlist_sizes = [len(original_playlists.get(name, [])) for name in available_names]
+    first_idx = np.argmax(playlist_sizes)
     selected_indices.append(first_idx)
 
     # Create a boolean mask for available items
     is_available = np.ones(len(available_names), dtype=bool)
     is_available[first_idx] = False
     
-    # 2. Iteratively select the farthest playlist
+    # 2. Iteratively select the playlist with the best combined score of distance and size
     for _ in range(n - 1):
         if not np.any(is_available):
             break # No more playlists to select
 
-        # Get vectors for selected and available playlists
         selected_vectors = available_vectors[selected_indices]
         remaining_vectors = available_vectors[is_available]
         
-        # Calculate the distance from each remaining point to all selected points
-        # This results in a matrix of shape (num_remaining, num_selected)
+        # --- Calculate Diversity Score (Distance) ---
         dist_matrix = cdist(remaining_vectors, selected_vectors, 'euclidean')
-        
-        # For each remaining point, find its minimum distance to any of the selected points
         min_distances = np.min(dist_matrix, axis=1)
         
-        # Find the remaining point that has the maximum minimum-distance
-        farthest_remaining_idx_local = np.argmax(min_distances)
+        # --- Calculate Size Score ---
+        original_indices_available = np.where(is_available)[0]
+        sizes_available = np.array([len(original_playlists.get(available_names[i], [])) for i in original_indices_available])
+        # Use log1p for a smooth curve with diminishing returns for size
+        size_scores = np.log1p(sizes_available)
+
+        # --- Normalize and Combine Scores ---
+        # Normalize both scores to a 0-1 range to make them comparable
+        max_dist = np.max(min_distances)
+        normalized_dist_scores = min_distances / max_dist if max_dist > 0 else np.zeros_like(min_distances)
+
+        max_size_score = np.max(size_scores)
+        normalized_size_scores = size_scores / max_size_score if max_size_score > 0 else np.zeros_like(size_scores)
+        
+        # Combine the scores (equal weighting)
+        # TEST USING * INSTEAD OF +
+        combined_scores = normalized_dist_scores * normalized_size_scores
+        
+        # Find the playlist that has the maximum combined score
+        best_candidate_local_idx = np.argmax(combined_scores)
         
         # Convert this local index back to the original full list index
-        original_indices = np.where(is_available)[0]
-        farthest_original_idx = original_indices[farthest_remaining_idx_local]
+        best_original_idx = original_indices_available[best_candidate_local_idx]
         
         # Add to selected and mark as unavailable
-        selected_indices.append(farthest_original_idx)
-        is_available[farthest_original_idx] = False
+        selected_indices.append(best_original_idx)
+        is_available[best_original_idx] = False
 
     # 3. Build the new, filtered result
     selected_names = [available_names[i] for i in selected_indices]
