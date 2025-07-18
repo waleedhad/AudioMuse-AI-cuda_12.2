@@ -3,8 +3,13 @@
 ![Media Server Support: Jellyfin 10.10.7, Navidrome 0.57.0](https://img.shields.io/badge/Media%20Server-Jellyfin%2010.10.7%2C%20Navidrome%200.57.0-blue?style=flat-square&logo=server&logoColor=white)
 
 
-
 # **AudioMuse-AI - Let the choice happen, the open-source way** 
+
+<p align="center">
+  <img src="https://github.com/NeptuneHub/AudioMuse-AI/blob/devel/screenshot/audiomuseai.png?raw=true" alt="AudioMuse-AI Logo" width="480">
+</p>
+
+
 
 AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) and [Navidrome](https://www.navidrome.org/) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
 
@@ -19,9 +24,10 @@ The **supported architecture** are:
 * **amd64**: Supported
 * **arm64**: Supported
 
-**Related repository:** 
-  * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm)
-  * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin)
+  > **The full list or AudioMuse-AI related repository are:** 
+  > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
+  > * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm): helm chart for easy installation on Kubernetes;
+  > * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin): Jellyfin Plugin.
 
 ## **Table of Contents**
 
