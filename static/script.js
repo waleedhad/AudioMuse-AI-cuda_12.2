@@ -120,6 +120,7 @@ function renderConfig(config) {
     document.getElementById('config-top_n_moods').value = config.top_n_moods || 0;
 
     // Clustering
+    document.getElementById('config-top_n_playlists').value = config.top_n_playlists || 0;
     clusterAlgorithmSelect.value = (config.cluster_algorithm === 'dbscan' || config.cluster_algorithm === 'gmm' || config.cluster_algorithm === 'spectral') ? config.cluster_algorithm : 'kmeans';
     document.getElementById('config-max_distance').value = config.max_distance || 0;
     document.getElementById('config-max_songs_per_cluster').value = config.max_songs_per_cluster || 0;
@@ -350,6 +351,7 @@ async function startTask(taskType) {
         
         Object.assign(payload, {
             clustering_method: clusterAlgorithmSelect.value,
+            top_n_playlists: parseInt(document.getElementById('config-top_n_playlists').value),
             max_distance: parseFloat(document.getElementById('config-max_distance').value),
             max_songs_per_cluster: parseInt(document.getElementById('config-max_songs_per_cluster').value),
             pca_components_min: parseInt(document.getElementById('config-pca_components_min').value),

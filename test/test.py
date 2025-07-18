@@ -4,7 +4,7 @@ import time
 import re
 
 # Update the BASE_URL to point to your running API server
-BASE_URL = 'http://192.168.3.17:8000'
+BASE_URL = 'http://192.168.3.14:8000'
 RETRIES = 3
 RETRY_DELAY = 2  # seconds between retries
 

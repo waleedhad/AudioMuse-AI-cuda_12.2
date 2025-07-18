@@ -3,12 +3,16 @@
 ![Media Server Support: Jellyfin 10.10.7, Navidrome 0.57.0](https://img.shields.io/badge/Media%20Server-Jellyfin%2010.10.7%2C%20Navidrome%200.57.0-blue?style=flat-square&logo=server&logoColor=white)
 
 
-
 # **AudioMuse-AI - Let the choice happen, the open-source way** 
+
+<p align="center">
+  <img src="https://github.com/NeptuneHub/AudioMuse-AI/blob/devel/screenshot/audiomuseai.png?raw=true" alt="AudioMuse-AI Logo" width="480">
+</p>
+
+
 
 AudioMuse-AI is an Open Source Dockerized environment that brings smart playlist generation to [Jellyfin](https://jellyfin.org) and [Navidrome](https://www.navidrome.org/) using sonic audio analysis via  [Librosa](https://github.com/librosa/librosa), [Tensorflow](https://www.tensorflow.org/)  and AI models. All you need is in a container that you can deploy locally or on your Kubernetes cluster (tested on K3S). In this repo you will find deployment example on both Kubernetes and Docker Compose.
 
-**NEWS:** From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
 Addional important information on this project can also be found here:
 * Mkdocs version of this README.md for better visualizzation: [Neptunehub AudioMuse-AI DOCS](https://neptunehub.github.io/AudioMuse-AI/)
@@ -18,6 +22,16 @@ Addional important information on this project can also be found here:
 The **supported architecture** are:
 * **amd64**: Supported
 * **arm64**: Supported
+
+**The full list or AudioMuse-AI related repository are:** 
+  > * [AudioMuse-AI](https://github.com/NeptuneHub/AudioMuse-AI): the core application, it run Flask and Worker containers to actually run all the feature;
+  > * [AudioMuse-AI Helm Chart](https://github.com/NeptuneHub/AudioMuse-AI-helm): helm chart for easy installation on Kubernetes;
+  > * [AudioMuse-AI Plugin for Jellyfin](https://github.com/NeptuneHub/audiomuse-ai-plugin): Jellyfin Plugin.
+
+
+And now just some **NEWS:**
+> * Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
+> * From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
 ## **Table of Contents**
 
@@ -355,6 +369,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `MAX_SONGS_PER_ARTIST`                   | Max songs from one artist per cluster.                                     | `3`                                  |
 | `MAX_DISTANCE`                           | Normalized distance threshold for tracks in a cluster.                     | `0.5`                                |
 | `CLUSTERING_RUNS`                        | Iterations for Monte Carlo evolutionary search.                            | `5000`                               |
+| `TOP_N_PLAYLISTS`                        | POST Clustering it keep only the top N diverse playlist.                   | `8`                               |
 | **Similarity General**    |                                                                              |                                      |
 | `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
 | `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
@@ -552,6 +567,8 @@ When chose clustering algorithm consider their complexity (speed, scalability, e
 * So K-Means -> GMM -> DBSCAN -> Spectral (from faster to slower)
 
 About quality it really depends from how your song are distributed. K-Means because is faster is always a good choice. GMM give good result in some test with embbeding. Spectral give also good result with embbeding but is very slow.
+
+The TOP Playlist Number parameter was added to find the top different playlist. In short after the clustering is executed, only the N most diverse playlist are keep to avoid to have hundred of playlist created. If you put this parameter to 0, it will keep all.
 
 Here's an explanation of the pros and cons of the different algorithms:
 

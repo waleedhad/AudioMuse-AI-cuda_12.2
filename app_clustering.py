@@ -13,7 +13,8 @@ from config import JELLYFIN_URL, JELLYFIN_USER_ID, JELLYFIN_TOKEN, HEADERS, TEMP
     DBSCAN_MIN_SAMPLES_MIN, DBSCAN_MIN_SAMPLES_MAX, GMM_N_COMPONENTS_MIN, GMM_N_COMPONENTS_MAX, \
     SPECTRAL_N_CLUSTERS_MIN, SPECTRAL_N_CLUSTERS_MAX, ENABLE_CLUSTERING_EMBEDDINGS, \
     PCA_COMPONENTS_MIN, PCA_COMPONENTS_MAX, CLUSTERING_RUNS, MOOD_LABELS, TOP_N_MOODS, \
-    AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME
+    AI_MODEL_PROVIDER, OLLAMA_SERVER_URL, OLLAMA_MODEL_NAME, GEMINI_API_KEY, GEMINI_MODEL_NAME, \
+    TOP_N_PLAYLISTS # *** NEW: Import the default for Top N Playlists ***
 
 # RQ import
 from rq import Retry
@@ -53,6 +54,10 @@ def start_clustering_endpoint():
           schema:
             type: object
             properties:
+              top_n_playlists:
+                type: integer
+                description: "If > 0, returns only the Top N most diverse playlists. If 0 or not provided, returns all. Defaults to value from config."
+                default: "Configured TOP_N_PLAYLISTS"
               clustering_method:
                 type: string
                 description: Algorithm to use for clustering (e.g., kmeans, dbscan, gmm, spectral).
@@ -264,6 +269,7 @@ def start_clustering_endpoint():
             "pca_components_max": int(data.get('pca_components_max', PCA_COMPONENTS_MAX)),
             "num_clustering_runs": int(data.get('clustering_runs', CLUSTERING_RUNS)),
             "max_songs_per_cluster_val": int(data.get('max_songs_per_cluster', MAX_SONGS_PER_CLUSTER)),
+            "top_n_playlists_param": int(data.get('top_n_playlists', TOP_N_PLAYLISTS)), # *** NEW: Pass Top N parameter ***
             "min_songs_per_genre_for_stratification_param": int(data.get('min_songs_per_genre_for_stratification', MIN_SONGS_PER_GENRE_FOR_STRATIFICATION)),
             "stratified_sampling_target_percentile_param": int(data.get('stratified_sampling_target_percentile', STRATIFIED_SAMPLING_TARGET_PERCENTILE)),
             "score_weight_diversity_param": float(data.get('score_weight_diversity', SCORE_WEIGHT_DIVERSITY)),

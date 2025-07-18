@@ -21,11 +21,12 @@ NAVIDROME_PASSWORD = os.environ.get("NAVIDROME_PASSWORD", "your_navidrome_passwo
 
 
 # --- General Constants (Read from Environment Variables where applicable) ---
-APP_VERSION = "v0.6.1-beta"
+APP_VERSION = "v0.6.2-beta"
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
+TOP_N_PLAYLISTS = int(os.environ.get("TOP_N_PLAYLISTS", "8")) # *** NEW: Default for Top N diverse playlists ***
 
 # --- Algorithm Choose Constants (Read from Environment Variables) ---
 CLUSTER_ALGORITHM = os.environ.get("CLUSTER_ALGORITHM", "kmeans") # accepted dbscan, kmeans, gmm, or spectral
@@ -191,7 +192,7 @@ EMBEDDING_DIMENSION = 200 # *** ADDED THIS LINE ***
 # --- Annoy Index Constants ---
 INDEX_NAME = os.environ.get("ANNOY_INDEX_NAME", "music_library") # The primary key for our index in the DB
 NUM_TREES = int(os.environ.get("ANNOY_NUM_TREES", "50")) # More trees = higher accuracy, larger index, longer build time. 50 means aroudn 1,5GB for 1 millions songs
-
+ANNOY_METRIC = os.environ.get("ANNOY_METRIC", "angular")  # Options: 'angular', 'euclidean', 'manhattan', 'hamming', 'dot'
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)

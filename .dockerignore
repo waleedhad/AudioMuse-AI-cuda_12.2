@@ -32,6 +32,7 @@ env
 # Documentation, screenshots, and local test files
 README.md
 docs/
+query/
 screenshot/
 .pytest_cache/
 htmlcov/

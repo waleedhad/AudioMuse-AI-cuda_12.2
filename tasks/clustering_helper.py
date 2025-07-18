@@ -370,18 +370,20 @@ def _format_and_score_iteration_result(
 
     # --- 2. Format final playlists and centroids ---
     named_playlists, playlist_centroids = {}, {}
+    # *** NEW: Map final playlist names to their centroid vectors for Top-N selection ***
+    playlist_to_centroid_vector_map = {}
     unique_predominant_mood_scores = {}
     unique_predominant_other_feature_scores = {}
     item_id_to_song_index_map = {track_data['item_id']: i for i, track_data in enumerate(valid_tracks)}
 
     for label_id, songs_list in filtered_clusters.items():
         if songs_list and label_id in centers:
+            center_vec = centers[label_id] # This is the vector in the clustered space
             if use_embeddings:
                 feature_centroid_vec = _get_feature_centroid_for_embedding_cluster(label_id, labels, X_feat_orig)
                 if feature_centroid_vec is None: continue
                 name, centroid_details = _name_cluster(feature_centroid_vec, None, False, active_moods, None)
             else:
-                center_vec = centers[label_id]
                 name, centroid_details = _name_cluster(center_vec, pca, params['pca_config']['enabled'], active_moods, scaler)
 
             temp_name, suffix = name, 1
@@ -391,6 +393,8 @@ def _format_and_score_iteration_result(
             
             named_playlists[temp_name] = songs_list
             playlist_centroids[temp_name] = centroid_details
+            # *** NEW: Store the mapping from the final unique name to the centroid vector ***
+            playlist_to_centroid_vector_map[temp_name] = center_vec
 
             if centroid_details and any(mood in active_moods for mood in centroid_details.keys()):
                 predominant_mood_key = max((k for k in centroid_details if k in MOOD_LABELS), key=centroid_details.get, default=None)
@@ -533,6 +537,7 @@ def _format_and_score_iteration_result(
         "fitness_score": final_score,
         "named_playlists": named_playlists,
         "playlist_centroids": playlist_centroids,
+        "playlist_to_centroid_vector_map": playlist_to_centroid_vector_map, # *** NEW: Return the map ***
         "parameters": {**params, "max_songs_per_cluster": max_songs_per_cluster, "run_id": run_idx},
         "scaler_details": {"mean": scaler.mean_.tolist(), "scale": scaler.scale_.tolist()} if scaler else None,
         "pca_model_details": {"components": pca.components_.tolist(), "variance": pca.explained_variance_ratio_.tolist()} if pca else None

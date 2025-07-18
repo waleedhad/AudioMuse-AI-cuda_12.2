@@ -10,6 +10,7 @@ import random
 import logging
 import uuid
 import traceback
+from scipy.spatial.distance import cdist # *** NEW: For distance calculations ***
 
 # RQ import
 from rq import get_current_job, Retry
@@ -42,6 +43,27 @@ from .clustering_helper import (
 )
 
 logger = logging.getLogger(__name__)
+
+def _sanitize_for_json(obj):
+    """
+    Recursively converts numpy arrays and numpy numeric types to native Python types
+    to ensure the object is JSON serializable.
+    """
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(elem) for elem in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    # Handle numpy numeric types which are not JSON serializable by default
+    elif isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64, np.uint8, np.uint16, np.uint32, np.uint64)):
+        return int(obj)
+    elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    else:
+        return obj
 
 
 def run_clustering_batch_task(
@@ -155,13 +177,17 @@ def run_clustering_batch_task(
                 progress = int(100 * (i + 1) / num_iterations_in_batch)
                 _log_and_update(f"Iteration {current_run_global_idx} complete. Batch best score: {best_score_in_batch:.2f}", progress)
 
+            # *** FIX: Sanitize the result to make it JSON-serializable before logging/returning ***
+            if best_result_in_batch:
+                best_result_in_batch = _sanitize_for_json(best_result_in_batch)
+
             final_details = {
                 "best_score_in_batch": best_score_in_batch,
                 "iterations_completed_in_batch": iterations_completed,
                 "full_best_result_from_batch": best_result_in_batch,
                 "final_subset_track_ids": current_sampled_track_ids
             }
-            _log_and_update(f"Batch complete. Best score: {best_score_in_batch:.2f}", 100, details=final_details, state=TASK_STATUS_SUCCESS)
+            _log_and_update(f"Batch complete. Best score: {best_score_in_batch or -1:.2f}", 100, details=final_details, state=TASK_STATUS_SUCCESS)
             return {
                 "status": "SUCCESS",
                 "iterations_completed_in_batch": iterations_completed,
@@ -190,6 +216,7 @@ def run_clustering_task(
     score_weight_other_feature_purity_param,
     ai_model_provider_param, ollama_server_url_param, ollama_model_name_param,
     gemini_api_key_param, gemini_model_name_param, top_n_moods_for_clustering_param,
+    top_n_playlists_param, # *** NEW: Accept Top N parameter ***
     enable_clustering_embeddings_param):
     """
     Main entry point for the clustering process.
@@ -198,6 +225,34 @@ def run_clustering_task(
     current_job = get_current_job(redis_conn)
     current_task_id = current_job.id if current_job else str(uuid.uuid4())
     logger.info(f"Starting main clustering task {current_task_id}")
+
+    # Capture initial parameters for the final report
+    initial_params = {
+        "clustering_method": clustering_method,
+        "pca_components_min": pca_components_min,
+        "pca_components_max": pca_components_max,
+        "use_embeddings": enable_clustering_embeddings_param,
+        "top_n_playlists": top_n_playlists_param, # *** NEW: Log Top N parameter ***
+        "stratification_percentile": stratified_sampling_target_percentile_param,
+        "score_weights": {
+            "mood_diversity": score_weight_diversity_param,
+            "silhouette": score_weight_silhouette_param,
+            "davies_bouldin": score_weight_davies_bouldin_param,
+            "calinski_harabasz": score_weight_calinski_harabasz_param,
+            "mood_purity": score_weight_purity_param,
+            "other_feature_diversity": score_weight_other_feature_diversity_param,
+            "other_feature_purity": score_weight_other_feature_purity_param
+        }
+    }
+    if clustering_method == 'kmeans':
+        initial_params["num_clusters_min"] = num_clusters_min
+        initial_params["num_clusters_max"] = num_clusters_max
+    elif clustering_method == 'gmm':
+        initial_params["num_clusters_min"] = gmm_n_components_min
+        initial_params["num_clusters_max"] = gmm_n_components_max
+    elif clustering_method == 'spectral':
+        initial_params["num_clusters_min"] = spectral_n_clusters_min
+        initial_params["num_clusters_max"] = spectral_n_clusters_max
 
     with app.app_context():
         # IDEMPOTENCY CHECK
@@ -319,10 +374,19 @@ def run_clustering_task(
             if not _main_task_accumulated_details["best_result"]:
                 raise ValueError("No valid clustering solution found after all runs.")
 
+            best_result = _main_task_accumulated_details["best_result"]
+
+            # *** NEW STEP: Filter for Top N Most Diverse Playlists ***
+            if top_n_playlists_param > 0 and len(best_result.get("named_playlists", {})) > top_n_playlists_param:
+                _log_and_update(f"Filtering for Top {top_n_playlists_param} most diverse playlists...", 91)
+                best_result = _select_top_n_diverse_playlists(best_result, top_n_playlists_param)
+                _main_task_accumulated_details["best_result"] = best_result # Update main dict with filtered result
+
             _log_and_update(f"Best clustering found with score: {_main_task_accumulated_details['best_score']:.2f}. Creating playlists...", 92)
 
             final_playlists_with_details = _name_and_prepare_playlists(
-                _main_task_accumulated_details["best_result"], ai_model_provider_param, ollama_server_url_param,
+                best_result, # Use the potentially filtered result
+                ai_model_provider_param, ollama_server_url_param,
                 ollama_model_name_param, gemini_api_key_param, gemini_model_name_param,
                 enable_clustering_embeddings_param
             )
@@ -337,12 +401,37 @@ def run_clustering_task(
 
             update_playlist_table(final_playlists_with_details)
 
+            # --- Final Success Reporting ---
+            final_message = "Clustering task completed successfully!"
+            
+            # Add final message to the log before preparing the summary
+            log_entry = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {final_message}"
+            _main_task_accumulated_details["log"].append(log_entry)
+            logger.info(f"[MainClusteringTask-{current_task_id}] {final_message}")
+
+            final_log = _main_task_accumulated_details.get('log', [])
+            truncated_log = final_log[-10:]
+
+            # This dictionary is the final, clean state for the DB.
+            # It includes running parameters, excludes elite solutions, and has a truncated log.
             final_db_summary = {
+                "status_message": final_message,
+                "running_parameters": initial_params,
                 "best_score": _main_task_accumulated_details["best_score"],
                 "best_params": _main_task_accumulated_details["best_result"].get("parameters"),
-                "num_playlists_created": len(final_playlists_with_details)
+                "num_playlists_created": len(final_playlists_with_details),
+                "log": truncated_log,
+                "log_storage_info": f"Log truncated to last {len(truncated_log)} entries. Original length: {len(final_log)}." if len(final_log) > 10 else "Full log."
             }
-            _log_and_update("Clustering task completed successfully!", 100, details_to_add_or_update=final_db_summary, task_state=TASK_STATUS_SUCCESS)
+            
+            if current_job:
+                current_job.meta['progress'] = 100
+                current_job.meta['status_message'] = final_message
+                current_job.save_meta()
+
+            # Direct call to save_task_status with the clean details object
+            save_task_status(current_task_id, "main_clustering", TASK_STATUS_SUCCESS, progress=100, details=final_db_summary)
+
             return {"status": "SUCCESS", "message": f"Playlists created. Best score: {_main_task_accumulated_details['best_score']:.2f}"}
 
         except Exception as e:
@@ -537,3 +626,93 @@ def _name_and_prepare_playlists(best_result, ai_provider, ollama_url, ollama_mod
             final_playlists[base_name_with_suffix] = songs # Store the list of tuples
 
     return final_playlists
+
+
+def _select_top_n_diverse_playlists(best_result, n):
+    """
+    Selects the N most diverse playlists from a clustering result by weighting
+    both distance (diversity) and size (usefulness).
+    """
+    playlist_to_vector = best_result.get("playlist_to_centroid_vector_map", {})
+    original_playlists = best_result.get("named_playlists", {})
+    original_centroids = best_result.get("playlist_centroids", {})
+
+    if not playlist_to_vector or n <= 0 or n >= len(playlist_to_vector):
+        logger.info(f"Skipping Top-N selection: N={n}, available playlists={len(playlist_to_vector)}. Returning original set.")
+        return best_result
+
+    logger.info(f"Starting selection of Top {n} diverse playlists from {len(playlist_to_vector)} candidates.")
+
+    # Convert to lists for easier indexing
+    available_names = list(playlist_to_vector.keys())
+    available_vectors = np.array(list(playlist_to_vector.values()))
+
+    if available_vectors.shape[0] <= n:
+        return best_result
+
+    selected_indices = []
+    
+    # 1. Start with the largest playlist to anchor the selection
+    playlist_sizes = [len(original_playlists.get(name, [])) for name in available_names]
+    first_idx = np.argmax(playlist_sizes)
+    selected_indices.append(first_idx)
+
+    # Create a boolean mask for available items
+    is_available = np.ones(len(available_names), dtype=bool)
+    is_available[first_idx] = False
+    
+    # 2. Iteratively select the playlist with the best combined score of distance and size
+    for _ in range(n - 1):
+        if not np.any(is_available):
+            break # No more playlists to select
+
+        selected_vectors = available_vectors[selected_indices]
+        remaining_vectors = available_vectors[is_available]
+        
+        # --- Calculate Diversity Score (Distance) ---
+        dist_matrix = cdist(remaining_vectors, selected_vectors, 'euclidean')
+        min_distances = np.min(dist_matrix, axis=1)
+        
+        # --- Calculate Size Score ---
+        original_indices_available = np.where(is_available)[0]
+        sizes_available = np.array([len(original_playlists.get(available_names[i], [])) for i in original_indices_available])
+        # Use log1p for a smooth curve with diminishing returns for size
+        size_scores = np.log1p(sizes_available)
+
+        # --- Normalize and Combine Scores ---
+        # Normalize both scores to a 0-1 range to make them comparable
+        max_dist = np.max(min_distances)
+        normalized_dist_scores = min_distances / max_dist if max_dist > 0 else np.zeros_like(min_distances)
+
+        max_size_score = np.max(size_scores)
+        normalized_size_scores = size_scores / max_size_score if max_size_score > 0 else np.zeros_like(size_scores)
+        
+        # Combine the scores (equal weighting)
+        # TEST USING * INSTEAD OF +
+        combined_scores = normalized_dist_scores * normalized_size_scores
+        
+        # Find the playlist that has the maximum combined score
+        best_candidate_local_idx = np.argmax(combined_scores)
+        
+        # Convert this local index back to the original full list index
+        best_original_idx = original_indices_available[best_candidate_local_idx]
+        
+        # Add to selected and mark as unavailable
+        selected_indices.append(best_original_idx)
+        is_available[best_original_idx] = False
+
+    # 3. Build the new, filtered result
+    selected_names = [available_names[i] for i in selected_indices]
+    
+    filtered_playlists = {name: original_playlists[name] for name in selected_names if name in original_playlists}
+    filtered_centroids = {name: original_centroids[name] for name in selected_names if name in original_centroids}
+    filtered_vector_map = {name: playlist_to_vector[name] for name in selected_names if name in playlist_to_vector}
+
+    new_result = best_result.copy()
+    new_result["named_playlists"] = filtered_playlists
+    new_result["playlist_centroids"] = filtered_centroids
+    new_result["playlist_to_centroid_vector_map"] = filtered_vector_map
+    
+    logger.info(f"Selected {len(selected_names)} diverse playlists: {selected_names}")
+
+    return new_result
