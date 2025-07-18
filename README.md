@@ -30,8 +30,8 @@ The **supported architecture** are:
 
 
 And now just some **NEWS:**
-> Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
-> From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
+> * Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
+> * From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
 ## **Table of Contents**
 
