@@ -21,7 +21,7 @@ NAVIDROME_PASSWORD = os.environ.get("NAVIDROME_PASSWORD", "your_navidrome_passwo
 
 
 # --- General Constants (Read from Environment Variables where applicable) ---
-APP_VERSION = "v0.6.3-beta"
+APP_VERSION = "v0.7.0-beta" # Version updated for Voyager integration
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
 MAX_SONGS_PER_ARTIST = 3
@@ -75,7 +75,7 @@ MAX_CONCURRENT_BATCH_JOBS = int(os.environ.get("MAX_CONCURRENT_BATCH_JOBS", "10"
 DB_FETCH_CHUNK_SIZE = int(os.environ.get("DB_FETCH_CHUNK_SIZE", "1000")) # Chunk size for fetching full track data from DB in batch jobs
 
 # --- Batching Constants for Analysis ---
-REBUILD_INDEX_BATCH_SIZE = int(os.environ.get("REBUILD_INDEX_BATCH_SIZE", "10")) # Rebuild Annoy index after this many albums are analyzed.
+REBUILD_INDEX_BATCH_SIZE = int(os.environ.get("REBUILD_INDEX_BATCH_SIZE", "10")) # Rebuild Voyager index after this many albums are analyzed.
 AUDIO_LOAD_TIMEOUT = int(os.getenv("AUDIO_LOAD_TIMEOUT", "600")) # Timeout in seconds for loading a single audio file.
 
 # --- Guided Evolutionary Clustering Constants ---
@@ -187,12 +187,15 @@ TOP_N_MOODS = 5
 TOP_N_OTHER_FEATURES = int(os.environ.get("TOP_N_OTHER_FEATURES", "2")) # Number of top "other features" to consider for clustering vector
 EMBEDDING_MODEL_PATH = "/app/model/msd-musicnn-1.pb"
 PREDICTION_MODEL_PATH = "/app/model/msd-msd-musicnn-1.pb"
-EMBEDDING_DIMENSION = 200 # *** ADDED THIS LINE ***
+EMBEDDING_DIMENSION = 200
 
-# --- Annoy Index Constants ---
-INDEX_NAME = os.environ.get("ANNOY_INDEX_NAME", "music_library") # The primary key for our index in the DB
-NUM_TREES = int(os.environ.get("ANNOY_NUM_TREES", "50")) # More trees = higher accuracy, larger index, longer build time. 50 means aroudn 1,5GB for 1 millions songs
-ANNOY_METRIC = os.environ.get("ANNOY_METRIC", "angular")  # Options: 'angular', 'euclidean', 'manhattan', 'hamming', 'dot'
+# --- Voyager Index Constants ---
+INDEX_NAME = os.environ.get("VOYAGER_INDEX_NAME", "music_library") # The primary key for our index in the DB
+VOYAGER_METRIC = os.environ.get("VOYAGER_METRIC", "angular") # Options: 'angular' (Cosine), 'euclidean', 'dot' (InnerProduct)
+VOYAGER_EF_CONSTRUCTION = int(os.environ.get("VOYAGER_EF_CONSTRUCTION", "1024"))
+VOYAGER_M = int(os.environ.get("VOYAGER_M", "64"))
+VOYAGER_QUERY_EF = int(os.environ.get("VOYAGER_QUERY_EF", "1024"))
+
 
 # --- Other Essentia Model Paths ---
 # Paths for models used in predict_other_models (VGGish-based)

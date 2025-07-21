@@ -42,7 +42,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         rq \
         pyyaml \
         six \
-        annoy \
+        voyager \
         psycopg2-binary \
         ftfy \
         flasgger \
@@ -60,7 +60,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         rq \
         pyyaml \
         six \
-        annoy \
+        voyager \
         psycopg2-binary \
         ftfy \
         flasgger \
