@@ -396,7 +396,11 @@ This are the default parameters on wich the analysis or clustering task will be 
 | **GMM Ranges**                           |                                                                              |                                      |
 | `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `40`                                 |
 | `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `100`                                 |
-| `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
+| `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `full`).                               | `full`                               |
+| **Spectral Ranges**                      |                                                                              |                                      |
+| `SPECTRAL_N_CLUSTERS_MIN`                | Min components for GMM.                                                    | `40`                                 |
+| `SPECTRAL_N_CLUSTERS_MAX`                | Max components for GMM.                                                    | `100`                                 |
+| `SPECTRAL_N_NEIGHBORS`                   | Number of Neighbors on which do clustering. Higher is better but slower    | `30`                               |
 | **PCA Ranges**                           |                                                                              |                                      |
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
 | `PCA_COMPONENTS_MAX`                     | Max PCA components (e.g., `8` for feature vectors, `199` for embeddings).    | `8`                                  |
