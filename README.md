@@ -373,6 +373,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | **Similarity General**    |                                                                              |                                      |
 | `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
 | `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
+| `ANNOY_METRIC`                           | Different tipy of distance metrics: `angular`, `euclidean`, `manhattan`, `hamming`, `dot`| `angular`              |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
 | `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                |
 | `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `10`                                  |
