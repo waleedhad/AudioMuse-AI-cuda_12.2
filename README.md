@@ -30,6 +30,7 @@ The **supported architecture** are:
 
 
 And now just some **NEWS:**
+> * Version 0.6.3-beta introduce **Voyager index** for the similarity function. Raising the recall from 70-80% to 99% for 100 similar song. Also using less memory.
 > * Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
 > * From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
@@ -372,8 +373,10 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `TOP_N_PLAYLISTS`                        | POST Clustering it keep only the top N diverse playlist.                   | `8`                               |
 | **Similarity General**    |                                                                              |                                      |
 | `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
-| `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
-| `ANNOY_METRIC`                           | Different tipy of distance metrics: `angular`, `euclidean`, `manhattan`, `hamming`, `dot`| `angular`              |
+| `VOYAGER_EF_CONSTRUCTION`                | Number of element analyzed to create the neighbor list in the index.       | `1024`                                 |
+| `VOYAGER_M`                              | Number of neighbore More  = higher accuracy.                               | `64`                                 |
+| `VOYAGER_QUERY_EF`                       | Number neighbor analyzed during the query.                                 | `1024`                                 |
+| `VOYAGER_METRIC`                           | Different tipy of distance metrics: `angular`, `euclidean`,`dot`         | `angular`              |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
 | `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                |
 | `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `10`                                  |
@@ -871,7 +874,9 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
-* [**annoy**](https://github.com/spotify/annoy) Approximate Nearest Neighbors used for the /similarity interface
+* [**annoy**](https://github.com/spotify/annoy) Approximate Nearest Neighbors used for the /similarity interface. Used only until v0.6.2-beta
+* [**voyager**](https://github.com/spotify/voyager) Approximate Nearest Neighbors used for the /similarity interface. Used from v0.6.3-beta
+
 * [**PostgreSQL:**](https://www.postgresql.org/) A powerful, open-source relational database used for persisting:  
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  
