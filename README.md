@@ -284,7 +284,7 @@ For a quick and interactive way to generate playlists without running the full e
 
 **IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
 
-This new functionality enable you to search the top N similar song that are similar to another one. Basically during the analysis task an Approximate Nearest Neighbors (Annoy) index is made. Then with the new similarity interface you can just search for similar song.
+This new functionality enable you to search the top N similar song that are similar to another one. Basically during the analysis task an Approximate Nearest Neighbors (Voyager) index is made. Then with the new similarity interface you can just search for similar song.
 
 **How to Use:**
 1.  **Access the Chat Interface:**
@@ -808,17 +808,17 @@ The "Playlist from Similar Song" feature provides an interactive way to discover
 **Core Workflow:**
 
 1. **Index Creation (During Analysis Task):**  
-   * The foundation of this feature is an **Approximate Nearest Neighbors (ANN) index**, which is built using Spotify's **Annoy** library.  
-   * During the main "Analysis Task," after the 200-dimensional MusiCNN embedding has been generated for each track, a dedicated function (build\_and\_store\_annoy\_index) is triggered.  
-   * This function gathers all embeddings from the database and uses them to build the Annoy index. It uses an 'angular' distance metric, which is highly effective for comparing the "direction" of high-dimensional vectors like audio embeddings, thus capturing sonic similarity well.  
+   * The foundation of this feature is an **Approximate Nearest Neighbors (ANN) index**, which is built using Spotify's **Voyager** library.  
+   * During the main "Analysis Task," after the 200-dimensional MusiCNN embedding has been generated for each track, a dedicated function (build\_and\_store\voyager\_index) is triggered.  
+   * This function gathers all embeddings from the database and uses them to build the Voyager index. It uses an 'angular' distance metric, which is highly effective for comparing the "direction" of high-dimensional vectors like audio embeddings, thus capturing sonic similarity well.  
    * The completed index, which is a highly optimized data structure for fast lookups, is then saved to the PostgreSQL database. This ensures it persists and only needs to be rebuilt when new music is analyzed.  
 2. **User Interface (similarity.html):**  
    * The user navigates to the /similarity page.  
    * An autocomplete search box allows the user to easily find a specific "seed" song by typing its title and/or artist. This search is powered by the /api/search\_tracks endpoint.  
 3. **High-Speed Similarity Search (/api/similar\_tracks):**  
    * Once the user selects a seed song and initiates the search, the frontend calls this API endpoint with the song's unique item\_id.  
-   * For maximum performance, the backend loads the Annoy index from the database into memory upon starting up (load\_annoy\_index\_for\_querying). This in-memory cache allows for near-instantaneous lookups.  
-   * The core function find\_nearest\_neighbors\_by\_id takes the seed song's ID, finds its corresponding vector within the Annoy index, and instantly retrieves the *N* closest vectors (the most similar songs) based on the pre-calculated angular distances.  
+   * For maximum performance, the backend loads the Voyager index from the database into memory upon starting up (load\voyager\_index\_for\_querying). This in-memory cache allows for near-instantaneous lookups.  
+   * The core function find\_nearest\_neighbors\_by\_id takes the seed song's ID, finds its corresponding vector within the Voyager index, and instantly retrieves the *N* closest vectors (the most similar songs) based on the pre-calculated angular distances.  
    * The backend then fetches the metadata (title, artist) for these resulting song IDs from the main score table.  
 4. **Playlist Creation (/api/create\_playlist):**  
    * The list of similar tracks, along with their distance from the seed song, is displayed to the user.  
