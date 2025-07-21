@@ -43,7 +43,7 @@ RUN pip3 install --no-cache-dir \
     rq \
     pyyaml \
     six \
-    annoy \
+    voyager \
     # Added psycopg2-binary for PostgreSQL connectivity
     psycopg2-binary \
     ftfy \
