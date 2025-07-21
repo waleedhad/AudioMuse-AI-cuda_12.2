@@ -460,12 +460,25 @@ def _calculate_target_songs_per_genre(genre_map, percentile, min_songs):
     return max(min_songs, int(np.floor(target)))
 
 def _monitor_and_process_batches(state_dict, parent_task_id, initial_check=False):
-    """Checks status of active jobs, processes results of finished ones."""
-    if initial_check:
-        # On recovery, check all child tasks from DB, not just ones in memory
-        job_ids_to_check = [task['task_id'] for task in get_child_tasks_from_db(parent_task_id)]
-    else:
-        job_ids_to_check = list(state_dict["active_jobs"].keys())
+    """
+    Checks status of active jobs, processes results of finished ones.
+    This function is corrected to prevent race conditions and infinite loops.
+    """
+    # ALWAYS get the full list of child tasks from the database.
+    # This is the single source of truth and prevents state inconsistencies.
+    all_child_tasks = get_child_tasks_from_db(parent_task_id)
+    
+    # Identify jobs that are still supposedly running according to our database.
+    job_ids_to_check = [
+        task['task_id'] for task in all_child_tasks 
+        if task['status'] not in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]
+    ]
+
+    # Also include jobs we know are active in-memory but might not be in the DB yet.
+    # This covers the brief moment right after enqueueing.
+    for job_id in state_dict["active_jobs"].keys():
+        if job_id not in job_ids_to_check:
+            job_ids_to_check.append(job_id)
 
     finished_job_ids = []
     for job_id in job_ids_to_check:
@@ -474,7 +487,12 @@ def _monitor_and_process_batches(state_dict, parent_task_id, initial_check=False
             if job.is_finished or job.is_failed or job.get_status() == JobStatus.CANCELED:
                 finished_job_ids.append(job_id)
         except NoSuchJobError:
-            logger.warning(f"Job {job_id} not found in RQ, treating as finished.")
+            # If the job is not in RQ, it's either finished and cleaned up, or something
+            # went wrong. We check our DB again. If the DB says it's not finished,
+            # we log a warning, but we treat it as 'finished' to avoid getting stuck.
+            task_info = get_task_info_from_db(job_id)
+            if not task_info or task_info.get('status') not in [TASK_STATUS_SUCCESS, TASK_STATUS_FAILURE, TASK_STATUS_REVOKED]:
+                 logger.warning(f"Job {job_id} not found in RQ, but its status in DB is not terminal. Treating as finished to prevent loop.")
             finished_job_ids.append(job_id)
 
     for job_id in finished_job_ids:
@@ -492,13 +510,14 @@ def _monitor_and_process_batches(state_dict, parent_task_id, initial_check=False
                 if current_best_score > state_dict["best_score"]:
                     state_dict["best_score"] = current_best_score
                     state_dict["best_result"] = best_from_batch
-        # Clean up finished job
+        # Clean up finished job from our in-memory dictionary
         if job_id in state_dict["active_jobs"]:
             del state_dict["active_jobs"][job_id]
 
     # Prune elite solutions to keep only the best
     state_dict["elite_solutions"].sort(key=lambda x: x["score"], reverse=True)
     state_dict["elite_solutions"] = state_dict["elite_solutions"][:TOP_N_ELITES]
+
 
 def _launch_batch_job(state_dict, parent_task_id, batch_idx, total_runs, genre_map, target_per_genre, *args):
     """Constructs and enqueues a single batch job."""
