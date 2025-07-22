@@ -211,7 +211,7 @@ def _is_likely_same_song(title1, artist1, title2, artist2, threshold=90):
     norm_artist2 = _normalize_artist(artist2)
     
     artist_score = fuzz.ratio(norm_artist1, norm_artist2)
-    if artist_score < 90:
+    if artist_score < 100:
         return False
 
     title_score = fuzz.ratio(norm_title1, norm_title2)
