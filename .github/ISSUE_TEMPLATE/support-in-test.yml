@@ -86,18 +86,18 @@ body:
       description: "Genre Diversity = how well were the different genres within your library represented by the generated playlists?  
       Amount of Playlist = how was the amount of playlists? 1=too few, 2=ok, 3= too many"
       value: |
-        | Test # | Genre Diversity | Amount of Playlist | Overall Quality| Comments  |
-        |        | 1=worst, 5=best | 1,2 or 3           | 1=worst, 5=best|           |
-        |-------:|:---------------:|:------------------:|:--------------:|:---------:|
-        | 1      |                 |                    |                |           |
-        | 2      |                 |                    |                |           |
-        | 3      |                 |                    |                |           |
-        | 4      |                 |                    |                |           |
-        | 5      |                 |                    |                |           |
-        | 6      |                 |                    |                |           |
-        | 7      |                 |                    |                |           |
-        | 8      |                 |                    |                |           |
-        | 9      |                 |                    |                |           |
+              | Test # | Genre Diversity<br>1=worst, 5=best| Amount of Playlist<br>1,2 or 3| Overall Quality<br>1=worst, 5=best|Comments|
+              |-------:|:---------------:|:------------------:|:--------------:|:---------:|
+              | 1      |                 |                    |                |           |
+              | 2      |                 |                    |                |           |
+              | 3      |                 |                    |                |           |
+              | 4      |                 |                    |                |           |
+              | 5      |                 |                    |                |           |
+              | 6      |                 |                    |                |           |
+              | 7      |                 |                    |                |           |
+              | 8      |                 |                    |                |           |
+              | 9      |                 |                    |                |           |
+
 
   - type: textarea
     id: additional-feedback
