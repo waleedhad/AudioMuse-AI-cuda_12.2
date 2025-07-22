@@ -205,9 +205,10 @@ def _is_same_song(title1, artist1, title2, artist2):
     
     return norm_title1 == norm_title2 and norm_artist1 == norm_artist2
 
-def _deduplicate_and_filter_neighbors(song_results: list, db_conn):
+def _deduplicate_and_filter_neighbors(song_results: list, db_conn, original_song_details: dict):
     """
-    Filters a list of songs to remove duplicates based on exact title/artist match.
+    Filters a list of songs to remove duplicates based on exact title/artist match,
+    including the original song that seeded the search.
     """
     if not song_results:
         return []
@@ -221,7 +222,9 @@ def _deduplicate_and_filter_neighbors(song_results: list, db_conn):
             item_details[row['item_id']] = {'title': row['title'], 'author': row['author']}
 
     unique_songs = []
-    added_songs_details = [] 
+    # FIX: Initialize the list of added songs with the original song's details.
+    # This ensures we don't add any neighbors that are duplicates of the original song.
+    added_songs_details = [{'title': original_song_details['title'], 'author': original_song_details['author']}] 
 
     for song in song_results:
         current_details = item_details.get(song['item_id'])
@@ -254,6 +257,17 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10, eliminate_dup
     if voyager_index is None or id_map is None or reverse_id_map is None:
         raise RuntimeError("Voyager index is not loaded in memory. It may be missing, empty, or the server failed to load it on startup.")
 
+    from app import get_db, get_score_data_by_ids
+    db_conn = get_db()
+
+    # FIX: Fetch details of the original song to use for deduplication.
+    target_song_details_list = get_score_data_by_ids([target_item_id])
+    if not target_song_details_list:
+        logger.error(f"Could not retrieve details for the target song {target_item_id}. Aborting neighbor search.")
+        return []
+    target_song_details = target_song_details_list[0]
+
+
     target_voyager_id = reverse_id_map.get(target_item_id)
     if target_voyager_id is None:
         logger.warning(f"Target item_id '{target_item_id}' not found in the loaded Voyager index map.")
@@ -268,7 +282,7 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10, eliminate_dup
     # If eliminating duplicates by artist, search for a much larger number of neighbors first.
     if eliminate_duplicates:
         # Query more to have a pool for filtering. +1 for the original song.
-        k_increase = max(5, int(n * 3))
+        k_increase = max(5, int(n * 4))
         num_to_query = n + k_increase + 1 # +1 to account for the query song itself
     else:
         # Standard query size increase for basic song-level deduplication
@@ -285,11 +299,9 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10, eliminate_dup
         if item_id and item_id != target_item_id:
             initial_results.append({"item_id": item_id, "distance": float(dist)})
 
-    from app import get_db, get_score_data_by_ids
-    db_conn = get_db()
-
     # First, perform the song-level deduplication (e.g., remove remixes)
-    unique_results_by_song = _deduplicate_and_filter_neighbors(initial_results, db_conn)
+    # FIX: Pass the original song's details to the deduplication function.
+    unique_results_by_song = _deduplicate_and_filter_neighbors(initial_results, db_conn, target_song_details)
     
     # Now, if requested, filter by artist count
     if eliminate_duplicates:
