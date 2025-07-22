@@ -8,7 +8,6 @@ import psycopg2 # type: ignore
 from psycopg2.extras import DictCursor
 import io # Import the io module
 import re
-from rapidfuzz import fuzz
 
 from config import (
     EMBEDDING_DIMENSION, INDEX_NAME, VOYAGER_METRIC, VOYAGER_EF_CONSTRUCTION,
@@ -188,38 +187,27 @@ def load_voyager_index_for_querying(force_reload=False):
     finally:
         cur.close()
 
-def _normalize_title(title: str) -> str:
-    """Lowercase, remove content in brackets, and normalize separators."""
-    if not title:
-        return ""
-    title = re.sub(r'[\[\(].*?[\]\)]', '', title)
-    title = re.sub(r'[_\-]', ' ', title)
-    title = re.sub(r'\s+', ' ', title)
-    return title.strip().lower()
-
-def _normalize_artist(artist: str) -> str:
+def _normalize_string(text: str) -> str:
     """Lowercase and strip whitespace."""
-    if not artist:
+    if not text:
         return ""
-    return artist.strip().lower()
+    return text.strip().lower()
 
-def _is_likely_same_song(title1, artist1, title2, artist2, threshold=90):
-    """Determines if two songs are likely the same based on title and artist similarity."""
-    norm_title1 = _normalize_title(title1)
-    norm_title2 = _normalize_title(title2)
-    norm_artist1 = _normalize_artist(artist1)
-    norm_artist2 = _normalize_artist(artist2)
+def _is_same_song(title1, artist1, title2, artist2):
+    """
+    Determines if two songs are identical based on title and artist.
+    Comparison is case-insensitive.
+    """
+    norm_title1 = _normalize_string(title1)
+    norm_title2 = _normalize_string(title2)
+    norm_artist1 = _normalize_string(artist1)
+    norm_artist2 = _normalize_string(artist2)
     
-    artist_score = fuzz.ratio(norm_artist1, norm_artist2)
-    if artist_score < 100:
-        return False
-
-    title_score = fuzz.ratio(norm_title1, norm_title2)
-    return title_score >= threshold
+    return norm_title1 == norm_title2 and norm_artist1 == norm_artist2
 
 def _deduplicate_and_filter_neighbors(song_results: list, db_conn):
     """
-    Filters a list of songs to remove duplicates based on title/artist similarity.
+    Filters a list of songs to remove duplicates based on exact title/artist match.
     """
     if not song_results:
         return []
@@ -243,12 +231,12 @@ def _deduplicate_and_filter_neighbors(song_results: list, db_conn):
 
         is_duplicate = False
         for added_detail in added_songs_details:
-            if _is_likely_same_song(
+            if _is_same_song(
                 current_details['title'], current_details['author'],
                 added_detail['title'], added_detail['author']
             ):
                 is_duplicate = True
-                logger.info(f"Found duplicate: '{current_details['title']}' is similar to '{added_detail['title']}'.")
+                logger.info(f"Found duplicate: '{current_details['title']}' by '{current_details['author']}'.")
                 break
         
         if not is_duplicate:
