@@ -195,7 +195,7 @@ spec:
         fsGroup: 0
       containers:
       - name: flask-app
-        image: ghcr.io/neptunehub/audiomuse-ai:0.6.2-beta
+        image: ghcr.io/neptunehub/audiomuse-ai:0.6.3-beta
         imagePullPolicy: Always
         ports:
         - containerPort: 8000
@@ -306,7 +306,7 @@ spec:
         fsGroup: 0
       containers:
       - name: rq-worker
-        image: ghcr.io/neptunehub/audiomuse-ai:0.6.2-beta
+        image: ghcr.io/neptunehub/audiomuse-ai:0.6.3-beta
         imagePullPolicy: Always
         env:
         - name: SERVICE_TYPE

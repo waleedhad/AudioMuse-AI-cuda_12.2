@@ -8,7 +8,6 @@ import logging
 import threading
 import numpy as np # Ensure numpy is imported
 import uuid # For generating job IDs if needed directly in API, though tasks handle their own
-from annoy import AnnoyIndex
 import time
 
 # RQ imports
@@ -216,6 +215,18 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # --- NEW: Table for Voyager index data ---
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS voyager_index_data (
+            index_name VARCHAR(255) PRIMARY KEY,
+            index_data BYTEA NOT NULL,
+            id_map_json TEXT NOT NULL,
+            embedding_dimension INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Drop obsolete tables if they exist
     cur.execute("DROP TABLE IF EXISTS annoy_index;")
     cur.execute("DROP TABLE IF EXISTS annoy_mappings;")
@@ -1153,7 +1164,7 @@ def get_playlists_endpoint():
 def listen_for_index_reloads():
     """
     Runs in a background thread to listen for messages on a Redis Pub/Sub channel.
-    When a 'reload' message is received, it triggers the in-memory Annoy index to be reloaded.
+    When a 'reload' message is received, it triggers the in-memory Voyager index to be reloaded.
     This is the recommended pattern for inter-process communication in this architecture,
     avoiding direct HTTP calls from workers to the web server.
     """
@@ -1162,7 +1173,7 @@ def listen_for_index_reloads():
     thread_redis_conn = Redis.from_url(REDIS_URL)
     pubsub = thread_redis_conn.pubsub()
     pubsub.subscribe('index-updates')
-    logger.info("Background thread started. Listening for Annoy index reloads on Redis channel 'index-updates'.")
+    logger.info("Background thread started. Listening for Voyager index reloads on Redis channel 'index-updates'.")
 
     for message in pubsub.listen():
         # The first message is a confirmation of subscription, so we skip it.
@@ -1172,13 +1183,13 @@ def listen_for_index_reloads():
             if message_data == 'reload':
                 # We need the application context to access 'g' and the database connection.
                 with app.app_context():
-                    logger.info("Triggering in-memory Annoy index reload from background listener.")
+                    logger.info("Triggering in-memory Voyager index reload from background listener.")
                     try:
-                        from tasks.annoy_manager import load_annoy_index_for_querying
-                        load_annoy_index_for_querying(force_reload=True)
-                        logger.info("In-memory Annoy index reloaded successfully by background listener.")
+                        from tasks.voyager_manager import load_voyager_index_for_querying
+                        load_voyager_index_for_querying(force_reload=True)
+                        logger.info("In-memory Voyager index reloaded successfully by background listener.")
                     except Exception as e:
-                        logger.error(f"Error reloading Annoy index from background listener: {e}", exc_info=True)
+                        logger.error(f"Error reloading Voyager index from background listener: {e}", exc_info=True)
 
 
 # --- Import and Register Blueprints ---
@@ -1196,7 +1207,7 @@ if __name__ == '__main__':
     from app_chat import chat_bp
     from app_clustering import clustering_bp
     from app_analysis import analysis_bp
-    from app_annoy import annoy_bp
+    from app_voyager import voyager_bp
 
     # Only chat gets a prefix
     app.register_blueprint(chat_bp, url_prefix='/chat')
@@ -1204,20 +1215,20 @@ if __name__ == '__main__':
     # Others are registered at root (no prefix)
     app.register_blueprint(clustering_bp)
     app.register_blueprint(analysis_bp)
-    app.register_blueprint(annoy_bp)
+    app.register_blueprint(voyager_bp)
     
     os.makedirs(TEMP_DIR, exist_ok=True)
     # This block runs only when the script is executed directly (e.g., `python app.py`)
     # It's the entry point for the web server process.
     with app.app_context():
-        # --- Initial Annoy Index Load ---
+        # --- Initial Voyager Index Load ---
         # Import locally to avoid circular dependency issues.
-        from tasks.annoy_manager import load_annoy_index_for_querying
-        # Load the Annoy index into memory on startup.
-        load_annoy_index_for_querying()
+        from tasks.voyager_manager import load_voyager_index_for_querying
+        # Load the Voyager index into memory on startup.
+        load_voyager_index_for_querying()
 
     # --- Start Background Listener Thread ---
-    # This thread will handle live reloads of the Annoy index without needing an API call.
+    # This thread will handle live reloads of the Voyager index without needing an API call.
     # NOTE FOR PRODUCTION: If you use a WSGI server like Gunicorn with multiple workers,
     # this simple threading model may not be ideal. Each worker would start its own
     # listener. A more robust production approach would be to use Gunicorn's `post_fork`

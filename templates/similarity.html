@@ -7,6 +7,15 @@
     <title>AudioMuse-AI - Playlist from Similar Song</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="/static/menu.css">
+    <style>
+        /* Basic styling for the new checkbox container */
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem; /* Space between checkbox and label */
+            margin-top: 1rem; /* Align with other inputs */
+        }
+    </style>
 </head>
 <body>
 
@@ -45,6 +54,12 @@
                         <div>
                             <label for="n">Number of results:</label>
                             <input type="number" id="n" name="n" value="10" min="1" max="100">
+                        </div>
+                    </div>
+                     <div class="param-group">
+                        <div class="checkbox-container">
+                            <input type="checkbox" id="eliminate_duplicates" name="eliminate_duplicates" checked>
+                            <label for="eliminate_duplicates">Limit songs per artist in results</label>
                         </div>
                     </div>
                     <button type="submit">
@@ -162,6 +177,7 @@
 
                 const itemId = selectedItemIdInput.value;
                 const n = document.getElementById('n').value;
+                const eliminateDuplicates = document.getElementById('eliminate_duplicates').checked;
 
                 resultsContainer.classList.remove('hidden');
                 playlistCreator.classList.add('hidden');
@@ -176,7 +192,11 @@
                 }
 
                 try {
-                    const params = new URLSearchParams({ item_id: itemId, n: n });
+                    const params = new URLSearchParams({ 
+                        item_id: itemId, 
+                        n: n,
+                        eliminate_duplicates: eliminateDuplicates // Always send true or false
+                    });
                     const response = await fetch(`/api/similar_tracks?${params}`);
                     const data = await response.json();
 

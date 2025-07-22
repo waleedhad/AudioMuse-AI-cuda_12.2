@@ -51,7 +51,8 @@ from config import (
 # Import other project modules
 from ai import get_ai_playlist_name, creative_prompt_template
 from .commons import score_vector
-from .annoy_manager import build_and_store_annoy_index
+# MODIFIED: Import from voyager_manager instead of annoy_manager
+from .voyager_manager import build_and_store_voyager_index
 # MODIFIED: The functions from mediaserver no longer need server-specific parameters.
 from .mediaserver import get_recent_albums, get_tracks_from_album, download_track
 
@@ -512,7 +513,8 @@ def run_analysis_task(num_recent_albums, top_n_moods):
                 
                 if albums_completed > last_rebuild_count and (albums_completed - last_rebuild_count) >= REBUILD_INDEX_BATCH_SIZE:
                     log_and_update_main(f"Batch of {albums_completed - last_rebuild_count} albums complete. Rebuilding index...", current_progress)
-                    build_and_store_annoy_index(get_db())
+                    # MODIFIED: Call the voyager index builder
+                    build_and_store_voyager_index(get_db())
                     redis_conn.publish('index-updates', 'reload')
                     last_rebuild_count = albums_completed
 
@@ -560,7 +562,8 @@ def run_analysis_task(num_recent_albums, top_n_moods):
                 time.sleep(5)
 
             log_and_update_main("Performing final index rebuild...", 95)
-            build_and_store_annoy_index(get_db())
+            # MODIFIED: Call the voyager index builder
+            build_and_store_voyager_index(get_db())
             redis_conn.publish('index-updates', 'reload')
 
             final_message = f"Main analysis complete. Launched {albums_launched}, Skipped {albums_skipped}."

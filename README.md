@@ -30,6 +30,7 @@ The **supported architecture** are:
 
 
 And now just some **NEWS:**
+> * Version 0.6.3-beta introduce **Voyager index** for the similarity function. Raising the recall from 70-80% to 99% for 100 similar song. Also using less memory.
 > * Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
 > * From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
 
@@ -52,6 +53,7 @@ And now just some **NEWS:**
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
   - [4. Spectral Clustering](#4-spectral-clustering)
   - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
+  - [How Purity and Diversity Scores Are Calculated](#how-purity-and-diversity-scores-are-calculated)
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Instant Chat Deep Dive](#instant-chat-deep-dive)
@@ -283,7 +285,7 @@ For a quick and interactive way to generate playlists without running the full e
 
 **IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
 
-This new functionality enable you to search the top N similar song that are similar to another one. Basically during the analysis task an Approximate Nearest Neighbors (Annoy) index is made. Then with the new similarity interface you can just search for similar song.
+This new functionality enable you to search the top N similar song that are similar to another one. Basically during the analysis task an Approximate Nearest Neighbors (Voyager) index is made. Then with the new similarity interface you can just search for similar song.
 
 **How to Use:**
 1.  **Access the Chat Interface:**
@@ -372,7 +374,11 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `TOP_N_PLAYLISTS`                        | POST Clustering it keep only the top N diverse playlist.                   | `8`                               |
 | **Similarity General**    |                                                                              |                                      |
 | `INDEX_NAME`                             | Name of the index, no need to change.                                      | `music_library`                      |
-| `NUM_TREES`                              | Number of tree used by the Annoy index. More trees = higher accuracy       | `50`                                 |
+| `VOYAGER_EF_CONSTRUCTION`                | Number of element analyzed to create the neighbor list in the index.       | `1024`                                 |
+| `VOYAGER_M`                              | Number of neighbore More  = higher accuracy.                               | `64`                                 |
+| `VOYAGER_QUERY_EF`                       | Number neighbor analyzed during the query.                                 | `1024`                                 |
+| `VOYAGER_METRIC`                           | Different tipe of distance metrics: `angular`, `euclidean`,`dot`         | `angular`              |
+| `SIMILARITY_ELIMINATE_DUPLICATES_DEFAULT` | It enable the possibility of use the `MAX_SONGS_PER_ARTIST` also in similar song  | `true`              |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
 | `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                |
 | `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `10`                                  |
@@ -395,7 +401,11 @@ This are the default parameters on wich the analysis or clustering task will be 
 | **GMM Ranges**                           |                                                                              |                                      |
 | `GMM_N_COMPONENTS_MIN`                   | Min components for GMM.                                                    | `40`                                 |
 | `GMM_N_COMPONENTS_MAX`                   | Max components for GMM.                                                    | `100`                                 |
-| `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `'full'`).                              | `full`                               |
+| `GMM_COVARIANCE_TYPE`                    | Covariance type for GMM (task uses `full`).                               | `full`                               |
+| **Spectral Ranges**                      |                                                                              |                                      |
+| `SPECTRAL_N_CLUSTERS_MIN`                | Min components for GMM.                                                    | `40`                                 |
+| `SPECTRAL_N_CLUSTERS_MAX`                | Max components for GMM.                                                    | `100`                                 |
+| `SPECTRAL_N_NEIGHBORS`                   | Number of Neighbors on which do clustering. Higher is better but slower    | `20`                               |
 | **PCA Ranges**                           |                                                                              |                                      |
 | `PCA_COMPONENTS_MIN`                     | Min PCA components (0 to disable).                                         | `0`                                  |
 | `PCA_COMPONENTS_MAX`                     | Max PCA components (e.g., `8` for feature vectors, `199` for embeddings).    | `8`                                  |
@@ -626,88 +636,135 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
         *   **Davies-Bouldin Index:** How well-separated are the clusters relative to their intra-cluster similarity?
         *   **Calinski-Harabasz Index:** Ratio of between-cluster to within-cluster dispersion.
 
+6.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
 
-6.  **How Purity and Diversity Scores Are Calculated**
-
-    The **Purity** and **Diversity** scores are key metrics (created for this songs clustering) used by the evolutionary algorithm to evaluate the quality of a set of playlists. These scores help balance **intra-playlist consistency** (Purity) with **inter-playlist variety** (Diversity). They are calculated in a consistent way, whether you use **interpretable score vectors** or **high-dimensional embeddings** for clustering.
-
-    **a. Determining the Playlist’s "Personality"**
-
-    Each playlist (or cluster) is assigned a **representative profile**—its thematic "personality"—based on how it was formed.
-
-    - **If clustering was done using score vectors:**
-        - The algorithm calculates the **centroid** of the cluster in feature vector space.
-        - This centroid is reverse-mapped into interpretable attributes, such as:  
-          `Tempo: 120bpm`, `Energy: 0.8`, `Mood_Rock: 75%`, `Mood_Happy: 60%`, etc.
-
-    - **If clustering was done using embeddings:**
-        - Embedding dimensions are not human-interpretable.
-        - The algorithm computes the **average score vector** across all songs in the cluster (using their original interpretable features).
-        - This average vector becomes the playlist’s interpretable profile.
-
-    In both cases, the result is a readable "personality profile" that defines the core characteristics of the playlist.
-
-    **b. Purity Score – Intra-Playlist Consistency**
-
-    The **Purity score** answers:  
-    _"How well do the songs within a playlist match its main theme?"_
-
-    - From the playlist’s profile, the algorithm extracts:
-        - The **top K mood labels**
-        - The **predominant non-mood feature** (e.g., tempo, energy)
-    - Each song is evaluated for how strongly it reflects these:
-        - `raw_playlist_purity_component` sums the highest score a song has for any of the top moods.
-        - `raw_other_feature_purity_component` sums the score for the playlist’s predominant other feature.
-
-    These raw values are then:
-
-    - Transformed with the natural logarithm (`np.log1p`)
-    - Normalized using:
-        - `LN_MOOD_PURITY_STATS`
-        - `LN_OTHER_FEATURES_PURITY_STATS`
-
-    A higher Purity score means songs in a playlist are tightly aligned to its theme.
-
-    **c. Diversity Score – Inter-Playlist Variety**
-
-    The **Diversity score** answers:  
-    _"How different are the playlists from each other?"_
-
-    - The algorithm looks at the **personality profiles** of all playlists.
-    - It identifies unique, dominant characteristics across playlists (moods, features).
-    - It then calculates:
-        - `raw_mood_diversity_score`: sum of highest scores for each unique predominant mood
-        - `raw_other_features_diversity_score`: same, for other features
-
-    These scores are also:
-
-    - Log-transformed (`np.log1p`)
-    - Normalized using:
-        - `LN_MOOD_DIVERSITY_STATS`
-        - `LN_OTHER_FEATURES_DIVERSITY_STATS`
-
-    > If using embeddings, alternative normalization constants are used, such as:
-    >
-    > - `LN_MOOD_DIVERSITY_EMBEDDING_STATS`
-    > - `LN_OTHER_FEATURES_DIVERSITY_EMBEDDING_STATS`
-
-    A higher Diversity score means playlists differ significantly from one another in theme and sound.
-
-    **d. Final Scoring**
-
-    The two components are combined using weighted coefficients:
-
-    ```python
-    final_score = (SCORE_WEIGHT_PURITY * purity_score) + (SCORE_WEIGHT_DIVERSITY * diversity_score)
-    ```
-
-    By adjusting `SCORE_WEIGHT_PURITY` and `SCORE_WEIGHT_DIVERSITY`, you can control whether the algorithm favors tightly themed playlists or maximally diverse collections.
-
-7.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
-
-8.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin or Navidrome.
+7.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin or Navidrome.
 
 This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
+
+Certainly! Here's the **full chapter**, now formatted using `###` headings instead of `##`, so it can fit into a larger document structure cleanly:
+
+---
+
+### How Purity and Diversity Scores Are Calculated
+
+The **Purity** and **Diversity** scores are custom-designed metrics used to evaluate the quality of clustered playlists based on their musical characteristics — especially mood. These scores guide the evolutionary clustering algorithm to balance two goals:
+
+* 🎯 **Purity** — how well songs within a playlist reflect its core mood identity
+* 🌈 **Diversity** — how different playlists are from one another in their dominant mood
+
+These metrics apply consistently whether clustering is based on **interpretable score vectors** (like mood labels) or **non-interpretable embeddings**.
+
+**6.1 Forming the Playlist Profile**
+
+Each playlist (i.e., cluster) is assigned a **personality profile** — a vector that defines its musical identity.
+
+* **If clustering used score vectors**:
+  The cluster centroid is directly interpretable — e.g., `indie: 0.6`, `pop: 0.4`, `tempo: 0.8`.
+
+* **If clustering used embeddings**:
+  The system computes the **average of the original score vectors** of the songs in the playlist to form the profile.
+
+The resulting profile determines the playlist’s **top moods** and dominant characteristics.
+
+
+**6.2 Mood Purity – Intra-Playlist Consistency**
+
+The **Mood Purity** score answers:
+
+> *“How strongly do the songs in a playlist reflect its most defining moods?”*
+
+**How it works:**
+
+1. From the playlist’s profile, extract the **top K moods**.
+2. For each song:
+
+   * Check which of those moods also exist in the **`active_moods` list** — i.e., moods actually encoded in the song's feature vector.
+   * Among those, take the **maximum score**.
+3. Sum these values across all songs in the playlist.
+
+ If a mood is in the top K but **not in `active_moods`**, it is **skipped**.
+
+**Example:**
+
+* **Playlist profile (top moods):** `pop: 0.6`, `indie: 0.4`, `vocal: 0.35`
+* **Top moods:** `["pop", "indie", "vocal"]`
+* **Active moods in song features:** `["indie", "rock", "vocal"]` (**pop is missing**)
+
+| Song | Mood Scores                        | Used Moods (top ∩ active) | Max Score (used) |
+| ---- | ---------------------------------- | ------------------------- | ---------------- |
+| A    | indie: 0.3, rock: 0.7, vocal: 0.6  | indie, vocal              | **0.6**          |
+| B    | indie: 0.4, rock: 0.45, vocal: 0.3 | indie, vocal              | **0.4**          |
+
+`pop` is ignored — not in `active_moods`
+**Raw Purity = 0.6 + 0.4 = 1.0**
+
+This score is:
+
+* Transformed using `np.log1p`
+* Normalized using `LN_MOOD_PURITY_STATS`
+
+A **high purity score** means that most songs strongly match the playlist’s actual mood focus.
+
+
+**Mood Diversity – Inter-Playlist Variety**
+
+The **Mood Diversity** score answers:
+
+> *“How different are the playlists from each other in mood identity?”*
+
+**How it works:**
+
+1. For each playlist, find its **dominant mood** — the highest mood score in its profile.
+2. Keep track of **unique dominant moods** across all playlists.
+3. Sum the scores of those unique moods.
+
+**Example:**
+
+| Playlist | Profile                            | Dominant Mood | Score |
+| -------- | ---------------------------------- | ------------- | ----- |
+| P1       | indie: 0.6, rock: 0.3, vocal: 0.2  | **indie**     | 0.6   |
+| P2       | pop: 0.5, indie: 0.3, vocal: 0.1   | **pop**       | 0.5   |
+| P3       | vocal: 0.55, indie: 0.4, rock: 0.2 | **vocal**     | 0.55  |
+
+**Raw Diversity = 0.6 + 0.5 + 0.55 = 1.65**
+
+This score is:
+
+* Transformed using `np.log1p`
+* Normalized using `LN_MOOD_DIVERSITY_STATS`
+
+A **high diversity score** means playlists explore a wide range of moods, rather than clustering around a single genre or vibe.
+
+**Comparison: Purity & Diversity vs. Silhouette Score**
+
+| Metric               | Measures What?                                  | Label-Aware | Cluster-Aware | Complexity   | Interpretation Strength     |
+| -------------------- | ----------------------------------------------- | ----------- | ------------- | ------------ | --------------------------- |
+| **Mood Purity**      | Song alignment with playlist’s top active moods | ✅ Yes       | ❌ No          | **O(N · K)** | ✅ High – mood alignment     |
+| **Mood Diversity**   | Mood variety across playlists                   | ✅ Yes       | ✅ Yes         | **O(C · M)** | ✅ High – thematic spread    |
+| **Silhouette Score** | Distance-based cluster separation               | ❌ No        | ✅ Yes         | **O(N²)**    | ⚠️ Medium – structural only |
+
+> Where:
+> `N` = number of songs
+> `K` = number of top moods considered
+> `C` = number of playlists
+> `M` = number of total mood labels
+
+ **Purity and Diversity** are fast, interpretable, and designed specifically for music data.
+ **Silhouette Score** focuses only on shape/separation and ignores label meaning entirely.
+
+**Combining Purity and Diversity**
+
+The final score that guides the clustering algorithm is a weighted combination:
+
+```python
+final_score = (SCORE_WEIGHT_PURITY * purity_score) + (SCORE_WEIGHT_DIVERSITY * diversity_score)
+```
+
+You can tune the weights to emphasize:
+
+* **Purity** → for tighter, more focused playlists
+* **Diversity** → for broader, more eclectic playlist collections
 
 ### **AI Playlist Naming**
 
@@ -800,17 +857,17 @@ The "Playlist from Similar Song" feature provides an interactive way to discover
 **Core Workflow:**
 
 1. **Index Creation (During Analysis Task):**  
-   * The foundation of this feature is an **Approximate Nearest Neighbors (ANN) index**, which is built using Spotify's **Annoy** library.  
-   * During the main "Analysis Task," after the 200-dimensional MusiCNN embedding has been generated for each track, a dedicated function (build\_and\_store\_annoy\_index) is triggered.  
-   * This function gathers all embeddings from the database and uses them to build the Annoy index. It uses an 'angular' distance metric, which is highly effective for comparing the "direction" of high-dimensional vectors like audio embeddings, thus capturing sonic similarity well.  
+   * The foundation of this feature is an **Approximate Nearest Neighbors (ANN) index**, which is built using Spotify's **Voyager** library.  
+   * During the main "Analysis Task," after the 200-dimensional MusiCNN embedding has been generated for each track, a dedicated function (build\_and\_store\voyager\_index) is triggered.  
+   * This function gathers all embeddings from the database and uses them to build the Voyager index. It uses an 'angular' distance metric, which is highly effective for comparing the "direction" of high-dimensional vectors like audio embeddings, thus capturing sonic similarity well.  
    * The completed index, which is a highly optimized data structure for fast lookups, is then saved to the PostgreSQL database. This ensures it persists and only needs to be rebuilt when new music is analyzed.  
 2. **User Interface (similarity.html):**  
    * The user navigates to the /similarity page.  
    * An autocomplete search box allows the user to easily find a specific "seed" song by typing its title and/or artist. This search is powered by the /api/search\_tracks endpoint.  
 3. **High-Speed Similarity Search (/api/similar\_tracks):**  
    * Once the user selects a seed song and initiates the search, the frontend calls this API endpoint with the song's unique item\_id.  
-   * For maximum performance, the backend loads the Annoy index from the database into memory upon starting up (load\_annoy\_index\_for\_querying). This in-memory cache allows for near-instantaneous lookups.  
-   * The core function find\_nearest\_neighbors\_by\_id takes the seed song's ID, finds its corresponding vector within the Annoy index, and instantly retrieves the *N* closest vectors (the most similar songs) based on the pre-calculated angular distances.  
+   * For maximum performance, the backend loads the Voyager index from the database into memory upon starting up (load\voyager\_index\_for\_querying). This in-memory cache allows for near-instantaneous lookups.  
+   * The core function find\_nearest\_neighbors\_by\_id takes the seed song's ID, finds its corresponding vector within the Voyager index, and instantly retrieves the *N* closest vectors (the most similar songs) based on the pre-calculated angular distances.  
    * The backend then fetches the metadata (title, artist) for these resulting song IDs from the main score table.  
 4. **Playlist Creation (/api/create\_playlist):**  
    * The list of similar tracks, along with their distance from the seed song, is displayed to the user.  
@@ -866,7 +923,9 @@ AudioMuse AI is built upon a robust stack of open-source technologies:
 * [**scikit-learn**](https://scikit-learn.org/) Utilized for machine learning algorithms:
   * KMeans / DBSCAN: For clustering tracks based on their extracted features (tempo and mood vectors).  
   * PCA (Principal Component Analysis): Optionally used for dimensionality reduction before clustering, to improve performance or cluster quality.  
-* [**annoy**](https://github.com/spotify/annoy) Approximate Nearest Neighbors used for the /similarity interface
+* [**annoy**](https://github.com/spotify/annoy) Approximate Nearest Neighbors used for the /similarity interface. Used only until v0.6.2-beta
+* [**voyager**](https://github.com/spotify/voyager) Approximate Nearest Neighbors used for the /similarity interface. Used from v0.6.3-beta
+
 * [**PostgreSQL:**](https://www.postgresql.org/) A powerful, open-source relational database used for persisting:  
   * Analyzed track metadata (tempo, key, mood vectors).  
   * Generated playlist structures.  

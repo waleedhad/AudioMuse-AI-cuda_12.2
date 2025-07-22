@@ -133,7 +133,7 @@ def test_annoy_similarity_and_playlist():
     assert 'playlist_id' in pl_data
 
     elapsed = time.time() - start_time
-    print(f"[TIMING] Annoy test completed in {elapsed:.2f} seconds")
+    print(f"[TIMING] Similar Song test completed in {elapsed:.2f} seconds")
 
 
 if __name__ == '__main__':
