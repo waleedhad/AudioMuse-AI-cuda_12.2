@@ -270,7 +270,8 @@ def run_clustering_task(
             "best_result": None,
             "active_jobs": {},
             "elite_solutions": [],
-            "last_subset_ids": []
+            "last_subset_ids": [],
+            "processed_job_ids": set() # *** FIX 1: Add set to track processed jobs ***
         }
 
         # Helper for logging and updating main task status, using a shared dictionary.
@@ -291,6 +292,7 @@ def run_clustering_task(
             details_for_db.pop('active_jobs', None) # Don't save job objects to DB
             details_for_db.pop('best_result', None) # Don't save the full result object in every progress update
             details_for_db.pop('last_subset_ids', None) # Remove the large list of IDs
+            details_for_db.pop('processed_job_ids', None) # Don't save the set of job IDs to DB
 
             if current_job:
                 current_job.meta['progress'] = progress
@@ -366,6 +368,14 @@ def run_clustering_task(
                     f"Progress: {_main_task_accumulated_details['runs_completed']}/{num_clustering_runs} runs. Active batches: {len(_main_task_accumulated_details['active_jobs'])}. Best score: {_main_task_accumulated_details['best_score']:.2f}",
                     progress
                 )
+                
+                # *** FIX 3: Starvation exit condition ***
+                # If all runs are accounted for and no jobs are active, exit the loop.
+                # This prevents getting stuck if a batch job fails to update its DB status.
+                if _main_task_accumulated_details["runs_completed"] >= num_clustering_runs and len(_main_task_accumulated_details["active_jobs"]) == 0:
+                    _log_and_update(f"All runs ({_main_task_accumulated_details['runs_completed']}) are processed and no active batches remain. Forcing loop exit to prevent starvation.", progress)
+                    break
+                
                 time.sleep(3)
 
             _log_and_update("All batches completed. Finalizing...", 90)
@@ -496,6 +506,12 @@ def _monitor_and_process_batches(state_dict, parent_task_id, initial_check=False
             finished_job_ids.append(job_id)
 
     for job_id in finished_job_ids:
+        # *** FIX 2: Prevent re-processing results ***
+        if job_id in state_dict.get("processed_job_ids", set()):
+            if job_id in state_dict["active_jobs"]:
+                del state_dict["active_jobs"][job_id]
+            continue
+        
         result = get_job_result_safely(job_id, parent_task_id, "clustering_batch")
         if result:
             state_dict["runs_completed"] += result.get("iterations_completed_in_batch", 0)
@@ -510,7 +526,9 @@ def _monitor_and_process_batches(state_dict, parent_task_id, initial_check=False
                 if current_best_score > state_dict["best_score"]:
                     state_dict["best_score"] = current_best_score
                     state_dict["best_result"] = best_from_batch
-        # Clean up finished job from our in-memory dictionary
+        
+        # Mark as processed and remove from active jobs list
+        state_dict.setdefault("processed_job_ids", set()).add(job_id)
         if job_id in state_dict["active_jobs"]:
             del state_dict["active_jobs"][job_id]
 

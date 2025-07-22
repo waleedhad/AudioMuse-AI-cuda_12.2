@@ -53,6 +53,7 @@ And now just some **NEWS:**
   - [3. GMM (Gaussian Mixture Models)](#3-gmm-gaussian-mixture-models)
   - [4. Spectral Clustering](#4-spectral-clustering)
   - [Montecarlo Evolutionary Approach](#montecarlo-evolutionary-approach)
+  - [How Purity and Diversity Scores Are Calculated](#how-purity-and-diversity-scores-are-calculated)
   - [AI Playlist Naming](#ai-playlist-naming)
 - [Concurrency Algorithm Deep Dive](#concurrency-algorithm-deep-dive)
 - [Instant Chat Deep Dive](#instant-chat-deep-dive)
@@ -635,88 +636,135 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
         *   **Davies-Bouldin Index:** How well-separated are the clusters relative to their intra-cluster similarity?
         *   **Calinski-Harabasz Index:** Ratio of between-cluster to within-cluster dispersion.
 
+6.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
 
-6.  **How Purity and Diversity Scores Are Calculated**
-
-    The **Purity** and **Diversity** scores are key metrics (created for this songs clustering) used by the evolutionary algorithm to evaluate the quality of a set of playlists. These scores help balance **intra-playlist consistency** (Purity) with **inter-playlist variety** (Diversity). They are calculated in a consistent way, whether you use **interpretable score vectors** or **high-dimensional embeddings** for clustering.
-
-    **a. Determining the Playlist’s "Personality"**
-
-    Each playlist (or cluster) is assigned a **representative profile**—its thematic "personality"—based on how it was formed.
-
-    - **If clustering was done using score vectors:**
-        - The algorithm calculates the **centroid** of the cluster in feature vector space.
-        - This centroid is reverse-mapped into interpretable attributes, such as:  
-          `Tempo: 120bpm`, `Energy: 0.8`, `Mood_Rock: 75%`, `Mood_Happy: 60%`, etc.
-
-    - **If clustering was done using embeddings:**
-        - Embedding dimensions are not human-interpretable.
-        - The algorithm computes the **average score vector** across all songs in the cluster (using their original interpretable features).
-        - This average vector becomes the playlist’s interpretable profile.
-
-    In both cases, the result is a readable "personality profile" that defines the core characteristics of the playlist.
-
-    **b. Purity Score – Intra-Playlist Consistency**
-
-    The **Purity score** answers:  
-    _"How well do the songs within a playlist match its main theme?"_
-
-    - From the playlist’s profile, the algorithm extracts:
-        - The **top K mood labels**
-        - The **predominant non-mood feature** (e.g., tempo, energy)
-    - Each song is evaluated for how strongly it reflects these:
-        - `raw_playlist_purity_component` sums the highest score a song has for any of the top moods.
-        - `raw_other_feature_purity_component` sums the score for the playlist’s predominant other feature.
-
-    These raw values are then:
-
-    - Transformed with the natural logarithm (`np.log1p`)
-    - Normalized using:
-        - `LN_MOOD_PURITY_STATS`
-        - `LN_OTHER_FEATURES_PURITY_STATS`
-
-    A higher Purity score means songs in a playlist are tightly aligned to its theme.
-
-    **c. Diversity Score – Inter-Playlist Variety**
-
-    The **Diversity score** answers:  
-    _"How different are the playlists from each other?"_
-
-    - The algorithm looks at the **personality profiles** of all playlists.
-    - It identifies unique, dominant characteristics across playlists (moods, features).
-    - It then calculates:
-        - `raw_mood_diversity_score`: sum of highest scores for each unique predominant mood
-        - `raw_other_features_diversity_score`: same, for other features
-
-    These scores are also:
-
-    - Log-transformed (`np.log1p`)
-    - Normalized using:
-        - `LN_MOOD_DIVERSITY_STATS`
-        - `LN_OTHER_FEATURES_DIVERSITY_STATS`
-
-    > If using embeddings, alternative normalization constants are used, such as:
-    >
-    > - `LN_MOOD_DIVERSITY_EMBEDDING_STATS`
-    > - `LN_OTHER_FEATURES_DIVERSITY_EMBEDDING_STATS`
-
-    A higher Diversity score means playlists differ significantly from one another in theme and sound.
-
-    **d. Final Scoring**
-
-    The two components are combined using weighted coefficients:
-
-    ```python
-    final_score = (SCORE_WEIGHT_PURITY * purity_score) + (SCORE_WEIGHT_DIVERSITY * diversity_score)
-    ```
-
-    By adjusting `SCORE_WEIGHT_PURITY` and `SCORE_WEIGHT_DIVERSITY`, you can control whether the algorithm favors tightly themed playlists or maximally diverse collections.
-
-7.  **Configurable Weights:** The influence of each component in the final score is determined by weights (e.g., `SCORE_WEIGHT_DIVERSITY`, `SCORE_WEIGHT_PURITY`, `SCORE_WEIGHT_SILHOUETTE`). These are defined in `config.py` and allow you to tune the algorithm to prioritize, for example, more diverse playlists over extremely pure ones, or vice-versa. 
-
-8.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin or Navidrome.
+7.  **Best Overall Solution:** After all iterations are complete, the set of parameters that yielded the highest overall composite score is chosen. The playlists generated from this top-scoring configuration are then presented and created in Jellyfin or Navidrome.
 
 This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
+
+Certainly! Here's the **full chapter**, now formatted using `###` headings instead of `##`, so it can fit into a larger document structure cleanly:
+
+---
+
+### How Purity and Diversity Scores Are Calculated
+
+The **Purity** and **Diversity** scores are custom-designed metrics used to evaluate the quality of clustered playlists based on their musical characteristics — especially mood. These scores guide the evolutionary clustering algorithm to balance two goals:
+
+* 🎯 **Purity** — how well songs within a playlist reflect its core mood identity
+* 🌈 **Diversity** — how different playlists are from one another in their dominant mood
+
+These metrics apply consistently whether clustering is based on **interpretable score vectors** (like mood labels) or **non-interpretable embeddings**.
+
+**6.1 Forming the Playlist Profile**
+
+Each playlist (i.e., cluster) is assigned a **personality profile** — a vector that defines its musical identity.
+
+* **If clustering used score vectors**:
+  The cluster centroid is directly interpretable — e.g., `indie: 0.6`, `pop: 0.4`, `tempo: 0.8`.
+
+* **If clustering used embeddings**:
+  The system computes the **average of the original score vectors** of the songs in the playlist to form the profile.
+
+The resulting profile determines the playlist’s **top moods** and dominant characteristics.
+
+
+**6.2 Mood Purity – Intra-Playlist Consistency**
+
+The **Mood Purity** score answers:
+
+> *“How strongly do the songs in a playlist reflect its most defining moods?”*
+
+**How it works:**
+
+1. From the playlist’s profile, extract the **top K moods**.
+2. For each song:
+
+   * Check which of those moods also exist in the **`active_moods` list** — i.e., moods actually encoded in the song's feature vector.
+   * Among those, take the **maximum score**.
+3. Sum these values across all songs in the playlist.
+
+ If a mood is in the top K but **not in `active_moods`**, it is **skipped**.
+
+**Example:**
+
+* **Playlist profile (top moods):** `pop: 0.6`, `indie: 0.4`, `vocal: 0.35`
+* **Top moods:** `["pop", "indie", "vocal"]`
+* **Active moods in song features:** `["indie", "rock", "vocal"]` (**pop is missing**)
+
+| Song | Mood Scores                        | Used Moods (top ∩ active) | Max Score (used) |
+| ---- | ---------------------------------- | ------------------------- | ---------------- |
+| A    | indie: 0.3, rock: 0.7, vocal: 0.6  | indie, vocal              | **0.6**          |
+| B    | indie: 0.4, rock: 0.45, vocal: 0.3 | indie, vocal              | **0.4**          |
+
+`pop` is ignored — not in `active_moods`
+**Raw Purity = 0.6 + 0.4 = 1.0**
+
+This score is:
+
+* Transformed using `np.log1p`
+* Normalized using `LN_MOOD_PURITY_STATS`
+
+A **high purity score** means that most songs strongly match the playlist’s actual mood focus.
+
+
+**Mood Diversity – Inter-Playlist Variety**
+
+The **Mood Diversity** score answers:
+
+> *“How different are the playlists from each other in mood identity?”*
+
+**How it works:**
+
+1. For each playlist, find its **dominant mood** — the highest mood score in its profile.
+2. Keep track of **unique dominant moods** across all playlists.
+3. Sum the scores of those unique moods.
+
+**Example:**
+
+| Playlist | Profile                            | Dominant Mood | Score |
+| -------- | ---------------------------------- | ------------- | ----- |
+| P1       | indie: 0.6, rock: 0.3, vocal: 0.2  | **indie**     | 0.6   |
+| P2       | pop: 0.5, indie: 0.3, vocal: 0.1   | **pop**       | 0.5   |
+| P3       | vocal: 0.55, indie: 0.4, rock: 0.2 | **vocal**     | 0.55  |
+
+**Raw Diversity = 0.6 + 0.5 + 0.55 = 1.65**
+
+This score is:
+
+* Transformed using `np.log1p`
+* Normalized using `LN_MOOD_DIVERSITY_STATS`
+
+A **high diversity score** means playlists explore a wide range of moods, rather than clustering around a single genre or vibe.
+
+**Comparison: Purity & Diversity vs. Silhouette Score**
+
+| Metric               | Measures What?                                  | Label-Aware | Cluster-Aware | Complexity   | Interpretation Strength     |
+| -------------------- | ----------------------------------------------- | ----------- | ------------- | ------------ | --------------------------- |
+| **Mood Purity**      | Song alignment with playlist’s top active moods | ✅ Yes       | ❌ No          | **O(N · K)** | ✅ High – mood alignment     |
+| **Mood Diversity**   | Mood variety across playlists                   | ✅ Yes       | ✅ Yes         | **O(C · M)** | ✅ High – thematic spread    |
+| **Silhouette Score** | Distance-based cluster separation               | ❌ No        | ✅ Yes         | **O(N²)**    | ⚠️ Medium – structural only |
+
+> Where:
+> `N` = number of songs
+> `K` = number of top moods considered
+> `C` = number of playlists
+> `M` = number of total mood labels
+
+ **Purity and Diversity** are fast, interpretable, and designed specifically for music data.
+ **Silhouette Score** focuses only on shape/separation and ignores label meaning entirely.
+
+**Combining Purity and Diversity**
+
+The final score that guides the clustering algorithm is a weighted combination:
+
+```python
+final_score = (SCORE_WEIGHT_PURITY * purity_score) + (SCORE_WEIGHT_DIVERSITY * diversity_score)
+```
+
+You can tune the weights to emphasize:
+
+* **Purity** → for tighter, more focused playlists
+* **Diversity** → for broader, more eclectic playlist collections
 
 ### **AI Playlist Naming**
 
