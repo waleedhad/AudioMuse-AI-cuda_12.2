@@ -66,37 +66,35 @@ body:
       label: "2.1 Performance Properties"
       description: "Paste runtime, best score, and number of playlists created for each test."
       value: |
-        | Test # | Runtime | Best Score | #Playlists Created|
-        | Test # | HH:MM:SS|xx.xx       | Just the number   |
-        |-------:|:-------:|:----------:|:-----------------:|
-        | 1      |         |            |                   |
-        | 2      |         |            |                   |
-        | 3      |         |            |                   |
-        | 4      |         |            |                   |
-        | 5      |         |            |                   |
-        | 6      |         |            |                   |
-        | 7      |         |            |                   |
-        | 8      |         |            |                   |
-        | 9      |         |            |                   |
+        | Test # | Runtime  HH:MM:SS| Best Score xx.xx|
+        |-------:|:-------:|:----------:|
+        | 1      |         |            |
+        | 2      |         |            |
+        | 3      |         |            |
+        | 4      |         |            |
+        | 5      |         |            |
+        | 6      |         |            |
+        | 7      |         |            |
+        | 8      |         |            |
+        | 9      |         |            |
 
   - type: textarea
     id: playlist-evaluation
     attributes:
       label: "3. Playlist Evaluation"
-      description: "Genre Diversity = how well were the different genres within your library represented by the generated playlists?  
-      Amount of Playlist = how was the amount of playlists? 1=too few, 2=ok, 3= too many"
+      description: "Genre Coherence = how well were the different genres within your library represented by the generated playlists?  
       value: |
-              | Test # | Genre Diversity<br>1=worst, 5=best| Amount of Playlist<br>1,2 or 3| Overall Quality<br>1=worst, 5=best|Comments|
-              |-------:|:---------------:|:------------------:|:--------------:|:---------:|
-              | 1      |                 |                    |                |           |
-              | 2      |                 |                    |                |           |
-              | 3      |                 |                    |                |           |
-              | 4      |                 |                    |                |           |
-              | 5      |                 |                    |                |           |
-              | 6      |                 |                    |                |           |
-              | 7      |                 |                    |                |           |
-              | 8      |                 |                    |                |           |
-              | 9      |                 |                    |                |           |
+              | Test # | Genre Coherence (out of 5) |Overall Quality (out of 5)| Comments|
+              |-------:|:---------------:|:------------------:|:--------------:|
+              | 1      |                 |                    |                |
+              | 2      |                 |                    |                |
+              | 3      |                 |                    |                |
+              | 4      |                 |                    |                |
+              | 5      |                 |                    |                |
+              | 6      |                 |                    |                |
+              | 7      |                 |                    |                |
+              | 8      |                 |                    |                |
+              | 9      |                 |                    |                |
 
 
   - type: textarea
