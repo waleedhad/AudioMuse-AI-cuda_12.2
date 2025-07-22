@@ -205,17 +205,6 @@ def init_db():
         app.logger.info("Adding 'embedding' column of type BYTEA to the 'embedding' table.")
         cur.execute("ALTER TABLE embedding ADD COLUMN embedding BYTEA")
 
-    # New, consolidated table for Annoy index data
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS annoy_index_data (
-            index_name VARCHAR(255) PRIMARY KEY,
-            index_data BYTEA NOT NULL,
-            id_map_json TEXT NOT NULL,
-            embedding_dimension INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
     # --- NEW: Table for Voyager index data ---
     cur.execute("""
         CREATE TABLE IF NOT EXISTS voyager_index_data (
