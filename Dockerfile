@@ -43,6 +43,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         pyyaml \
         six \
         voyager \
+        rapidfuzz \
         psycopg2-binary \
         ftfy \
         flasgger \
@@ -61,6 +62,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         pyyaml \
         six \
         voyager \
+        rapidfuzz \
         psycopg2-binary \
         ftfy \
         flasgger \
@@ -77,8 +79,6 @@ RUN mkdir -p /app/model
 
 # Download models from the GitHub release (corrected URL)
 RUN wget -q -P /app/model \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/audioset-vggish-3.pb \
-    https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-audioset-vggish-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/danceability-msd-musicnn-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-audioset-vggish-1.pb \
     https://github.com/NeptuneHub/AudioMuse-AI/releases/download/v1.0.0-model/mood_aggressive-msd-musicnn-1.pb \

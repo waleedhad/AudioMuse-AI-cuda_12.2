@@ -7,6 +7,8 @@ import voyager # type: ignore
 import psycopg2 # type: ignore
 from psycopg2.extras import DictCursor
 import io # Import the io module
+import re
+from rapidfuzz import fuzz
 
 from config import (
     EMBEDDING_DIMENSION, INDEX_NAME, VOYAGER_METRIC, VOYAGER_EF_CONSTRUCTION,
@@ -171,13 +173,10 @@ def load_voyager_index_for_querying(force_reload=False):
             voyager_index, id_map, reverse_id_map = None, None, None
             return
 
-        # *** FIX: Wrap the binary data in a file-like object for voyager.load ***
         index_stream = io.BytesIO(index_binary_data)
         loaded_index = voyager.Index.load(index_stream)
-        loaded_index.ef = VOYAGER_QUERY_EF # Set query-time parameter
-
+        loaded_index.ef = VOYAGER_QUERY_EF 
         voyager_index = loaded_index
-        # JSON keys are strings, convert them back to integers for the map
         id_map = {int(k): v for k, v in json.loads(id_map_json).items()}
         reverse_id_map = {v: k for k, v in id_map.items()}
 
@@ -189,17 +188,84 @@ def load_voyager_index_for_querying(force_reload=False):
     finally:
         cur.close()
 
+def _normalize_title(title: str) -> str:
+    """Lowercase, remove content in brackets, and normalize separators."""
+    if not title:
+        return ""
+    title = re.sub(r'[\[\(].*?[\]\)]', '', title)
+    title = re.sub(r'[_\-]', ' ', title)
+    title = re.sub(r'\s+', ' ', title)
+    return title.strip().lower()
+
+def _normalize_artist(artist: str) -> str:
+    """Lowercase and strip whitespace."""
+    if not artist:
+        return ""
+    return artist.strip().lower()
+
+def _is_likely_same_song(title1, artist1, title2, artist2, threshold=90):
+    """Determines if two songs are likely the same based on title and artist similarity."""
+    norm_title1 = _normalize_title(title1)
+    norm_title2 = _normalize_title(title2)
+    norm_artist1 = _normalize_artist(artist1)
+    norm_artist2 = _normalize_artist(artist2)
+    
+    artist_score = fuzz.ratio(norm_artist1, norm_artist2)
+    if artist_score < 90:
+        return False
+
+    title_score = fuzz.ratio(norm_title1, norm_title2)
+    return title_score >= threshold
+
+def _deduplicate_and_filter_neighbors(song_results: list, db_conn):
+    """
+    Filters a list of songs to remove duplicates based on title/artist similarity.
+    """
+    if not song_results:
+        return []
+
+    item_ids = [r['item_id'] for r in song_results]
+    item_details = {}
+    with db_conn.cursor(cursor_factory=DictCursor) as cur:
+        cur.execute("SELECT item_id, title, author FROM score WHERE item_id = ANY(%s)", (item_ids,))
+        rows = cur.fetchall()
+        for row in rows:
+            item_details[row['item_id']] = {'title': row['title'], 'author': row['author']}
+
+    unique_songs = []
+    added_songs_details = [] 
+
+    for song in song_results:
+        current_details = item_details.get(song['item_id'])
+        if not current_details:
+            logger.warning(f"Could not find details for item_id {song['item_id']} during deduplication. Skipping.")
+            continue
+
+        is_duplicate = False
+        for added_detail in added_songs_details:
+            if _is_likely_same_song(
+                current_details['title'], current_details['author'],
+                added_detail['title'], added_detail['author']
+            ):
+                is_duplicate = True
+                logger.info(f"Found duplicate: '{current_details['title']}' is similar to '{added_detail['title']}'.")
+                break
+        
+        if not is_duplicate:
+            unique_songs.append(song)
+            added_songs_details.append(current_details)
+
+    return unique_songs
 
 def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
     """
     Finds the N nearest neighbors for a given item_id using the globally cached Voyager index.
-    The results will NOT include the original item.
+    The results will NOT include the original item and will be deduplicated based on title/artist similarity.
     """
     if voyager_index is None or id_map is None or reverse_id_map is None:
         raise RuntimeError("Voyager index is not loaded in memory. It may be missing, empty, or the server failed to load it on startup.")
 
     target_voyager_id = reverse_id_map.get(target_item_id)
-
     if target_voyager_id is None:
         logger.warning(f"Target item_id '{target_item_id}' not found in the loaded Voyager index map.")
         return []
@@ -210,17 +276,30 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
         logger.error(f"Could not retrieve vector for Voyager ID {target_voyager_id} (item_id: {target_item_id}): {e}")
         return []
 
-    # Query for n+1 neighbors because the first result will be the item itself.
-    neighbor_voyager_ids, distances = voyager_index.query(query_vector, k=n + 1)
+    k_increase = max(5, int(n * 0.20))
+    num_to_query = n + k_increase
 
-    results = []
-    # Skip the first result, as it's the query item itself.
-    for voyager_id, dist in zip(neighbor_voyager_ids[1:], distances[1:]):
+    # Query for neighbors. This list INCLUDES the original song itself as the first result.
+    neighbor_voyager_ids, distances = voyager_index.query(query_vector, k=num_to_query)
+
+    initial_results = []
+    # Process the entire list, including the original song, for deduplication.
+    for voyager_id, dist in zip(neighbor_voyager_ids, distances):
         item_id = id_map.get(voyager_id)
         if item_id:
-            results.append({"item_id": item_id, "distance": float(dist)})
+            initial_results.append({"item_id": item_id, "distance": float(dist)})
 
-    return results
+    from app import get_db
+    db_conn = get_db()
+    
+    # This list contains unique songs, which may still include the original query song.
+    unique_results = _deduplicate_and_filter_neighbors(initial_results, db_conn)
+
+    # Explicitly filter out the original song from the now-unique list.
+    final_results = [song for song in unique_results if song['item_id'] != target_item_id]
+
+    # Return the top N results from the cleaned and filtered list.
+    return final_results[:n]
 
 
 def get_item_id_by_title_and_artist(title: str, artist: str):
