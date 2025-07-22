@@ -2,6 +2,8 @@
 from flask import Blueprint, jsonify, request, render_template
 import logging
 
+# Import the new config option
+from config import SIMILARITY_ELIMINATE_DUPLICATES_DEFAULT
 from tasks.voyager_manager import (
     find_nearest_neighbors_by_id, 
     create_playlist_from_ids,
@@ -18,9 +20,17 @@ voyager_bp = Blueprint('voyager_bp', __name__, template_folder='../templates')
 def similarity_page():
     """
     Serves the frontend page for finding similar tracks.
+    ---
+    tags:
+      - UI
+    responses:
+      200:
+        description: HTML content of the similarity page.
+        content:
+          text/html:
+            schema:
+              type: string
     """
-    # This assumes your similarity.html is in the main templates folder.
-    # If it's specific to this blueprint, you might need to adjust the path.
     return render_template('similarity.html')
 
 @voyager_bp.route('/api/search_tracks', methods=['GET'])
@@ -104,9 +114,30 @@ def get_similar_tracks_endpoint():
         schema:
           type: integer
           default: 10
+      - name: eliminate_duplicates
+        in: query
+        description: If 'true', limits the number of songs per artist in the results. If 'false', this is disabled. If the parameter is omitted, the server's default behavior is used.
+        schema:
+          type: string
+          enum: ['true', 'false']
     responses:
       200:
         description: A list of similar tracks with their details.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  item_id:
+                    type: string
+                  title:
+                    type: string
+                  author:
+                    type: string
+                  distance:
+                    type: number
       400:
         description: Bad request, missing required parameters.
       404:
@@ -118,6 +149,12 @@ def get_similar_tracks_endpoint():
     title = request.args.get('title')
     artist = request.args.get('artist')
     num_neighbors = request.args.get('n', 10, type=int)
+    
+    eliminate_duplicates_str = request.args.get('eliminate_duplicates')
+    if eliminate_duplicates_str is None:
+        eliminate_duplicates = SIMILARITY_ELIMINATE_DUPLICATES_DEFAULT
+    else:
+        eliminate_duplicates = eliminate_duplicates_str.lower() == 'true'
 
     target_item_id = None
 
@@ -132,7 +169,11 @@ def get_similar_tracks_endpoint():
         return jsonify({"error": "Request must include either 'item_id' or both 'title' and 'artist'."}), 400
 
     try:
-        neighbor_results = find_nearest_neighbors_by_id(target_item_id, n=num_neighbors)
+        neighbor_results = find_nearest_neighbors_by_id(
+            target_item_id, 
+            n=num_neighbors,
+            eliminate_duplicates=eliminate_duplicates
+        )
         if not neighbor_results:
             return jsonify({"error": "Target track not found in index or no similar tracks found."}), 404
 
@@ -145,7 +186,6 @@ def get_similar_tracks_endpoint():
         distance_map = {n['item_id']: n['distance'] for n in neighbor_results}
 
         final_results = []
-        # Ensure original order from neighbor_results is maintained
         for neighbor_id in neighbor_ids:
             if neighbor_id in details_map:
                 track_info = details_map[neighbor_id]

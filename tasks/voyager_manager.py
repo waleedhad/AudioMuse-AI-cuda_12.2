@@ -12,7 +12,7 @@ from rapidfuzz import fuzz
 
 from config import (
     EMBEDDING_DIMENSION, INDEX_NAME, VOYAGER_METRIC, VOYAGER_EF_CONSTRUCTION,
-    VOYAGER_M, VOYAGER_QUERY_EF
+    VOYAGER_M, VOYAGER_QUERY_EF, MAX_SONGS_PER_ARTIST
 )
 
 # Import from other project modules
@@ -257,10 +257,11 @@ def _deduplicate_and_filter_neighbors(song_results: list, db_conn):
 
     return unique_songs
 
-def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
+def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10, eliminate_duplicates: bool = False):
     """
     Finds the N nearest neighbors for a given item_id using the globally cached Voyager index.
     The results will NOT include the original item and will be deduplicated based on title/artist similarity.
+    If eliminate_duplicates is True, it will also limit the number of songs from a single artist.
     """
     if voyager_index is None or id_map is None or reverse_id_map is None:
         raise RuntimeError("Voyager index is not loaded in memory. It may be missing, empty, or the server failed to load it on startup.")
@@ -276,29 +277,58 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10):
         logger.error(f"Could not retrieve vector for Voyager ID {target_voyager_id} (item_id: {target_item_id}): {e}")
         return []
 
-    k_increase = max(5, int(n * 0.20))
-    num_to_query = n + k_increase
+    # If eliminating duplicates by artist, search for a much larger number of neighbors first.
+    if eliminate_duplicates:
+        # Query more to have a pool for filtering. +1 for the original song.
+        k_increase = max(5, int(n * 3))
+        num_to_query = n + k_increase + 1 # +1 to account for the query song itself
+    else:
+        # Standard query size increase for basic song-level deduplication
+        k_increase = max(5, int(n * 0.20))
+        num_to_query = n + k_increase + 1 # +1 to account for the query song itself
 
-    # Query for neighbors. This list INCLUDES the original song itself as the first result.
+    # Query for neighbors.
     neighbor_voyager_ids, distances = voyager_index.query(query_vector, k=num_to_query)
 
     initial_results = []
-    # Process the entire list, including the original song, for deduplication.
+    # Create a list of results, excluding the original song itself.
     for voyager_id, dist in zip(neighbor_voyager_ids, distances):
         item_id = id_map.get(voyager_id)
-        if item_id:
+        if item_id and item_id != target_item_id:
             initial_results.append({"item_id": item_id, "distance": float(dist)})
 
-    from app import get_db
+    from app import get_db, get_score_data_by_ids
     db_conn = get_db()
+
+    # First, perform the song-level deduplication (e.g., remove remixes)
+    unique_results_by_song = _deduplicate_and_filter_neighbors(initial_results, db_conn)
     
-    # This list contains unique songs, which may still include the original query song.
-    unique_results = _deduplicate_and_filter_neighbors(initial_results, db_conn)
+    # Now, if requested, filter by artist count
+    if eliminate_duplicates:
+        # We need author information. We can fetch it once for all unique songs.
+        item_ids_to_check = [r['item_id'] for r in unique_results_by_song]
+        
+        track_details_list = get_score_data_by_ids(item_ids_to_check)
+        details_map = {d['item_id']: {'author': d['author']} for d in track_details_list}
 
-    # Explicitly filter out the original song from the now-unique list.
-    final_results = [song for song in unique_results if song['item_id'] != target_item_id]
+        artist_counts = {}
+        final_results = []
+        for song in unique_results_by_song:
+            song_id = song['item_id']
+            author = details_map.get(song_id, {}).get('author')
 
-    # Return the top N results from the cleaned and filtered list.
+            if not author:
+                logger.warning(f"Could not find author for item_id {song_id} during artist deduplication. Skipping.")
+                continue
+
+            current_count = artist_counts.get(author, 0)
+            if current_count < MAX_SONGS_PER_ARTIST:
+                final_results.append(song)
+                artist_counts[author] = current_count + 1
+    else:
+        final_results = unique_results_by_song
+
+    # Finally, return the top N results from the processed list.
     return final_results[:n]
 
 

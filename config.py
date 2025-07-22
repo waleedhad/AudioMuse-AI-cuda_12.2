@@ -24,7 +24,9 @@ NAVIDROME_PASSWORD = os.environ.get("NAVIDROME_PASSWORD", "your_navidrome_passwo
 APP_VERSION = "v0.6.3-beta" # Version updated for Voyager integration
 MAX_DISTANCE = 0.5
 MAX_SONGS_PER_CLUSTER = 0
-MAX_SONGS_PER_ARTIST = 3
+MAX_SONGS_PER_ARTIST = int(os.getenv("MAX_SONGS_PER_ARTIST", "3")) # Max songs per artist in similarity results and clustering
+# New: Default behavior for eliminating duplicates in similarity search. If param not passed to API, this is the default.
+SIMILARITY_ELIMINATE_DUPLICATES_DEFAULT = os.environ.get("SIMILARITY_ELIMINATE_DUPLICATES_DEFAULT", "True").lower() == 'true'
 NUM_RECENT_ALBUMS = int(os.getenv("NUM_RECENT_ALBUMS", "0")) # Convert to int
 TOP_N_PLAYLISTS = int(os.environ.get("TOP_N_PLAYLISTS", "8")) # *** NEW: Default for Top N diverse playlists ***
 

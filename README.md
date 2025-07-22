@@ -376,7 +376,8 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `VOYAGER_EF_CONSTRUCTION`                | Number of element analyzed to create the neighbor list in the index.       | `1024`                                 |
 | `VOYAGER_M`                              | Number of neighbore More  = higher accuracy.                               | `64`                                 |
 | `VOYAGER_QUERY_EF`                       | Number neighbor analyzed during the query.                                 | `1024`                                 |
-| `VOYAGER_METRIC`                           | Different tipy of distance metrics: `angular`, `euclidean`,`dot`         | `angular`              |
+| `VOYAGER_METRIC`                           | Different tipe of distance metrics: `angular`, `euclidean`,`dot`         | `angular`              |
+| `SIMILARITY_ELIMINATE_DUPLICATES_DEFAULT` | It enable the possibility of use the `MAX_SONGS_PER_ARTIST` also in similar song  | `true`              |
 | **Evolutionary Clustering & Scoring**    |                                                                              |                                      |
 | `ITERATIONS_PER_BATCH_JOB`               | Number of clustering iterations processed per RQ batch job.                | `20`                                |
 | `MAX_CONCURRENT_BATCH_JOBS`              | Maximum number of clustering batch jobs to run simultaneously.             | `10`                                  |
