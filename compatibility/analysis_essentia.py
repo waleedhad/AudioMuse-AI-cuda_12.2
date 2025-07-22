@@ -29,7 +29,7 @@ from rq.exceptions import NoSuchJobError, InvalidJobOperation
 # Import project modules
 from . import mediaserver
 from .commons import score_vector
-from .annoy_manager import build_and_store_annoy_index
+from .voyager_manager import build_and_store_voyager_index
 from ai import get_ai_playlist_name, creative_prompt_template
 
 # Import configuration (ensure config.py is in PYTHONPATH or same directory)
@@ -591,7 +591,7 @@ def run_analysis_task(num_recent_albums, top_n_moods):
                     
                     try:
                         db_conn_rebuild = get_db()
-                        build_and_store_annoy_index(db_conn_rebuild)
+                        build_and_store_voyager_index(db_conn_rebuild)
                         redis_conn.publish('index-updates', 'reload')
                         logger.info(f"Incremental index rebuild complete after {albums_completed_count} albums.")
                         # IMPORTANT: Update the counter to prevent immediate re-rebuilds
@@ -681,13 +681,13 @@ def run_analysis_task(num_recent_albums, top_n_moods):
                 except Exception:
                     failed_albums += 1
             
-            # --- Annoy Index Creation ---
+            # --- Voyager Index Creation ---
             # Perform a final rebuild to include any remaining albums that didn't form a full batch.
             log_and_update_main_analysis("Performing final index rebuild to include all tracks...", 95)
             db_conn = get_db()
-            build_and_store_annoy_index(db_conn)
+            build_and_store_voyager_index(db_conn)
             
-            final_message = f"Main analysis complete. Found {total_albums_to_check} albums, skipped {albums_skipped_count}. Of the {albums_launched_count} launched, {successful_albums} succeeded, {failed_albums} failed. Total tracks analyzed: {total_tracks_analyzed_all_albums}. Annoy index created."
+            final_message = f"Main analysis complete. Found {total_albums_to_check} albums, skipped {albums_skipped_count}. Of the {albums_launched_count} launched, {successful_albums} succeeded, {failed_albums} failed. Total tracks analyzed: {total_tracks_analyzed_all_albums}. Voyager index created."
 
             log_and_update_main_analysis("Publishing index-reload notification to Redis...", 98)
             try:
