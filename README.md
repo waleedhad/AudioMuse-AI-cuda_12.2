@@ -642,16 +642,12 @@ AudioMuse-AI doesn't just run a clustering algorithm once; it employs a sophisti
 
 This iterative and evolutionary process allows AudioMuse-AI to automatically explore a vast parameter space and converge on a clustering solution that is well-suited to the underlying structure of your music library.
 
-Certainly! Here's the **full chapter**, now formatted using `###` headings instead of `##`, so it can fit into a larger document structure cleanly:
-
----
-
 ### How Purity and Diversity Scores Are Calculated
 
 The **Purity** and **Diversity** scores are custom-designed metrics used to evaluate the quality of clustered playlists based on their musical characteristics — especially mood. These scores guide the evolutionary clustering algorithm to balance two goals:
 
-* 🎯 **Purity** — how well songs within a playlist reflect its core mood identity
-* 🌈 **Diversity** — how different playlists are from one another in their dominant mood
+* **Purity** — how well songs within a playlist reflect its core mood identity
+* **Diversity** — how different playlists are from one another in their dominant mood
 
 These metrics apply consistently whether clustering is based on **interpretable score vectors** (like mood labels) or **non-interpretable embeddings**.
 
