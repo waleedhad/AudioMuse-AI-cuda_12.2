@@ -185,7 +185,7 @@ def chat_home():
                                 'type': 'string', 'example': 'http://127.0.0.1:11434/api/generate'
                             },
                             'default_gemini_model_name': {
-                                'type': 'string', 'example': 'gemini-1.5-flash-latest'
+                                'type': 'string', 'example': 'gemini-2.5-pro'
                             },
                             'default_gemini_api_key': {
                                 'type': 'string', 'description': 'The configured Gemini API key (empty if placeholder).'
@@ -243,7 +243,7 @@ def chat_config_defaults_api():
                         'ai_model': {
                             'type': 'string',
                             'description': 'The specific AI model name to use. Defaults to server config for the provider.',
-                            'example': 'gemini-1.5-flash-latest'
+                            'example': 'gemini-2.5-pro'
                         },
                         'ollama_server_url': {
                             'type': 'string',

@@ -52,7 +52,7 @@
                             </div>
                             <div id="geminiConfig" class="hidden">
                                 <label for="geminiModel">Gemini Model</label>
-                                <input type="text" id="geminiModel" placeholder="e.g., gemini-1.5-flash-latest">
+                                <input type="text" id="geminiModel" placeholder="e.g., gemini-2.5-pro">
                                 <div style="margin-top: 1.5rem;">
                                     <label for="geminiApiKey">Gemini API Key (for testing)</label>
                                     <input type="password" id="geminiApiKey" placeholder="Enter Gemini API Key">
@@ -156,7 +156,7 @@
                 ollamaModelSelect.value = globalConfig.default_ollama_model_name || ""; // Set default value for input
                 ollamaServerUrlInput.value = globalConfig.ollama_server_url || "http://localhost:11434/api/generate"; // Pre-fill Ollama Server URL
                 
-                geminiModelSelect.value = globalConfig.default_gemini_model_name || "gemini-1.5-flash-latest";
+                geminiModelSelect.value = globalConfig.default_gemini_model_name || "gemini-2.5-pro";
                 // Pre-fill Gemini API key from config if available and not the placeholder
                 // User can still override this in the form.
                 geminiApiKeyInput.value = globalConfig.default_gemini_api_key || "";

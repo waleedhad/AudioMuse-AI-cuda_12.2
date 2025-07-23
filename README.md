@@ -113,7 +113,7 @@ config:
   aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
   ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
   ollamaModelName: "mistral:7b"
-  geminiModelName: "gemini-1.5-flash-latest"
+  geminiModelName: "gemini-2.5-pro"
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
 
@@ -152,7 +152,7 @@ config:
   aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
   ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
   ollamaModelName: "mistral:7b"
-  geminiModelName: "gemini-1.5-flash-latest"
+  geminiModelName: "gemini-2.5-pro"
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
 
@@ -418,7 +418,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `50`                                 |
 | `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>:11434/api/generate` |
 | `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
-| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
+| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-2.5-pro`            |
 | **Scoring Weights**                      |                                                                              |                                      |
 | `SCORE_WEIGHT_DIVERSITY`                 | Weight for inter-playlist mood diversity.                                  | `2.0`                                |
 | `SCORE_WEIGHT_PURITY`                    | Weight for playlist purity (intra-playlist mood consistency).                | `1.0`                                |
