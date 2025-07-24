@@ -64,6 +64,7 @@ And now just some **NEWS:**
 - [Future Possibilities](#future-possibilities)
 - [How To Contribute](#how-to-contribute)
 - [Contributors](#contributors)
+- [Star History](#star-history)
 
 ## **Quick Start Deployment on K3S WITH HELM**
 
@@ -974,3 +975,7 @@ git add .gitattributes
 Really thanks to all the contributors of this project, for developing, testing and giving suggestions on new feature:
 
 - [@NovaCyntax](https://github.com/NovaCyntax) — Testing and new feature suggestions
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=NeptuneHub/AudioMuse-AI&type=Timeline)](https://www.star-history.com/#NeptuneHub/AudioMuse-AI&Timeline)
