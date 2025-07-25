@@ -738,7 +738,7 @@ def create_media_server_playlist_api():
             raise Exception("Media server did not return playlist information after creation.")
             
         # The created_playlist_info is the full JSON response from the media server
-        return jsonify({"message": f"Successfully created playlist '{created_playlist_info.get('Name')}' on the media server with ID: {created_playlist_info.get('Id')}"}), 200
+        return jsonify({"message": f"Successfully created playlist '{user_playlist_name}' on the media server with ID: {created_playlist_info.get('Id')}"}), 200
 
     except Exception as e:
         # Log detailed error on the server
