@@ -42,6 +42,7 @@ And now just some **NEWS:**
 - [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
 - [Playlist from Similar song (via similarity Interface)](#playlist-from-similar-song-via-similarity-interface)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
+- [Hardware Requirements](#hardware-requirements)
 - [Configuration Parameters](#configuration-parameters)
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
 - [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
@@ -71,9 +72,11 @@ And now just some **NEWS:**
 This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster WITH HELM. This is the fast way to deploy it!
 
 *  **Prerequisites:**
-    *   A running K3S cluster.
+    *   A running `K3S cluster`.
     *   `kubectl` configured to interact with your cluster.
     *   `helm` installed.
+    *   `Jellyfin` or `Navidrome` installed.
+    *   Respect the HW requirements (look the specific chapter)
 
 The helm chart repo is provided here:
 * https://github.com/NeptuneHub/AudioMuse-AI-helm
@@ -169,6 +172,8 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
 1.  **Prerequisites:**
     *   A running K3S cluster.
     *   `kubectl` configured to interact with your cluster.
+    *   `Jellyfin` or `Navidrome` installed.
+    *   Respect the HW requirements (look the specific chapter)
 
 2.  **Configuration:**
     *   Navigate to the `deployments/` directory.
@@ -329,6 +334,20 @@ The deployment file also creates the `playlist` namespace to contain all these r
 
 For a more stable use, I suggest editing the deployment container image to use specific version tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha.
 
+## **Hardware Requirements**
+
+AudioMuse-Ai is actually tested on:
+* **INTEL**: HP Mini PC with Intel i5-6500, 16 GB RAM and NVME SSD
+* **ARM**: Raspberry Pi 5 8GB RAM and NVME SSD
+
+The **suggested requirements** are: 4core INTEL or ARM CPU (Producted from 2015 and above) with AVX support, 8GB ram and an SSD.
+
+It can most probably run on older CPU (from 3rd gen and above) and with less ram (maybe 4GB) but I never tested.
+
+Intel I7 CPU of first gen or older **DON'T WORK** because Tensorflow require AVX supprt.
+
+If you tested with CPU older than the suggested requirements, please track this in an issue ticket reporting your feedback.
+
 ## **Configuration Parameters**
 
 These are the parameters accepted for this script. You can pass them as environment variables using, for example, /deployment/deployment.yaml in this repository.
@@ -441,6 +460,8 @@ For a quick local setup or for users not using Kubernetes, a `docker-compose.yam
 
 **Prerequisites:**
 *   Docker and Docker Compose installed.
+*   `Jellyfin` or `Navidrome` installed.
+*   Respect the HW requirements (look the specific chapter)
 
 **Steps:**
 1.  **Navigate to the `deployment` directory:**
