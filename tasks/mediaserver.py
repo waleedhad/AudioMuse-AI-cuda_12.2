@@ -442,24 +442,50 @@ def _navidrome_delete_playlist(playlist_id):
         return False
 
 def _navidrome_get_top_played_songs(limit):
-    """Fetches the top N most played songs from Navidrome using the getTopSongs endpoint."""
-    params = {"count": limit}
-    response = _navidrome_request("getTopSongs", params)
-    if response and "topSongs" in response and "song" in response["topSongs"]:
-        songs = response["topSongs"]["song"]
-        # Normalize keys to match Jellyfin's output for compatibility
-        return [{
-            'Id': s.get('id'),
-            'Name': s.get('title'),
-            'AlbumArtist': s.get('artist'),
-            'Path': s.get('path'),
-            'UserData': { # Emulate Jellyfin's UserData structure
-                'PlayCount': s.get('playCount', 0),
-                # lastPlayed is not in getTopSongs, must be fetched separately
-                'LastPlayedDate': None 
-            }
-        } for s in songs]
-    return []
+    """
+    Fetches the top N most played songs from Navidrome.
+    This is an approximation, as the Subsonic API doesn't directly provide a list
+    of top songs. Instead, we get the most frequently played albums and then
+    collect the songs from those albums.
+    """
+    logger.info(f"Fetching top played songs from Navidrome by getting frequently played albums (target song count: {limit}).")
+    top_songs = []
+    
+    # We fetch a list of frequently played albums. The number of albums to fetch is a heuristic.
+    # We'll fetch enough albums to likely contain at least `limit` songs.
+    # Let's assume an average of 10 songs per album and add a buffer.
+    num_albums_to_fetch = (limit // 10) + 10 
+    
+    params = {"type": "frequent", "size": num_albums_to_fetch}
+    response = _navidrome_request("getAlbumList2", params)
+    
+    if response and "albumList2" in response and "album" in response["albumList2"]:
+        frequent_albums = response["albumList2"]["album"]
+        logger.info(f"Found {len(frequent_albums)} frequently played albums.")
+        
+        for album in frequent_albums:
+            if len(top_songs) >= limit:
+                break # Stop once we have enough songs
+            
+            album_id = album.get("id")
+            album_name = album.get("name", "Unknown Album")
+            logger.debug(f"Fetching tracks for frequently played album: '{album_name}' (ID: {album_id})")
+            
+            tracks = _navidrome_get_tracks_from_album(album_id)
+            if tracks:
+                top_songs.extend(tracks)
+        
+        if not top_songs:
+            logger.warning("Found frequently played albums, but could not retrieve any tracks from them.")
+
+    else:
+        logger.warning("Could not retrieve a list of frequently played albums from Navidrome. The server may not have enough play history.")
+
+    # Return the collected songs, truncated to the exact limit.
+    final_songs = top_songs[:limit]
+    logger.info(f"Returning {len(final_songs)} top played songs based on album frequency.")
+    return final_songs
+
 
 def _navidrome_get_last_played_time(item_id):
     """Fetches the last played time for a specific track from Navidrome."""
