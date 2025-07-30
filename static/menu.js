@@ -43,7 +43,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const menuItems = [
         { href: '/', text: 'Analysis and Clustering' },
         { href: '/chat', text: 'Instant Playlist' },
-        { href: '/similarity', text: 'Playlist from Similar Song' }
+        { href: '/similarity', text: 'Playlist from Similar Song' },
+        { href: '/sonic_fingerprint', text: 'Sonic Fingerprint' }
     ];
 
     // Find the navigation list
@@ -64,7 +65,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 isActive = true;
             }
         } else {
-            if (currentPath === linkPath || currentPath === linkPath + '/') {
+            // Check if the current path starts with the link's path.
+            // This handles cases like '/sonic_fingerprint' and '/sonic_fingerprint/'
+            if (currentPath.startsWith(linkPath) && (currentPath.length === linkPath.length || currentPath.charAt(linkPath.length) === '/')) {
                 isActive = true;
             }
         }

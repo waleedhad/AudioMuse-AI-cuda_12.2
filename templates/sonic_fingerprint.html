@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="app-version" content="{{ app_version }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AudioMuse-AI - Sonic Fingerprint</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/menu.css">
+    <style>
+        /* Add styles for the fingerprint form button to match the similarity page */
+        #fingerprint-form button {
+            flex-grow: 1;
+            color: white;
+            font-weight: 700;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            width: 100%;
+            font-size: 1rem;
+            margin-top: 1rem;
+            background-color: #2563EB;
+        }
+        #fingerprint-form button:hover {
+            background-color: #1D4ED8;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <aside class="sidebar">
+        <nav>
+            <ul class="sidebar-nav">
+                <!-- Menu items are dynamically inserted by menu.js -->
+            </ul>
+        </nav>
+    </aside>
+
+    <div class="main-content" id="main-content">
+        <button class="menu-toggle">&#9776;</button>
+        <div class="container">
+            <section>
+                <header class="page-header">
+                    <h1>AudioMuse-AI - Sonic Fingerprint</h1>
+                    <p>Generate a playlist based on your unique listening habits.</p>
+                </header>
+
+                <form id="fingerprint-form">
+                    <button type="submit">
+                        Generate My Sonic Fingerprint
+                    </button>
+                </form>
+            </section>
+
+            <section id="results-container" class="hidden">
+                <h2>Results</h2>
+                <div id="status"></div>
+                <div id="results-table-wrapper"></div>
+            </section>
+
+            <section id="playlist-creator" class="hidden">
+                <h3>Create a Playlist from Results</h3>
+                <form id="playlist-form">
+                    <div class="param-group">
+                        <div>
+                           <label for="playlist_name">Playlist Name:</label>
+                           <input type="text" id="playlist_name" name="playlist_name" required placeholder="e.g., My Sonic Mix">
+                        </div>
+                    </div>
+                    <button type="submit" style="background-color: #16A34A;">
+                        Create Playlist on Media Server
+                    </button>
+                </form>
+                <div id="playlist-status"></div>
+            </section>
+        
+        </div>
+    </div>
+</div>
+
+    <script>
+        (() => {
+            let currentTrackIds = [];
+
+            const fingerprintForm = document.getElementById('fingerprint-form');
+            const playlistForm = document.getElementById('playlist-form');
+            const resultsContainer = document.getElementById('results-container');
+            const playlistCreator = document.getElementById('playlist-creator');
+            const statusDiv = document.getElementById('status');
+            const resultsTableWrapper = document.getElementById('results-table-wrapper');
+            const playlistStatusDiv = document.getElementById('playlist-status');
+
+            // --- Main Form Submission ---
+            fingerprintForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+
+                resultsContainer.classList.remove('hidden');
+                playlistCreator.classList.add('hidden');
+                statusDiv.textContent = 'Generating your sonic fingerprint... This may take a moment.';
+                statusDiv.className = '';
+                resultsTableWrapper.innerHTML = '';
+
+                try {
+                    const response = await fetch(`/api/sonic_fingerprint/generate`);
+                    const data = await response.json();
+
+                    if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                    
+                    if (data.length === 0) {
+                        statusDiv.textContent = 'Could not generate fingerprint. No recommendations found.';
+                        statusDiv.className = 'status-error';
+                        return;
+                    }
+
+                    currentTrackIds = data.map(track => track.item_id);
+
+                    statusDiv.textContent = `Found ${data.length} recommended tracks.`;
+                    const tableHTML = `
+                        <table>
+                            <thead>
+                                <tr><th>Title</th><th>Artist</th><th>Distance</th></tr>
+                            </thead>
+                            <tbody>
+                                ${data.map(track => `
+                                    <tr>
+                                        <td>${track.title || 'N/A'}</td>
+                                        <td>${track.author || 'N/A'}</td>
+                                        <td>${track.distance.toFixed(4)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>`;
+                    resultsTableWrapper.innerHTML = tableHTML;
+                    playlistCreator.classList.remove('hidden');
+                    playlistStatusDiv.textContent = '';
+                    document.getElementById('playlist_name').value = 'My Sonic Fingerprint Mix';
+
+                } catch (error) {
+                    statusDiv.textContent = `Error: ${error.message}`;
+                    statusDiv.className = 'status-error';
+                    console.error('Fetch error:', error);
+                }
+            });
+
+            // --- Playlist Creation ---
+            playlistForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                const playlistName = document.getElementById('playlist_name').value;
+                
+                playlistStatusDiv.className = '';
+                if (!playlistName) {
+                    playlistStatusDiv.textContent = 'Please enter a playlist name.';
+                    playlistStatusDiv.className = 'status-error';
+                    return;
+                }
+                if (currentTrackIds.length === 0) {
+                    playlistStatusDiv.textContent = 'No tracks to add. Please generate a fingerprint first.';
+                    playlistStatusDiv.className = 'status-error';
+                    return;
+                }
+                playlistStatusDiv.textContent = 'Creating playlist...';
+                
+                try {
+                    const response = await fetch('/api/create_playlist', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            playlist_name: playlistName,
+                            track_ids: currentTrackIds
+                        }),
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    playlistStatusDiv.textContent = result.message;
+                    playlistStatusDiv.className = 'status-success';
+                } catch (error) {
+                    playlistStatusDiv.textContent = `Error: ${error.message}`;
+                    playlistStatusDiv.className = 'status-error';
+                    console.error('Playlist creation error:', error);
+                }
+            });
+        })();
+    </script>
+    <script src="/static/menu.js"></script>
+</body>
+</html>

@@ -179,6 +179,38 @@ def _jellyfin_delete_playlist(playlist_id):
         logger.error(f"Exception deleting Jellyfin playlist ID {playlist_id}: {e}", exc_info=True)
         return False
 
+def _jellyfin_get_top_played_songs(limit):
+    """Fetches the top N most played songs from Jellyfin."""
+    url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
+    params = {
+        "IncludeItemTypes": "Audio",
+        "SortBy": "PlayCount",
+        "SortOrder": "Descending",
+        "Recursive": True,
+        "Limit": limit,
+        "Fields": "UserData,Path"  # Request UserData to get PlayCount and LastPlayedDate
+    }
+    try:
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
+        r.raise_for_status()
+        items = r.json().get("Items", [])
+        return items
+    except Exception as e:
+        logger.error(f"Jellyfin get_top_played_songs failed: {e}", exc_info=True)
+        return []
+
+def _jellyfin_get_last_played_time(item_id):
+    """Fetches the last played time for a specific track from Jellyfin."""
+    url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items/{item_id}"
+    params = {"Fields": "UserData"}
+    try:
+        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
+        r.raise_for_status()
+        user_data = r.json().get("UserData", {})
+        return user_data.get("LastPlayedDate") # Returns a string like "2024-01-15T18:30:00.0000000Z" or None
+    except Exception as e:
+        logger.error(f"Jellyfin get_last_played_time failed for item {item_id}: {e}", exc_info=True)
+        return None
 
 # ##############################################################################
 # NAVIDROME (SUBSONIC API) IMPLEMENTATION
@@ -409,6 +441,33 @@ def _navidrome_delete_playlist(playlist_id):
         logger.error(f"Failed to delete playlist ID '{playlist_id}' on Navidrome")
         return False
 
+def _navidrome_get_top_played_songs(limit):
+    """Fetches the top N most played songs from Navidrome using the getTopSongs endpoint."""
+    params = {"count": limit}
+    response = _navidrome_request("getTopSongs", params)
+    if response and "topSongs" in response and "song" in response["topSongs"]:
+        songs = response["topSongs"]["song"]
+        # Normalize keys to match Jellyfin's output for compatibility
+        return [{
+            'Id': s.get('id'),
+            'Name': s.get('title'),
+            'AlbumArtist': s.get('artist'),
+            'Path': s.get('path'),
+            'UserData': { # Emulate Jellyfin's UserData structure
+                'PlayCount': s.get('playCount', 0),
+                # lastPlayed is not in getTopSongs, must be fetched separately
+                'LastPlayedDate': None 
+            }
+        } for s in songs]
+    return []
+
+def _navidrome_get_last_played_time(item_id):
+    """Fetches the last played time for a specific track from Navidrome."""
+    params = {"id": item_id}
+    response = _navidrome_request("getSong", params)
+    if response and "song" in response:
+        return response["song"].get("lastPlayed") # Returns a timestamp string like "2023-10-27T10:00:00Z" or None
+    return None
 
 # ##############################################################################
 # PUBLIC API (Dispatcher functions)
@@ -535,6 +594,31 @@ def create_instant_playlist(playlist_name, item_ids):
         return _jellyfin_create_instant_playlist(playlist_name, item_ids)
     elif config.MEDIASERVER_TYPE == 'navidrome':
         return _navidrome_create_instant_playlist(playlist_name, item_ids)
+    else:
+        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
+        return None
+
+def get_top_played_songs(limit):
+    """
+    Fetches the top N most played songs from the configured media server.
+    """
+    if config.MEDIASERVER_TYPE == 'jellyfin':
+        return _jellyfin_get_top_played_songs(limit)
+    elif config.MEDIASERVER_TYPE == 'navidrome':
+        return _navidrome_get_top_played_songs(limit)
+    else:
+        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
+        return []
+
+def get_last_played_time(item_id):
+    """
+    Fetches the last played time for a specific track from the configured media server.
+    Returns a UTC timestamp string or None.
+    """
+    if config.MEDIASERVER_TYPE == 'jellyfin':
+        return _jellyfin_get_last_played_time(item_id)
+    elif config.MEDIASERVER_TYPE == 'navidrome':
+        return _navidrome_get_last_played_time(item_id)
     else:
         logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
         return None

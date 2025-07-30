@@ -1197,6 +1197,7 @@ if __name__ == '__main__':
     from app_clustering import clustering_bp
     from app_analysis import analysis_bp
     from app_voyager import voyager_bp
+    from app_sonic_fingerprint import sonic_fingerprint_bp
 
     # Only chat gets a prefix
     app.register_blueprint(chat_bp, url_prefix='/chat')
@@ -1205,6 +1206,7 @@ if __name__ == '__main__':
     app.register_blueprint(clustering_bp)
     app.register_blueprint(analysis_bp)
     app.register_blueprint(voyager_bp)
+    app.register_blueprint(sonic_fingerprint_bp)
     
     os.makedirs(TEMP_DIR, exist_ok=True)
     # This block runs only when the script is executed directly (e.g., `python app.py`)
