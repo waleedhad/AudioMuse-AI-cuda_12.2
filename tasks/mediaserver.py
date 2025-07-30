@@ -3,6 +3,7 @@
 import requests
 import logging
 import os
+import random
 import config  # Import the config module to access server type and settings
 
 logger = logging.getLogger(__name__)
@@ -444,12 +445,11 @@ def _navidrome_delete_playlist(playlist_id):
 def _navidrome_get_top_played_songs(limit):
     """
     Fetches the top N most played songs from Navidrome.
-    This is an approximation, as the Subsonic API doesn't directly provide a list
-    of top songs. Instead, we get the most frequently played albums and then
-    collect the songs from those albums.
+    This is an approximation. It gets the most frequently played albums, collects all
+    their songs, and then takes a random sample to avoid bias towards the first album.
     """
     logger.info(f"Fetching top played songs from Navidrome by getting frequently played albums (target song count: {limit}).")
-    top_songs = []
+    all_top_songs = []
     
     # We fetch a list of frequently played albums. The number of albums to fetch is a heuristic.
     # We'll fetch enough albums to likely contain at least `limit` songs.
@@ -463,26 +463,28 @@ def _navidrome_get_top_played_songs(limit):
         frequent_albums = response["albumList2"]["album"]
         logger.info(f"Found {len(frequent_albums)} frequently played albums.")
         
+        # Collect all songs from all the fetched frequent albums first.
         for album in frequent_albums:
-            if len(top_songs) >= limit:
-                break # Stop once we have enough songs
-            
             album_id = album.get("id")
             album_name = album.get("name", "Unknown Album")
             logger.debug(f"Fetching tracks for frequently played album: '{album_name}' (ID: {album_id})")
             
             tracks = _navidrome_get_tracks_from_album(album_id)
             if tracks:
-                top_songs.extend(tracks)
+                all_top_songs.extend(tracks)
         
-        if not top_songs:
+        if not all_top_songs:
             logger.warning("Found frequently played albums, but could not retrieve any tracks from them.")
 
     else:
         logger.warning("Could not retrieve a list of frequently played albums from Navidrome. The server may not have enough play history.")
 
-    # Return the collected songs, truncated to the exact limit.
-    final_songs = top_songs[:limit]
+    # If we have more songs than the limit, take a random sample. Otherwise, take all of them.
+    if len(all_top_songs) > limit:
+        final_songs = random.sample(all_top_songs, limit)
+    else:
+        final_songs = all_top_songs
+        
     logger.info(f"Returning {len(final_songs)} top played songs based on album frequency.")
     return final_songs
 
