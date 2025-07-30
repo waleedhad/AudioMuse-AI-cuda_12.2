@@ -4,6 +4,7 @@ import logging
 
 from tasks.sonic_fingerprint_manager import generate_sonic_fingerprint
 from app import get_score_data_by_ids
+from config import SONIC_FINGERPRINT_NEIGHBORS
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,6 @@ def sonic_fingerprint_page():
             schema:
               type: string
     """
-    # This will look for 'sonic_fingerprint.html' in your 'templates' folder.
-    # For now, this will fail if the template doesn't exist, but the API endpoint will work.
     try:
         return render_template('sonic_fingerprint.html')
     except Exception as e:
@@ -41,6 +40,12 @@ def generate_sonic_fingerprint_endpoint():
     ---
     tags:
       - Sonic Fingerprint
+    parameters:
+      - name: n
+        in: query
+        type: integer
+        required: false
+        description: The number of results to return. Overrides the server default.
     responses:
       200:
         description: A list of recommended tracks based on the sonic fingerprint.
@@ -63,8 +68,11 @@ def generate_sonic_fingerprint_endpoint():
         description: Server error during generation.
     """
     try:
+        # Get the number of results from the query parameter, default to None to use the config value
+        num_results = request.args.get('n', type=int)
+
         # The manager function does all the heavy lifting
-        fingerprint_results = generate_sonic_fingerprint()
+        fingerprint_results = generate_sonic_fingerprint(num_neighbors=num_results)
 
         if not fingerprint_results:
             return jsonify([])
@@ -76,7 +84,7 @@ def generate_sonic_fingerprint_endpoint():
         details_map = {d['item_id']: d for d in details_list}
         distance_map = {r['item_id']: r['distance'] for r in fingerprint_results}
 
-        # Reconstruct the final list, ensuring order is preserved from the similarity search
+        # Reconstruct the final list, ensuring order is preserved
         final_results = []
         for res_id in result_ids:
             if res_id in details_map:

@@ -9,14 +9,23 @@ from app import get_tracks_by_ids
 
 logger = logging.getLogger(__name__)
 
-def generate_sonic_fingerprint():
+def generate_sonic_fingerprint(num_neighbors=None):
     """
     Generates a 'sonic fingerprint' by averaging the embeddings of the most played songs,
     weighted by recency, and then finds similar songs to this fingerprint.
+    The final list will be truncated to the requested number of results.
+
+    Args:
+        num_neighbors (int, optional): The total number of desired tracks in the final playlist.
+                                       If None, defaults to SONIC_FINGERPRINT_NEIGHBORS from config.
     """
     logger.info("Generating sonic fingerprint...")
 
-    # 1. Get top N played songs from the media server
+    # Determine the total desired size for the final playlist
+    total_desired_size = num_neighbors if num_neighbors is not None else SONIC_FINGERPRINT_NEIGHBORS
+    logger.info(f"Targeting a total playlist size of {total_desired_size}.")
+
+    # 1. Get top N played songs from the media server (using config for the seed songs)
     top_songs = get_top_played_songs(limit=SONIC_FINGERPRINT_TOP_N_SONGS)
     if not top_songs:
         logger.warning("No top played songs found. Cannot generate sonic fingerprint.")
@@ -31,6 +40,7 @@ def generate_sonic_fingerprint():
         logger.warning("Could not retrieve embeddings for any of the top songs.")
         return []
 
+    # This map will only contain songs that have a valid embedding
     embeddings_map = {track['item_id']: track['embedding_vector'] for track in track_details if 'embedding_vector' in track and track['embedding_vector'].size > 0}
     
     weighted_vectors = []
@@ -44,40 +54,29 @@ def generate_sonic_fingerprint():
 
         embedding_vector = embeddings_map[song_id]
         
-        # Get last played time for weighting
         last_played_str = get_last_played_time(song_id)
         
-        weight = 1.0  # Default weight
+        weight = 1.0
         days_since_played = "N/A"
         if last_played_str:
             try:
-                # Navidrome format: "2023-10-27T10:00:00Z"
-                # Jellyfin format:  "2024-01-15T18:30:00.0000000Z"
-                # Python's fromisoformat can only handle up to 6 microsecond digits.
-                # We need to truncate longer fractional seconds from Jellyfin before parsing.
                 if '.' in last_played_str and last_played_str.endswith('Z'):
                     dot_index = last_played_str.rfind('.')
                     z_index = last_played_str.rfind('Z')
-                    
-                    # If the fractional part has more than 6 digits, truncate it
                     if z_index > dot_index and (z_index - dot_index - 1) > 6:
                         last_played_str = last_played_str[:dot_index+7] + 'Z'
 
-                # The fromisoformat method handles both formats if we normalize the 'Z'
                 last_played_dt = datetime.fromisoformat(last_played_str.replace('Z', '+00:00'))
                 days_since_played = (datetime.now(timezone.utc) - last_played_dt).days
                 
-                # Apply exponential decay weight.
-                # A shorter half-life gives more importance to very recent songs.
-                half_life = 30.0 # days
+                half_life = 30.0
                 decay_rate = -np.log(0.5) / half_life
                 weight = np.exp(-decay_rate * max(0, days_since_played))
 
             except (ValueError, TypeError) as e:
                 logger.warning(f"Could not parse date '{last_played_str}' for song {song_id}. Using lower weight. Error: {e}")
-                weight = 0.5 # Lower weight if date is unparsable
+                weight = 0.5
         else:
-            # Song has a play count but no last played date, give it a lower weight
             weight = 0.25
 
         weighted_vectors.append(embedding_vector * weight)
@@ -88,20 +87,55 @@ def generate_sonic_fingerprint():
         logger.error("No valid embeddings with weights could be calculated. Cannot generate fingerprint.")
         return []
 
-    # Calculate the average vector (the "sonic fingerprint")
     average_vector = np.sum(weighted_vectors, axis=0) / total_weight
-    
     logger.info(f"Calculated average vector (sonic fingerprint) from {len(weighted_vectors)} songs.")
 
-    # 4. Use Voyager to find similar songs to the fingerprint
+    # 4. Use Voyager to find similar songs
+    # Get the IDs of the songs that actually contributed to the fingerprint
+    contributing_seed_ids = list(embeddings_map.keys())
+    num_seed_songs = len(contributing_seed_ids)
+
+    # Calculate how many new neighbors to find to reach the total desired size
+    neighbors_to_find = total_desired_size - num_seed_songs
+
+    if neighbors_to_find <= 0:
+        logger.info(f"The number of seed songs ({num_seed_songs}) is >= the desired playlist size ({total_desired_size}). Returning only seed songs, truncated to the desired size.")
+        final_results = [{'item_id': song_id, 'distance': 0.0} for song_id in contributing_seed_ids[:total_desired_size]]
+        return final_results
+
     try:
-        similar_songs = find_nearest_neighbors_by_vector(
+        logger.info(f"Searching for {neighbors_to_find} new neighbors to supplement the {num_seed_songs} seed songs.")
+        similar_songs_from_voyager = find_nearest_neighbors_by_vector(
             query_vector=average_vector,
-            n=SONIC_FINGERPRINT_NEIGHBORS,
-            eliminate_duplicates=True # Good default to get a diverse playlist
+            n=neighbors_to_find,
+            eliminate_duplicates=True
         )
-        logger.info(f"Found {len(similar_songs)} similar songs for the sonic fingerprint.")
-        return similar_songs
+        logger.info(f"Found {len(similar_songs_from_voyager)} similar songs for the sonic fingerprint.")
+
+        # --- Combine seed songs and similar songs ---
+        final_song_ids = set()
+        combined_results = []
+
+        # 1. Add the seed songs first
+        for song_id in contributing_seed_ids:
+            if song_id not in final_song_ids:
+                combined_results.append({'item_id': song_id, 'distance': 0.0})
+                final_song_ids.add(song_id)
+        
+        logger.info(f"Added {len(final_song_ids)} seed songs to the results.")
+
+        # 2. Add the similar songs found by Voyager, skipping duplicates, until the desired size is reached
+        for song in similar_songs_from_voyager:
+            if len(combined_results) >= total_desired_size:
+                break
+            if song['item_id'] not in final_song_ids:
+                combined_results.append(song)
+                final_song_ids.add(song['item_id'])
+                
+        logger.info(f"Total unique songs in final fingerprint playlist: {len(combined_results)}")
+
+        return combined_results
+
     except Exception as e:
         logger.error(f"Error finding neighbors for sonic fingerprint: {e}", exc_info=True)
         return []

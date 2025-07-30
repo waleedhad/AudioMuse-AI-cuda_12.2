@@ -49,6 +49,12 @@
                 </header>
 
                 <form id="fingerprint-form">
+                    <div class="param-group">
+                        <div>
+                            <label for="n">Number of results:</label>
+                            <input type="number" id="n" name="n" value="200" min="40" max="1000">
+                        </div>
+                    </div>
                     <button type="submit">
                         Generate My Sonic Fingerprint
                     </button>
@@ -97,6 +103,18 @@
             fingerprintForm.addEventListener('submit', async function (event) {
                 event.preventDefault();
 
+                const nInput = document.getElementById('n');
+                const n = parseInt(nInput.value, 10);
+
+                if (n < 40) {
+                    statusDiv.textContent = 'Number of results must be at least 40.';
+                    statusDiv.className = 'status-error';
+                    resultsTableWrapper.innerHTML = '';
+                    playlistCreator.classList.add('hidden');
+                    resultsContainer.classList.remove('hidden');
+                    return;
+                }
+
                 resultsContainer.classList.remove('hidden');
                 playlistCreator.classList.add('hidden');
                 statusDiv.textContent = 'Generating your sonic fingerprint... This may take a moment.';
@@ -104,7 +122,8 @@
                 resultsTableWrapper.innerHTML = '';
 
                 try {
-                    const response = await fetch(`/api/sonic_fingerprint/generate`);
+                    const params = new URLSearchParams({ n: n });
+                    const response = await fetch(`/api/sonic_fingerprint/generate?${params}`);
                     const data = await response.json();
 
                     if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
