@@ -30,6 +30,7 @@ The **supported architecture** are:
 
 
 And now just some **NEWS:**
+> * Version 0.6.4-beta introdcue **Sonic Fingerprint** turn your listening history in a fingerprint to discover similar sonic songs.
 > * Version 0.6.3-beta introduce **Voyager index** for the similarity function. Raising the recall from 70-80% to 99% for 100 similar song. Also using less memory.
 > * Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
 > * From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
@@ -41,6 +42,7 @@ And now just some **NEWS:**
 - [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
 - [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
 - [Playlist from Similar song (via similarity Interface)](#playlist-from-similar-song-via-similarity-interface)
+- [Sonic Fingerprint playlist (via sonic_fingerprint Interface](#sonic-fingerprint-playlist-via-sonic_fingerprint-interface)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
 - [Hardware Requirements](#hardware-requirements)
 - [Configuration Parameters](#configuration-parameters)
@@ -303,6 +305,25 @@ This new functionality enable you to search the top N similar song that are simi
 4.  **Review and Create:**
     *   Input a name for the playlist and ask the interface to create it directly on Jellyfin or Navidrome. That's it!
 
+## **Sonic Fingerprint playlist (via sonic_fingerprint Interface)**
+
+**IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
+
+This new functionality analyze your listening history and create your specific sonic fingerprint. With it it takes advance of Voyager Index (the sonic similarity function) to search for similar songs. With this similar song it enable you to create your personal playlist.
+
+**How to Use:**
+1.  **Access the Chat Interface:**
+    *   Navigate to `http://<EXTERNAL-IP>:8000/sonic_fingerprint` (or `http://localhost:8000/sonic_fingerprint` for local Docker Compose deployments).
+2.  **Input Your Username**
+    *   It get by default your username configurde in env variable, but if you have multiple user you can input it in the front-end to a personalized playlist
+3.  **Input Your Password or API token**
+    *   On jellyfin you can still use your API Token, for Navidrome you will need to use the password of the specific user. By default it takes the value from the env variable
+4.  **Select the number of song**
+    *  Select the number of similar song, from a minimum of 40 to a maximum of 200
+5.  **Run the Sonic Fingerprint search**
+    *   Ask the front-end to generate the list of Sonic Fingerprint track, it will show to you in the table.
+6.  **Review and Create:**
+    *   Input a name for the playlist and ask the interface to create it directly on Jellyfin or Navidrome. That's it!
 
 ## **Kubernetes Deployment (K3S Example)**
 
