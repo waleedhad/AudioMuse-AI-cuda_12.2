@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="/static/menu.css">
     <style>
-        /* Add styles for the fingerprint form button to match the similarity page */
         #fingerprint-form button {
             flex-grow: 1;
             color: white;
@@ -50,7 +49,6 @@
 
                 <form id="fingerprint-form">
                     
-                    <!-- User Credentials Section -->
                     <fieldset>
                         <legend>Your Credentials</legend>
                         <p style="font-size: 0.875rem; color: #4B5563; margin-top: -0.5rem; margin-bottom: 1rem;">
@@ -59,8 +57,8 @@
                         <div class="param-group">
                             {% if mediaserver_type == 'jellyfin' %}
                             <div>
-                                <label for="jellyfin_user_id">Jellyfin User ID:</label>
-                                <input type="text" id="jellyfin_user_id" name="jellyfin_user_id" required placeholder="Find in Jellyfin Dashboard > Users">
+                                <label for="jellyfin_user_identifier">Jellyfin Username or User ID:</label>
+                                <input type="text" id="jellyfin_user_identifier" name="jellyfin_user_identifier" required placeholder="Enter Jellyfin Username or User ID">
                             </div>
                             <div>
                                 <label for="jellyfin_token">Jellyfin API Token:</label>
@@ -79,7 +77,6 @@
                         </div>
                     </fieldset>
 
-                    <!-- Generation Parameters -->
                      <fieldset>
                         <legend>Parameters</legend>
                         <div class="param-group">
@@ -129,32 +126,48 @@
 
             const fingerprintForm = document.getElementById('fingerprint-form');
             const playlistForm = document.getElementById('playlist-form');
+            const statusDiv = document.getElementById('status');
             const resultsContainer = document.getElementById('results-container');
             const playlistCreator = document.getElementById('playlist-creator');
-            const statusDiv = document.getElementById('status');
             const resultsTableWrapper = document.getElementById('results-table-wrapper');
             const playlistStatusDiv = document.getElementById('playlist-status');
 
-            // --- Main Form Submission ---
+            // --- NEW: Fetch and pre-populate default credentials on page load ---
+            window.addEventListener('DOMContentLoaded', async () => {
+                if (mediaserverType === 'jellyfin') {
+                    try {
+                        const response = await fetch('/api/config/jellyfin_defaults');
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.default_user_id) {
+                                document.getElementById('jellyfin_user_identifier').value = data.default_user_id;
+                            }
+                            if (data.default_token) {
+                                document.getElementById('jellyfin_token').value = data.default_token;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch Jellyfin default config:', error);
+                    }
+                }
+            });
+
             fingerprintForm.addEventListener('submit', async function (event) {
                 event.preventDefault();
 
-                const nInput = document.getElementById('n');
-                const n = parseInt(nInput.value, 10);
-                
+                const n = parseInt(document.getElementById('n').value, 10);
                 const params = new URLSearchParams({ n: n });
 
-                // Append credentials to params
                 if (mediaserverType === 'jellyfin') {
-                    const userId = document.getElementById('jellyfin_user_id').value;
+                    const identifier = document.getElementById('jellyfin_user_identifier').value;
                     const token = document.getElementById('jellyfin_token').value;
-                    if (!userId || !token) {
-                        statusDiv.textContent = 'Jellyfin User ID and Token are required.';
+                    if (!identifier || !token) {
+                        statusDiv.textContent = 'Jellyfin User Identifier and Token are required.';
                         statusDiv.className = 'status-error';
                         resultsContainer.classList.remove('hidden');
                         return;
                     }
-                    params.append('jellyfin_user_id', userId);
+                    params.append('jellyfin_user_identifier', identifier);
                     params.append('jellyfin_token', token);
                 } else if (mediaserverType === 'navidrome') {
                     const user = document.getElementById('navidrome_user').value;
@@ -167,16 +180,6 @@
                     }
                     params.append('navidrome_user', user);
                     params.append('navidrome_password', password);
-                }
-
-
-                if (n < 40) {
-                    statusDiv.textContent = 'Number of results must be at least 40.';
-                    statusDiv.className = 'status-error';
-                    resultsTableWrapper.innerHTML = '';
-                    playlistCreator.classList.add('hidden');
-                    resultsContainer.classList.remove('hidden');
-                    return;
                 }
 
                 resultsContainer.classList.remove('hidden');
@@ -192,54 +195,45 @@
                     if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
                     
                     if (data.length === 0) {
-                        statusDiv.textContent = 'Could not generate fingerprint. No recommendations found. Check your credentials and listening history.';
+                        statusDiv.textContent = 'Could not generate fingerprint. No recommendations found. Check credentials and listening history.';
                         statusDiv.className = 'status-error';
                         return;
                     }
 
                     currentTrackIds = data.map(track => track.item_id);
-
                     statusDiv.textContent = `Found ${data.length} recommended tracks.`;
                     const tableHTML = `
                         <table>
-                            <thead>
-                                <tr><th>Title</th><th>Artist</th><th>Distance</th></tr>
-                            </thead>
+                            <thead><tr><th>Title</th><th>Artist</th><th>Distance</th></tr></thead>
                             <tbody>
                                 ${data.map(track => `
                                     <tr>
                                         <td>${track.title || 'N/A'}</td>
                                         <td>${track.author || 'N/A'}</td>
                                         <td>${track.distance.toFixed(4)}</td>
-                                    </tr>
-                                `).join('')}
+                                    </tr>`).join('')}
                             </tbody>
                         </table>`;
                     resultsTableWrapper.innerHTML = tableHTML;
                     playlistCreator.classList.remove('hidden');
                     playlistStatusDiv.textContent = '';
                     document.getElementById('playlist_name').value = 'My Sonic Fingerprint Mix';
-
                 } catch (error) {
                     statusDiv.textContent = `Error: ${error.message}`;
                     statusDiv.className = 'status-error';
-                    console.error('Fetch error:', error);
                 }
             });
 
-            // --- Playlist Creation ---
             playlistForm.addEventListener('submit', async function (event) {
                 event.preventDefault();
                 const playlistName = document.getElementById('playlist_name').value;
-                
-                playlistStatusDiv.className = '';
                 if (!playlistName) {
                     playlistStatusDiv.textContent = 'Please enter a playlist name.';
                     playlistStatusDiv.className = 'status-error';
                     return;
                 }
                 if (currentTrackIds.length === 0) {
-                    playlistStatusDiv.textContent = 'No tracks to add. Please generate a fingerprint first.';
+                    playlistStatusDiv.textContent = 'No tracks to add. Generate a fingerprint first.';
                     playlistStatusDiv.className = 'status-error';
                     return;
                 }
@@ -250,9 +244,8 @@
                     user_creds: {}
                 };
 
-                // Add credentials to payload for the create_playlist API call
                 if (mediaserverType === 'jellyfin') {
-                    payload.user_creds.user_id = document.getElementById('jellyfin_user_id').value;
+                    payload.user_creds.user_identifier = document.getElementById('jellyfin_user_identifier').value;
                     payload.user_creds.token = document.getElementById('jellyfin_token').value;
                 } else if (mediaserverType === 'navidrome') {
                     payload.user_creds.user = document.getElementById('navidrome_user').value;
@@ -262,7 +255,6 @@
                 playlistStatusDiv.textContent = 'Creating playlist...';
                 
                 try {
-                    // NOTE: This assumes /api/create_playlist is updated to handle `user_creds` in its JSON body.
                     const response = await fetch('/api/create_playlist', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -275,7 +267,6 @@
                 } catch (error) {
                     playlistStatusDiv.textContent = `Error: ${error.message}`;
                     playlistStatusDiv.className = 'status-error';
-                    console.error('Playlist creation error:', error);
                 }
             });
         })();
