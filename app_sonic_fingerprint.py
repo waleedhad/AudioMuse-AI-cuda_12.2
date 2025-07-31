@@ -5,7 +5,7 @@ import logging
 from tasks.sonic_fingerprint_manager import generate_sonic_fingerprint
 from tasks.mediaserver import resolve_jellyfin_user # Import the new resolver function
 from app import get_score_data_by_ids
-from config import MEDIASERVER_TYPE, JELLYFIN_USER_ID, JELLYFIN_TOKEN # Import configs
+from config import MEDIASERVER_TYPE, JELLYFIN_USER_ID, JELLYFIN_TOKEN, NAVIDROME_USER, NAVIDROME_PASSWORD # Import configs
 
 logger = logging.getLogger(__name__)
 
@@ -34,33 +34,31 @@ def sonic_fingerprint_page():
          logger.error(f"Error rendering sonic_fingerprint.html: {e}", exc_info=True)
          return "Sonic Fingerprint page not implemented yet. Use the API at /api/sonic_fingerprint/generate"
 
-@sonic_fingerprint_bp.route('/api/config/jellyfin_defaults', methods=['GET'])
-def get_jellyfin_defaults():
+@sonic_fingerprint_bp.route('/api/config/defaults', methods=['GET'])
+def get_media_server_defaults():
     """
-    Provides default Jellyfin credentials from the server configuration.
+    Provides default credentials from the server configuration based on the media server type.
     This is intended for trusted network environments to pre-populate frontend forms.
     ---
     tags:
       - Configuration
     responses:
       200:
-        description: A JSON object with default user ID and token.
+        description: A JSON object with default credentials for the configured media server.
         content:
           application/json:
             schema:
               type: object
-              properties:
-                default_user_id:
-                  type: string
-                  description: The default Jellyfin User ID from the server config.
-                default_token:
-                  type: string
-                  description: The default Jellyfin API Token from the server config.
     """
     if MEDIASERVER_TYPE == 'jellyfin':
         return jsonify({
             "default_user_id": JELLYFIN_USER_ID,
             "default_token": JELLYFIN_TOKEN
+        })
+    elif MEDIASERVER_TYPE == 'navidrome':
+        return jsonify({
+            "default_user": NAVIDROME_USER,
+            "default_password": NAVIDROME_PASSWORD
         })
     return jsonify({})
 

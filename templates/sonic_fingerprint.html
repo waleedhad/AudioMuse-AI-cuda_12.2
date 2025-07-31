@@ -132,23 +132,31 @@
             const resultsTableWrapper = document.getElementById('results-table-wrapper');
             const playlistStatusDiv = document.getElementById('playlist-status');
 
-            // --- NEW: Fetch and pre-populate default credentials on page load ---
+            // --- Fetch and pre-populate default credentials on page load ---
             window.addEventListener('DOMContentLoaded', async () => {
-                if (mediaserverType === 'jellyfin') {
-                    try {
-                        const response = await fetch('/api/config/jellyfin_defaults');
-                        if (response.ok) {
-                            const data = await response.json();
-                            if (data.default_user_id) {
-                                document.getElementById('jellyfin_user_identifier').value = data.default_user_id;
-                            }
-                            if (data.default_token) {
-                                document.getElementById('jellyfin_token').value = data.default_token;
-                            }
+                try {
+                    const response = await fetch('/api/config/defaults');
+                    if (!response.ok) return;
+                    
+                    const data = await response.json();
+
+                    if (mediaserverType === 'jellyfin') {
+                        if (data.default_user_id) {
+                            document.getElementById('jellyfin_user_identifier').value = data.default_user_id;
                         }
-                    } catch (error) {
-                        console.error('Failed to fetch Jellyfin default config:', error);
+                        if (data.default_token) {
+                            document.getElementById('jellyfin_token').value = data.default_token;
+                        }
+                    } else if (mediaserverType === 'navidrome') {
+                        if (data.default_user) {
+                            document.getElementById('navidrome_user').value = data.default_user;
+                        }
+                        if (data.default_password) {
+                            document.getElementById('navidrome_password').value = data.default_password;
+                        }
                     }
+                } catch (error) {
+                    console.error('Failed to fetch default config:', error);
                 }
             });
 
