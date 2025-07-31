@@ -2,14 +2,14 @@ import logging
 import numpy as np
 from datetime import datetime, timezone
 
-from config import SONIC_FINGERPRINT_TOP_N_SONGS, SONIC_FINGERPRINT_NEIGHBORS, EMBEDDING_DIMENSION
+from config import SONIC_FINGERPRINT_TOP_N_SONGS, SONIC_FINGERPRINT_NEIGHBORS
 from .mediaserver import get_top_played_songs, get_last_played_time
 from .voyager_manager import find_nearest_neighbors_by_vector
 from app import get_tracks_by_ids
 
 logger = logging.getLogger(__name__)
 
-def generate_sonic_fingerprint(num_neighbors=None):
+def generate_sonic_fingerprint(num_neighbors=None, user_creds=None):
     """
     Generates a 'sonic fingerprint' by averaging the embeddings of the most played songs,
     weighted by recency, and then finds similar songs to this fingerprint.
@@ -18,6 +18,9 @@ def generate_sonic_fingerprint(num_neighbors=None):
     Args:
         num_neighbors (int, optional): The total number of desired tracks in the final playlist.
                                        If None, defaults to SONIC_FINGERPRINT_NEIGHBORS from config.
+        user_creds (dict, optional): A dictionary containing user-specific credentials.
+                                     For Jellyfin: {'user_id': '...', 'token': '...'}
+                                     For Navidrome: {'user': '...', 'password': '...'}
     """
     logger.info("Generating sonic fingerprint...")
 
@@ -25,8 +28,8 @@ def generate_sonic_fingerprint(num_neighbors=None):
     total_desired_size = num_neighbors if num_neighbors is not None else SONIC_FINGERPRINT_NEIGHBORS
     logger.info(f"Targeting a total playlist size of {total_desired_size}.")
 
-    # 1. Get top N played songs from the media server (using config for the seed songs)
-    top_songs = get_top_played_songs(limit=SONIC_FINGERPRINT_TOP_N_SONGS)
+    # 1. Get top N played songs from the media server, passing user credentials
+    top_songs = get_top_played_songs(limit=SONIC_FINGERPRINT_TOP_N_SONGS, user_creds=user_creds)
     if not top_songs:
         logger.warning("No top played songs found. Cannot generate sonic fingerprint.")
         return []
@@ -54,7 +57,8 @@ def generate_sonic_fingerprint(num_neighbors=None):
 
         embedding_vector = embeddings_map[song_id]
         
-        last_played_str = get_last_played_time(song_id)
+        # Pass user credentials to get last played time
+        last_played_str = get_last_played_time(song_id, user_creds=user_creds)
         
         weight = 1.0
         days_since_played = "N/A"

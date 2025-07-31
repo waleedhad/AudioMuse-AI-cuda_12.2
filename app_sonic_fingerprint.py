@@ -4,7 +4,7 @@ import logging
 
 from tasks.sonic_fingerprint_manager import generate_sonic_fingerprint
 from app import get_score_data_by_ids
-from config import SONIC_FINGERPRINT_NEIGHBORS
+from config import MEDIASERVER_TYPE # Import MEDIASERVER_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,10 @@ def sonic_fingerprint_page():
               type: string
     """
     try:
-        return render_template('sonic_fingerprint.html')
+        # Pass the media server type to the template
+        return render_template('sonic_fingerprint.html', mediaserver_type=MEDIASERVER_TYPE)
     except Exception as e:
+         logger.error(f"Error rendering sonic_fingerprint.html: {e}", exc_info=True)
          return "Sonic Fingerprint page not implemented yet. Use the API at /api/sonic_fingerprint/generate"
 
 
@@ -46,33 +48,55 @@ def generate_sonic_fingerprint_endpoint():
         type: integer
         required: false
         description: The number of results to return. Overrides the server default.
+      - name: jellyfin_user_id
+        in: query
+        type: string
+        required: false
+        description: The Jellyfin User ID (required if media server is Jellyfin).
+      - name: jellyfin_token
+        in: query
+        type: string
+        required: false
+        description: The Jellyfin API Token (required if media server is Jellyfin).
+      - name: navidrome_user
+        in: query
+        type: string
+        required: false
+        description: The Navidrome username (required if media server is Navidrome).
+      - name: navidrome_password
+        in: query
+        type: string
+        required: false
+        description: The Navidrome password (required if media server is Navidrome).
     responses:
       200:
         description: A list of recommended tracks based on the sonic fingerprint.
-        content:
-          application/json:
-            schema:
-              type: array
-              items:
-                type: object
-                properties:
-                  item_id:
-                    type: string
-                  title:
-                    type: string
-                  author:
-                    type: string
-                  distance:
-                    type: number
+      400:
+        description: Bad Request - Missing necessary credentials for the configured media server.
       500:
         description: Server error during generation.
     """
     try:
-        # Get the number of results from the query parameter, default to None to use the config value
         num_results = request.args.get('n', type=int)
-
-        # The manager function does all the heavy lifting
-        fingerprint_results = generate_sonic_fingerprint(num_neighbors=num_results)
+        
+        # --- Extract user credentials from request ---
+        user_creds = {}
+        if MEDIASERVER_TYPE == 'jellyfin':
+            user_creds['user_id'] = request.args.get('jellyfin_user_id')
+            user_creds['token'] = request.args.get('jellyfin_token')
+            if not user_creds['user_id'] or not user_creds['token']:
+                return jsonify({"error": "Jellyfin User ID and API Token are required."}), 400
+        elif MEDIASERVER_TYPE == 'navidrome':
+            user_creds['user'] = request.args.get('navidrome_user')
+            user_creds['password'] = request.args.get('navidrome_password')
+            if not user_creds['user'] or not user_creds['password']:
+                return jsonify({"error": "Navidrome username and password are required."}), 400
+        
+        # The manager function now accepts user credentials
+        fingerprint_results = generate_sonic_fingerprint(
+            num_neighbors=num_results,
+            user_creds=user_creds
+        )
 
         if not fingerprint_results:
             return jsonify([])

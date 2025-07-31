@@ -463,12 +463,14 @@ def search_tracks_by_title_and_artist(title_query: str, artist_query: str, limit
     return results
 
 
-def create_playlist_from_ids(playlist_name: str, track_ids: list):
+def create_playlist_from_ids(playlist_name: str, track_ids: list, user_creds: dict = None):
     """
-    Creates a new playlist on the configured media server with the provided name and track IDs.
+    Creates a new playlist on the configured media server with the provided name and track IDs,
+    using the provided user credentials.
     """
     try:
-        created_playlist = create_instant_playlist(playlist_name, track_ids)
+        # Pass the user_creds down to the mediaserver function
+        created_playlist = create_instant_playlist(playlist_name, track_ids, user_creds=user_creds)
         
         if not created_playlist:
             raise Exception("Playlist creation failed. The media server did not return a playlist object.")

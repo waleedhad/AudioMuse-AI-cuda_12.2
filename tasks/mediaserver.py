@@ -15,66 +15,43 @@ REQUESTS_TIMEOUT = 300
 # JELLYFIN IMPLEMENTATION
 # ##############################################################################
 
+# --- ADMIN/GLOBAL JELLYFIN FUNCTIONS ---
 def _jellyfin_get_recent_albums(limit):
     """
     Fetches a list of the most recently added albums from Jellyfin using pagination.
-    If limit is 0, it fetches all albums.
-    If limit > 0, it fetches up to the specified limit.
+    Uses global admin credentials.
     """
     all_albums = []
     start_index = 0
-    page_size = 500  # The number of items to request per page
+    page_size = 500
     fetch_all = (limit == 0)
 
     while fetch_all or len(all_albums) < limit:
-        # Determine how many items to fetch in the current request
-        size_to_fetch = page_size
-        if not fetch_all:
-            size_to_fetch = min(page_size, limit - len(all_albums))
-
-        if size_to_fetch <= 0:
-            break
+        size_to_fetch = page_size if fetch_all else min(page_size, limit - len(all_albums))
+        if size_to_fetch <= 0: break
 
         url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
         params = {
-            "IncludeItemTypes": "MusicAlbum",
-            "SortBy": "DateCreated",
-            "SortOrder": "Descending",
-            "Recursive": True,
-            "Limit": size_to_fetch,
-            "StartIndex": start_index
+            "IncludeItemTypes": "MusicAlbum", "SortBy": "DateCreated", "SortOrder": "Descending",
+            "Recursive": True, "Limit": size_to_fetch, "StartIndex": start_index
         }
-        
         try:
             r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
             r.raise_for_status()
             response_data = r.json()
             albums = response_data.get("Items", [])
-            
-            if not albums:
-                # No more albums to fetch, break the loop
-                break
-
+            if not albums: break
             all_albums.extend(albums)
             start_index += len(albums)
-
-            # If the number of returned albums is less than requested, it's the last page
-            if len(albums) < size_to_fetch:
-                break
-            
-            # If fetching all, check if we have reached the total record count
-            if fetch_all and start_index >= response_data.get("TotalRecordCount", float('inf')):
-                 break
-
+            if len(albums) < size_to_fetch: break
+            if fetch_all and start_index >= response_data.get("TotalRecordCount", float('inf')): break
         except Exception as e:
             logger.error(f"Jellyfin get_recent_albums failed during pagination: {e}", exc_info=True)
-            # Exit loop on any request error
             break
-
     return all_albums
 
 def _jellyfin_get_tracks_from_album(album_id):
-    """Fetches all audio tracks for a given album ID from Jellyfin."""
+    """Fetches all audio tracks for a given album ID from Jellyfin using admin credentials."""
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"ParentId": album_id, "IncludeItemTypes": "Audio"}
     try:
@@ -86,27 +63,24 @@ def _jellyfin_get_tracks_from_album(album_id):
         return []
 
 def _jellyfin_download_track(temp_dir, item):
-    """Downloads a single track from Jellyfin."""
+    """Downloads a single track from Jellyfin using admin credentials."""
     try:
         track_id = item['Id']
         file_extension = os.path.splitext(item.get('Path', ''))[1] or '.tmp'
         download_url = f"{config.JELLYFIN_URL}/Items/{track_id}/Download"
         local_filename = os.path.join(temp_dir, f"{track_id}{file_extension}")
-
         with requests.get(download_url, headers=config.HEADERS, stream=True, timeout=REQUESTS_TIMEOUT) as r:
             r.raise_for_status()
             with open(local_filename, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
         logger.info(f"Downloaded '{item['Name']}' to '{local_filename}'")
         return local_filename
     except Exception as e:
         logger.error(f"Failed to download track {item.get('Name', 'Unknown')}: {e}", exc_info=True)
         return None
 
-
 def _jellyfin_get_all_songs():
-    """Fetches all songs from Jellyfin."""
+    """Fetches all songs from Jellyfin using admin credentials."""
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "Audio", "Recursive": True}
     try:
@@ -118,7 +92,7 @@ def _jellyfin_get_all_songs():
         return []
 
 def _jellyfin_get_playlist_by_name(playlist_name):
-    """Finds a Jellyfin playlist by its exact name."""
+    """Finds a Jellyfin playlist by its exact name using admin credentials."""
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "Playlist", "Recursive": True, "Name": playlist_name}
     try:
@@ -131,7 +105,7 @@ def _jellyfin_get_playlist_by_name(playlist_name):
         return None
 
 def _jellyfin_create_playlist(base_name, item_ids):
-    """Creates a new playlist on Jellyfin."""
+    """Creates a new playlist on Jellyfin using admin credentials."""
     url = f"{config.JELLYFIN_URL}/Playlists"
     body = {"Name": base_name, "Ids": item_ids, "UserId": config.JELLYFIN_USER_ID}
     try:
@@ -141,23 +115,8 @@ def _jellyfin_create_playlist(base_name, item_ids):
     except Exception as e:
         logger.error("Exception creating Jellyfin playlist '%s': %s", base_name, e, exc_info=True)
 
-def _jellyfin_create_instant_playlist(playlist_name, item_ids):
-    """Creates a new instant playlist on Jellyfin and returns the response object."""
-    final_playlist_name = f"{playlist_name.strip()}_instant"
-    url = f"{config.JELLYFIN_URL}/Playlists"
-    body = {"Name": final_playlist_name, "Ids": item_ids, "UserId": config.JELLYFIN_USER_ID}
-    try:
-        r = requests.post(url, headers=config.HEADERS, json=body, timeout=REQUESTS_TIMEOUT)
-        r.raise_for_status()
-        created_playlist = r.json()
-        logger.info("✅ Created Jellyfin instant playlist '%s' with ID: %s", final_playlist_name, created_playlist.get('Id'))
-        return created_playlist
-    except Exception as e:
-        logger.error("Exception creating Jellyfin instant playlist '%s': %s", playlist_name, e, exc_info=True)
-        return None
-
 def _jellyfin_get_all_playlists():
-    """Fetches all playlists from Jellyfin."""
+    """Fetches all playlists from Jellyfin using admin credentials."""
     url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
     params = {"IncludeItemTypes": "Playlist", "Recursive": True}
     try:
@@ -169,7 +128,7 @@ def _jellyfin_get_all_playlists():
         return []
 
 def _jellyfin_delete_playlist(playlist_id):
-    """Deletes a playlist on Jellyfin."""
+    """Deletes a playlist on Jellyfin using admin credentials."""
     url = f"{config.JELLYFIN_URL}/Items/{playlist_id}"
     try:
         r = requests.delete(url, headers=config.HEADERS, timeout=REQUESTS_TIMEOUT)
@@ -180,120 +139,106 @@ def _jellyfin_delete_playlist(playlist_id):
         logger.error(f"Exception deleting Jellyfin playlist ID {playlist_id}: {e}", exc_info=True)
         return False
 
-def _jellyfin_get_top_played_songs(limit):
-    """Fetches the top N most played songs from Jellyfin."""
-    url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items"
+# --- USER-SPECIFIC JELLYFIN FUNCTIONS ---
+def _jellyfin_get_top_played_songs(limit, user_id, token):
+    """Fetches the top N most played songs from Jellyfin for a specific user."""
+    url = f"{config.JELLYFIN_URL}/Users/{user_id}/Items"
+    headers = {"X-Emby-Token": token}
     params = {
-        "IncludeItemTypes": "Audio",
-        "SortBy": "PlayCount",
-        "SortOrder": "Descending",
-        "Recursive": True,
-        "Limit": limit,
-        "Fields": "UserData,Path"  # Request UserData to get PlayCount and LastPlayedDate
+        "IncludeItemTypes": "Audio", "SortBy": "PlayCount", "SortOrder": "Descending",
+        "Recursive": True, "Limit": limit, "Fields": "UserData,Path"
     }
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
+        r = requests.get(url, headers=headers, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
-        items = r.json().get("Items", [])
-        return items
+        return r.json().get("Items", [])
     except Exception as e:
-        logger.error(f"Jellyfin get_top_played_songs failed: {e}", exc_info=True)
+        logger.error(f"Jellyfin get_top_played_songs failed for user {user_id}: {e}", exc_info=True)
         return []
 
-def _jellyfin_get_last_played_time(item_id):
-    """Fetches the last played time for a specific track from Jellyfin."""
-    url = f"{config.JELLYFIN_URL}/Users/{config.JELLYFIN_USER_ID}/Items/{item_id}"
+def _jellyfin_get_last_played_time(item_id, user_id, token):
+    """Fetches the last played time for a specific track from Jellyfin for a specific user."""
+    url = f"{config.JELLYFIN_URL}/Users/{user_id}/Items/{item_id}"
+    headers = {"X-Emby-Token": token}
     params = {"Fields": "UserData"}
     try:
-        r = requests.get(url, headers=config.HEADERS, params=params, timeout=REQUESTS_TIMEOUT)
+        r = requests.get(url, headers=headers, params=params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
-        user_data = r.json().get("UserData", {})
-        return user_data.get("LastPlayedDate") # Returns a string like "2024-01-15T18:30:00.0000000Z" or None
+        return r.json().get("UserData", {}).get("LastPlayedDate")
     except Exception as e:
-        logger.error(f"Jellyfin get_last_played_time failed for item {item_id}: {e}", exc_info=True)
+        logger.error(f"Jellyfin get_last_played_time failed for item {item_id}, user {user_id}: {e}", exc_info=True)
+        return None
+
+def _jellyfin_create_instant_playlist(playlist_name, item_ids, user_id, token):
+    """Creates a new instant playlist on Jellyfin for a specific user."""
+    final_playlist_name = f"{playlist_name.strip()}_instant"
+    url = f"{config.JELLYFIN_URL}/Playlists"
+    headers = {"X-Emby-Token": token}
+    body = {"Name": final_playlist_name, "Ids": item_ids, "UserId": user_id}
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=REQUESTS_TIMEOUT)
+        r.raise_for_status()
+        created_playlist = r.json()
+        logger.info("✅ Created Jellyfin instant playlist '%s' for user %s", final_playlist_name, user_id)
+        return created_playlist
+    except Exception as e:
+        logger.error("Exception creating Jellyfin instant playlist '%s' for user %s: %s", playlist_name, user_id, e, exc_info=True)
         return None
 
 # ##############################################################################
 # NAVIDROME (SUBSONIC API) IMPLEMENTATION
 # ##############################################################################
 
-def get_navidrome_auth_params():
-    """
-    Generates authentication parameters for the Navidrome (Subsonic) API.
-    Navidrome does not support client-side password hashing (like md5 or pbkdf2)
-    due to its use of secure Argon2 password hashing on the server.
-    The correct method for password-based auth is to send the password hex-encoded.
-    Returns a dictionary of parameters required for every Navidrome API call.
-    """
-    if not config.NAVIDROME_PASSWORD or not config.NAVIDROME_USER:
-        logger.warning("Navidrome User or Password is not configured in environment variables.")
+def get_navidrome_auth_params(username=None, password=None):
+    """Generates Navidrome auth params, using provided creds or falling back to global config."""
+    auth_user = username or config.NAVIDROME_USER
+    auth_pass = password or config.NAVIDROME_PASSWORD
+    if not auth_user or not auth_pass:
+        logger.warning("Navidrome User or Password is not configured.")
         return {}
-    
-    # Hex-encode the password. This is the method Navidrome supports for password auth.
-    hex_encoded_password = config.NAVIDROME_PASSWORD.encode('utf-8').hex()
-    
-    return {
-        "u": config.NAVIDROME_USER,
-        "p": f"enc:{hex_encoded_password}", # The 'enc:' prefix is required by the Subsonic API
-        "v": "1.16.1",
-        "c": config.APP_VERSION,
-        "f": "json"
-    }
+    hex_encoded_password = auth_pass.encode('utf-8').hex()
+    return {"u": auth_user, "p": f"enc:{hex_encoded_password}", "v": "1.16.1", "c": config.APP_VERSION, "f": "json"}
 
-def _navidrome_request(endpoint, params=None, method='get', stream=False):
-    """Helper function to make requests to the Navidrome API."""
-    if params is None:
-        params = {}
-    
-    auth_params = get_navidrome_auth_params()
+def _navidrome_request(endpoint, params=None, method='get', stream=False, user_creds=None):
+    """Helper to make Navidrome API requests using specific or global user credentials."""
+    params = params or {}
+    auth_params = get_navidrome_auth_params(
+        username=user_creds.get('user') if user_creds else None,
+        password=user_creds.get('password') if user_creds else None
+    )
     if not auth_params:
-        logger.error("Navidrome credentials are not configured. Cannot make API call.")
+        logger.error("Navidrome credentials not configured. Cannot make API call.")
         return None
-
     url = f"{config.NAVIDROME_URL}/rest/{endpoint}.view"
     all_params = {**auth_params, **params}
-
     try:
         if method.lower() == 'get':
             r = requests.get(url, params=all_params, timeout=REQUESTS_TIMEOUT, stream=stream)
-        elif method.lower() == 'post':
-            r = requests.post(url, params=all_params, timeout=REQUESTS_TIMEOUT)
         else:
-            logger.error(f"Unsupported HTTP method: {method}")
-            return None
-            
+            r = requests.post(url, params=all_params, timeout=REQUESTS_TIMEOUT)
         r.raise_for_status()
-        if stream:
-            return r
-        
-        response_data = r.json()
-        
-        subsonic_response = response_data.get("subsonic-response", {})
+        if stream: return r
+        subsonic_response = r.json().get("subsonic-response", {})
         if subsonic_response.get("status") == "failed":
             error = subsonic_response.get("error", {})
-            logger.error(f"Navidrome API Error on endpoint '{endpoint}': {error.get('message')} (Code: {error.get('code')})")
+            logger.error(f"Navidrome API Error on '{endpoint}': {error.get('message')} (Code: {error.get('code')})")
             return None
-            
         return subsonic_response
-        
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling Navidrome API endpoint '{endpoint}': {e}", exc_info=True)
         return None
 
+# --- ADMIN/GLOBAL NAVIDROME FUNCTIONS ---
 def _navidrome_download_track(temp_dir, item):
-    """Downloads a single track from Navidrome."""
+    """Downloads a single track from Navidrome using admin credentials."""
     try:
-        # Use 'id' (original key) for the API call, not the normalized 'Id'
-        track_id = item['id'] 
+        track_id = item['id']
         file_extension = os.path.splitext(item.get('path', ''))[1] or '.tmp'
         local_filename = os.path.join(temp_dir, f"{track_id}{file_extension}")
-        
-        # Navidrome uses the 'stream' endpoint for downloads
         response = _navidrome_request("stream", params={"id": track_id}, stream=True)
         if response:
             with open(local_filename, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
             logger.info(f"Downloaded '{item.get('title', 'Unknown')}' to '{local_filename}'")
             return local_filename
     except Exception as e:
@@ -301,66 +246,29 @@ def _navidrome_download_track(temp_dir, item):
     return None
 
 def _navidrome_get_recent_albums(limit):
-    """
-    Fetches a list of the most recently added albums from Navidrome.
-    If limit is 0, it fetches all albums by paginating.
-    If limit > 0, it fetches up to the specified limit, handling pagination if necessary.
-    """
+    """Fetches a list of the most recently added albums from Navidrome using admin credentials."""
     all_albums = []
     offset = 0
-    page_size = 500  # Max size per Subsonic API request
+    page_size = 500
     fetch_all = (limit == 0)
-
     while fetch_all or len(all_albums) < limit:
-        # Determine the size for the current page request
-        size_to_fetch = page_size
-        if not fetch_all:
-            size_to_fetch = min(page_size, limit - len(all_albums))
-
-        if size_to_fetch <= 0:
-            break
-
+        size_to_fetch = page_size if fetch_all else min(page_size, limit - len(all_albums))
+        if size_to_fetch <= 0: break
         params = {"type": "newest", "size": size_to_fetch, "offset": offset}
         response = _navidrome_request("getAlbumList2", params)
-
         if response and "albumList2" in response and "album" in response["albumList2"]:
             albums = response["albumList2"]["album"]
-            if not albums:
-                break  # No more albums to fetch
-
+            if not albums: break
             all_albums.extend([{**a, 'Id': a.get('id'), 'Name': a.get('name')} for a in albums])
             offset += len(albums)
-
-            if len(albums) < size_to_fetch:
-                break # This was the last page
+            if len(albums) < size_to_fetch: break
         else:
             logger.error("Failed to fetch recent albums page from Navidrome.")
             break
-            
     return all_albums
 
-def _navidrome_get_tracks_from_album(album_id):
-    """
-    Fetches all audio tracks for a given album ID from Navidrome and
-    normalizes the keys to match Jellyfin's format for compatibility.
-    """
-    params = {"id": album_id}
-    response = _navidrome_request("getAlbum", params)
-    if response and "album" in response and "song" in response["album"]:
-        songs = response["album"]["song"]
-        # Normalize keys to match Jellyfin ('Id', 'Name', etc.)
-        return [{
-            **s,
-            'Id': s.get('id'),
-            'Name': s.get('title'),
-            'AlbumArtist': s.get('artist'),
-            'Path': s.get('path')
-        } for s in songs]
-    return []
-
 def _navidrome_get_all_songs():
-    """Fetches all songs from Navidrome using the search3 endpoint."""
-    logger.warning("Fetching all songs from Navidrome. This may be slow for large libraries.")
+    """Fetches all songs from Navidrome using admin credentials."""
     all_songs = []
     offset = 0
     limit = 500
@@ -369,132 +277,92 @@ def _navidrome_get_all_songs():
         response = _navidrome_request("search3", params)
         if response and "searchResult3" in response and "song" in response["searchResult3"]:
             songs = response["searchResult3"]["song"]
-            if not songs:
-                break
-            # Normalize keys to match Jellyfin's output
-            all_songs.extend([{
-                **s,
-                'Id': s.get('id'),
-                'Name': s.get('title'),
-                'AlbumArtist': s.get('artist'),
-                'Path': s.get('path')
-            } for s in songs])
+            if not songs: break
+            all_songs.extend([{'Id': s.get('id'), 'Name': s.get('title'), 'AlbumArtist': s.get('artist'), 'Path': s.get('path')} for s in songs])
             offset += len(songs)
-            if len(songs) < limit:
-                break
+            if len(songs) < limit: break
         else:
-            logger.error("Failed to fetch songs using search3. The Navidrome server may not support this method for fetching all songs.")
+            logger.error("Failed to fetch all songs from Navidrome.")
             break
     return all_songs
 
-def _navidrome_get_playlist_by_name(playlist_name):
-    """Finds a Navidrome playlist by its exact name."""
-    response = _navidrome_request("getPlaylists")
-    if response and "playlists" in response and "playlist" in response["playlists"]:
-        for playlist in response["playlists"]["playlist"]:
-            if playlist.get("name") == playlist_name:
-                playlist_details_response = _navidrome_request("getPlaylist", {"id": playlist["id"]})
-                if playlist_details_response and "playlist" in playlist_details_response:
-                    # Normalize the playlist object
-                    p = playlist_details_response["playlist"]
-                    return {**p, 'Id': p.get('id'), 'Name': p.get('name')}
-    return None
-
 def _navidrome_create_playlist(base_name, item_ids):
-    """Creates a new playlist on Navidrome."""
+    """Creates a new playlist on Navidrome using admin credentials."""
     params = {"name": base_name, "songId": item_ids}
     response = _navidrome_request("createPlaylist", params, method='post')
     if response and response.get("status") == "ok":
-        logger.info("✅ Created Navidrome playlist '%s' with %s tracks", base_name, len(item_ids))
+        logger.info("✅ Created Navidrome playlist '%s'", base_name)
     else:
         logger.error("Failed to create playlist '%s' on Navidrome", base_name)
 
-def _navidrome_create_instant_playlist(playlist_name, item_ids):
-    """Creates a new instant playlist on Navidrome and returns it."""
-    final_playlist_name = f"{playlist_name.strip()}_instant"
-    params = {"name": final_playlist_name, "songId": item_ids}
-    response = _navidrome_request("createPlaylist", params, method='post')
-    
-    if response and response.get("status") == "ok":
-        logger.info("✅ Created playlist '%s' on Navidrome. Now fetching its details.", final_playlist_name)
-        return _navidrome_get_playlist_by_name(final_playlist_name)
-    else:
-        logger.error("Failed to create instant playlist '%s' on Navidrome", final_playlist_name)
-        return None
-
 def _navidrome_get_all_playlists():
-    """Fetches all playlists from Navidrome."""
+    """Fetches all playlists from Navidrome using admin credentials."""
     response = _navidrome_request("getPlaylists")
     if response and "playlists" in response and "playlist" in response["playlists"]:
-        playlists = response["playlists"]["playlist"]
-        # Normalize keys
-        return [{**p, 'Id': p.get('id'), 'Name': p.get('name')} for p in playlists]
+        return [{**p, 'Id': p.get('id'), 'Name': p.get('name')} for p in response["playlists"]["playlist"]]
     return []
 
 def _navidrome_delete_playlist(playlist_id):
-    """Deletes a playlist on Navidrome."""
-    params = {"id": playlist_id}
-    response = _navidrome_request("deletePlaylist", params, method='post')
+    """Deletes a playlist on Navidrome using admin credentials."""
+    response = _navidrome_request("deletePlaylist", {"id": playlist_id}, method='post')
     if response and response.get("status") == "ok":
         logger.info(f"🗑️ Deleted Navidrome playlist ID: {playlist_id}")
         return True
-    else:
-        logger.error(f"Failed to delete playlist ID '{playlist_id}' on Navidrome")
-        return False
+    logger.error(f"Failed to delete playlist ID '{playlist_id}' on Navidrome")
+    return False
 
-def _navidrome_get_top_played_songs(limit):
-    """
-    Fetches the top N most played songs from Navidrome.
-    This is an approximation. It gets the most frequently played albums, collects all
-    their songs, and then takes a random sample to avoid bias towards the first album.
-    """
-    logger.info(f"Fetching top played songs from Navidrome by getting frequently played albums (target song count: {limit}).")
+# --- USER-SPECIFIC NAVIDROME FUNCTIONS ---
+def _navidrome_get_tracks_from_album(album_id, user_creds=None):
+    """Fetches all audio tracks for an album. Uses specific user_creds if provided."""
+    params = {"id": album_id}
+    response = _navidrome_request("getAlbum", params, user_creds=user_creds)
+    if response and "album" in response and "song" in response["album"]:
+        songs = response["album"]["song"]
+        return [{**s, 'Id': s.get('id'), 'Name': s.get('title'), 'AlbumArtist': s.get('artist'), 'Path': s.get('path')} for s in songs]
+    return []
+
+def _navidrome_get_playlist_by_name(playlist_name, user_creds=None):
+    """Finds a Navidrome playlist by name. Uses specific user_creds if provided."""
+    response = _navidrome_request("getPlaylists", user_creds=user_creds)
+    if response and "playlists" in response and "playlist" in response["playlists"]:
+        for playlist in response["playlists"]["playlist"]:
+            if playlist.get("name") == playlist_name:
+                details_resp = _navidrome_request("getPlaylist", {"id": playlist["id"]}, user_creds=user_creds)
+                if details_resp and "playlist" in details_resp:
+                    p = details_resp["playlist"]
+                    return {**p, 'Id': p.get('id'), 'Name': p.get('name')}
+    return None
+
+def _navidrome_get_top_played_songs(limit, user_creds):
+    """Fetches the top N most played songs from Navidrome for a specific user."""
+    logger.info(f"Fetching top played songs from Navidrome for user '{user_creds.get('user')}'")
     all_top_songs = []
-    
-    # We fetch a list of frequently played albums. The number of albums to fetch is a heuristic.
-    # We'll fetch enough albums to likely contain at least `limit` songs.
-    # Let's assume an average of 10 songs per album and add a buffer.
-    num_albums_to_fetch = (limit // 10) + 10 
-    
+    num_albums_to_fetch = (limit // 10) + 10
     params = {"type": "frequent", "size": num_albums_to_fetch}
-    response = _navidrome_request("getAlbumList2", params)
-    
+    response = _navidrome_request("getAlbumList2", params, user_creds=user_creds)
     if response and "albumList2" in response and "album" in response["albumList2"]:
-        frequent_albums = response["albumList2"]["album"]
-        logger.info(f"Found {len(frequent_albums)} frequently played albums.")
-        
-        # Collect all songs from all the fetched frequent albums first.
-        for album in frequent_albums:
-            album_id = album.get("id")
-            album_name = album.get("name", "Unknown Album")
-            logger.debug(f"Fetching tracks for frequently played album: '{album_name}' (ID: {album_id})")
-            
-            tracks = _navidrome_get_tracks_from_album(album_id)
-            if tracks:
-                all_top_songs.extend(tracks)
-        
-        if not all_top_songs:
-            logger.warning("Found frequently played albums, but could not retrieve any tracks from them.")
-
-    else:
-        logger.warning("Could not retrieve a list of frequently played albums from Navidrome. The server may not have enough play history.")
-
-    # If we have more songs than the limit, take a random sample. Otherwise, take all of them.
-    if len(all_top_songs) > limit:
-        final_songs = random.sample(all_top_songs, limit)
-    else:
-        final_songs = all_top_songs
-        
-    logger.info(f"Returning {len(final_songs)} top played songs based on album frequency.")
+        for album in response["albumList2"]["album"]:
+            tracks = _navidrome_get_tracks_from_album(album.get("id"), user_creds=user_creds)
+            if tracks: all_top_songs.extend(tracks)
+    final_songs = random.sample(all_top_songs, limit) if len(all_top_songs) > limit else all_top_songs
     return final_songs
 
-
-def _navidrome_get_last_played_time(item_id):
-    """Fetches the last played time for a specific track from Navidrome."""
-    params = {"id": item_id}
-    response = _navidrome_request("getSong", params)
+def _navidrome_get_last_played_time(item_id, user_creds):
+    """Fetches the last played time for a track for a specific user."""
+    response = _navidrome_request("getSong", {"id": item_id}, user_creds=user_creds)
     if response and "song" in response:
-        return response["song"].get("lastPlayed") # Returns a timestamp string like "2023-10-27T10:00:00Z" or None
+        return response["song"].get("lastPlayed")
+    return None
+
+def _navidrome_create_instant_playlist(playlist_name, item_ids, user_creds):
+    """Creates a new instant playlist on Navidrome for a specific user."""
+    final_playlist_name = f"{playlist_name.strip()}_instant"
+    params = {"name": final_playlist_name, "songId": item_ids}
+    response = _navidrome_request("createPlaylist", params, method='post', user_creds=user_creds)
+    if response and response.get("status") == "ok":
+        logger.info("✅ Created playlist '%s' for user '%s'", final_playlist_name, user_creds.get('user'))
+        return _navidrome_get_playlist_by_name(final_playlist_name, user_creds=user_creds)
+    logger.error("Failed to create instant playlist '%s' for user '%s'", final_playlist_name, user_creds.get('user'))
     return None
 
 # ##############################################################################
@@ -502,151 +370,89 @@ def _navidrome_get_last_played_time(item_id):
 # ##############################################################################
 
 def delete_automatic_playlists():
-    """
-    Finds and deletes all playlists ending with '_automatic' on the configured media server.
-    """
+    """Deletes all playlists ending with '_automatic' using admin credentials."""
     logger.info("Starting deletion of all '_automatic' playlists.")
     deleted_count = 0
     if config.MEDIASERVER_TYPE == 'jellyfin':
-        playlists = _jellyfin_get_all_playlists()
-        for playlist in playlists:
-            if playlist.get('Name', '').endswith('_automatic'):
-                #logger.info(f"Found Jellyfin playlist to delete: {playlist.get('Name')} (ID: {playlist.get('Id')})")
-                if _jellyfin_delete_playlist(playlist.get('Id')):
-                    deleted_count += 1
+        for p in _jellyfin_get_all_playlists():
+            if p.get('Name', '').endswith('_automatic') and _jellyfin_delete_playlist(p.get('Id')):
+                deleted_count += 1
     elif config.MEDIASERVER_TYPE == 'navidrome':
-        playlists = _navidrome_get_all_playlists()
-        for playlist in playlists:
-            # Use the normalized 'Name' and 'Id' keys
-            if playlist.get('Name', '').endswith('_automatic'):
-                logger.info(f"Found Navidrome playlist to delete: {playlist.get('Name')} (ID: {playlist.get('Id')})")
-                if _navidrome_delete_playlist(playlist.get('id')): # API still needs original 'id'
-                    deleted_count += 1
-    else:
-        logger.error(f"Unsupported media server type for automatic playlist deletion: {config.MEDIASERVER_TYPE}")
-    
-    logger.info(f"Finished deletion of '_automatic' playlists. Deleted {deleted_count} playlists.")
+        for p in _navidrome_get_all_playlists():
+            if p.get('Name', '').endswith('_automatic') and _navidrome_delete_playlist(p.get('id')):
+                deleted_count += 1
+    logger.info(f"Finished deletion. Deleted {deleted_count} playlists.")
 
 def get_recent_albums(limit):
-    """
-    Fetches a list of the most recently added albums from the configured media server.
-    """
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_recent_albums(limit)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_recent_albums(limit)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return []
+    """Fetches recently added albums using admin credentials."""
+    if config.MEDIASERVER_TYPE == 'jellyfin': return _jellyfin_get_recent_albums(limit)
+    if config.MEDIASERVER_TYPE == 'navidrome': return _navidrome_get_recent_albums(limit)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return []
 
 def get_tracks_from_album(album_id):
-    """
-    Fetches all audio tracks for a given album ID from the configured media server.
-    """
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_tracks_from_album(album_id)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_tracks_from_album(album_id)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return []
+    """Fetches tracks for an album using admin credentials."""
+    if config.MEDIASERVER_TYPE == 'jellyfin': return _jellyfin_get_tracks_from_album(album_id)
+    if config.MEDIASERVER_TYPE == 'navidrome': return _navidrome_get_tracks_from_album(album_id)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return []
 
 def download_track(temp_dir, item):
-    """
-    Downloads a track from the configured media server.
-    """
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_download_track(temp_dir, item)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_download_track(temp_dir, item)
-    else:
-        logger.error(f"Unsupported media server type for download: {config.MEDIASERVER_TYPE}")
-        return None
-
-
+    """Downloads a track using admin credentials."""
+    if config.MEDIASERVER_TYPE == 'jellyfin': return _jellyfin_download_track(temp_dir, item)
+    if config.MEDIASERVER_TYPE == 'navidrome': return _navidrome_download_track(temp_dir, item)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return None
 
 def get_all_songs():
-    """
-    Fetches all songs from the configured media server.
-    """
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_all_songs()
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_all_songs()
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return []
+    """Fetches all songs using admin credentials."""
+    if config.MEDIASERVER_TYPE == 'jellyfin': return _jellyfin_get_all_songs()
+    if config.MEDIASERVER_TYPE == 'navidrome': return _navidrome_get_all_songs()
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return []
 
 def get_playlist_by_name(playlist_name):
-    """
-    Finds a playlist by its exact name on the configured media server.
-    """
-    if not playlist_name or not playlist_name.strip():
-        raise ValueError("Playlist name cannot be empty.")
-        
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_playlist_by_name(playlist_name)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_playlist_by_name(playlist_name)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return None
+    """Finds a playlist by name using admin credentials."""
+    if not playlist_name or not playlist_name.strip(): raise ValueError("Playlist name is required.")
+    if config.MEDIASERVER_TYPE == 'jellyfin': return _jellyfin_get_playlist_by_name(playlist_name)
+    if config.MEDIASERVER_TYPE == 'navidrome': return _navidrome_get_playlist_by_name(playlist_name)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return None
 
 def create_playlist(base_name, item_ids):
-    """
-    Creates a new playlist on the configured media server.
-    """
-    if not base_name or not base_name.strip():
-        raise ValueError("Playlist name cannot be empty.")
-    if not item_ids:
-        raise ValueError("No item IDs provided for playlist creation.")
-        
-    if config.MEDIASERVER_TYPE == 'jellyfin':
-        _jellyfin_create_playlist(base_name, item_ids)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        _navidrome_create_playlist(base_name, item_ids)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
+    """Creates a playlist using admin credentials."""
+    if not base_name or not base_name.strip(): raise ValueError("Playlist name is required.")
+    if not item_ids: raise ValueError("Track IDs are required.")
+    if config.MEDIASERVER_TYPE == 'jellyfin': _jellyfin_create_playlist(base_name, item_ids)
+    elif config.MEDIASERVER_TYPE == 'navidrome': _navidrome_create_playlist(base_name, item_ids)
+    else: logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
 
-def create_instant_playlist(playlist_name, item_ids):
-    """
-    Creates a new playlist with an '_instant' suffix on the configured media server.
-    Returns a JSON object for the created playlist on success.
-    """
-    if not playlist_name or not playlist_name.strip():
-        raise ValueError("Playlist name cannot be empty.")
-    if not item_ids:
-        raise ValueError("No item IDs provided for playlist creation.")
-
+def create_instant_playlist(playlist_name, item_ids, user_creds=None):
+    """Creates an instant playlist. Uses user_creds if provided, otherwise admin."""
+    if not playlist_name or not playlist_name.strip(): raise ValueError("Playlist name is required.")
+    if not item_ids: raise ValueError("Track IDs are required.")
     if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_create_instant_playlist(playlist_name, item_ids)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_create_instant_playlist(playlist_name, item_ids)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return None
+        user_id = user_creds.get('user_id') if user_creds else config.JELLYFIN_USER_ID
+        token = user_creds.get('token') if user_creds else config.JELLYFIN_TOKEN
+        if not user_id or not token: raise ValueError("Jellyfin User ID and Token are required.")
+        return _jellyfin_create_instant_playlist(playlist_name, item_ids, user_id, token)
+    if config.MEDIASERVER_TYPE == 'navidrome':
+        return _navidrome_create_instant_playlist(playlist_name, item_ids, user_creds)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return None
 
-def get_top_played_songs(limit):
-    """
-    Fetches the top N most played songs from the configured media server.
-    """
+def get_top_played_songs(limit, user_creds=None):
+    """Fetches top played songs. Uses user_creds if provided, otherwise admin."""
     if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_top_played_songs(limit)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_top_played_songs(limit)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return []
+        user_id = user_creds.get('user_id') if user_creds else config.JELLYFIN_USER_ID
+        token = user_creds.get('token') if user_creds else config.JELLYFIN_TOKEN
+        if not user_id or not token: raise ValueError("Jellyfin User ID and Token are required.")
+        return _jellyfin_get_top_played_songs(limit, user_id, token)
+    if config.MEDIASERVER_TYPE == 'navidrome':
+        return _navidrome_get_top_played_songs(limit, user_creds)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return []
 
-def get_last_played_time(item_id):
-    """
-    Fetches the last played time for a specific track from the configured media server.
-    Returns a UTC timestamp string or None.
-    """
+def get_last_played_time(item_id, user_creds=None):
+    """Fetches last played time for a track. Uses user_creds if provided, otherwise admin."""
     if config.MEDIASERVER_TYPE == 'jellyfin':
-        return _jellyfin_get_last_played_time(item_id)
-    elif config.MEDIASERVER_TYPE == 'navidrome':
-        return _navidrome_get_last_played_time(item_id)
-    else:
-        logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}")
-        return None
+        user_id = user_creds.get('user_id') if user_creds else config.JELLYFIN_USER_ID
+        token = user_creds.get('token') if user_creds else config.JELLYFIN_TOKEN
+        if not user_id or not token: raise ValueError("Jellyfin User ID and Token are required.")
+        return _jellyfin_get_last_played_time(item_id, user_id, token)
+    if config.MEDIASERVER_TYPE == 'navidrome':
+        return _navidrome_get_last_played_time(item_id, user_creds)
+    logger.error(f"Unsupported media server type: {config.MEDIASERVER_TYPE}"); return None
