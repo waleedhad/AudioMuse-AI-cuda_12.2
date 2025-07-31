@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 # Define a global timeout for all requests
 REQUESTS_TIMEOUT = 300
+# Define a batch size for Navidrome API calls to avoid long URLs
+NAVIDROME_API_BATCH_SIZE = 40
+
 
 # ##############################################################################
 # JELLYFIN IMPLEMENTATION
@@ -214,24 +217,37 @@ def get_navidrome_auth_params(username=None, password=None):
     return {"u": auth_user, "p": f"enc:{hex_encoded_password}", "v": "1.16.1", "c": config.APP_VERSION, "f": "json"}
 
 def _navidrome_request(endpoint, params=None, method='get', stream=False, user_creds=None):
-    """Helper to make Navidrome API requests using specific or global user credentials."""
+    """
+    Helper to make Navidrome API requests. It sends all parameters in the URL's
+    query string, which is the expected behavior for Subsonic APIs, but can cause
+    issues with very long parameter lists (e.g., creating large playlists).
+    """
     params = params or {}
-    auth_params = get_navidrome_auth_params(username=user_creds.get('user') if user_creds else None, password=user_creds.get('password') if user_creds else None)
-    if not auth_params: 
+    auth_params = get_navidrome_auth_params(
+        username=user_creds.get('user') if user_creds else None,
+        password=user_creds.get('password') if user_creds else None
+    )
+    if not auth_params:
         logger.error("Navidrome credentials not configured. Cannot make API call.")
         return None
+
     url = f"{config.NAVIDROME_URL}/rest/{endpoint}.view"
     all_params = {**auth_params, **params}
+
     try:
         r = requests.request(method, url, params=all_params, timeout=REQUESTS_TIMEOUT, stream=stream)
         r.raise_for_status()
-        if stream: return r
+
+        if stream:
+            return r
+            
         subsonic_response = r.json().get("subsonic-response", {})
         if subsonic_response.get("status") == "failed":
             error = subsonic_response.get("error", {})
             logger.error(f"Navidrome API Error on '{endpoint}': {error.get('message')}")
             return None
         return subsonic_response
+        
     except requests.exceptions.RequestException as e:
         logger.error(f"Error calling Navidrome API endpoint '{endpoint}': {e}", exc_info=True)
         return None
@@ -301,14 +317,76 @@ def _navidrome_get_all_songs():
             break
     return all_songs
 
+def _navidrome_add_to_playlist(playlist_id, item_ids, user_creds=None):
+    """
+    Adds a list of songs to an existing Navidrome playlist in batches.
+    Uses the 'updatePlaylist' endpoint.
+    """
+    if not item_ids:
+        return True
+
+    logger.info(f"Adding {len(item_ids)} songs to Navidrome playlist ID {playlist_id} in batches.")
+    for i in range(0, len(item_ids), NAVIDROME_API_BATCH_SIZE):
+        batch_ids = item_ids[i:i + NAVIDROME_API_BATCH_SIZE]
+        params = {"playlistId": playlist_id, "songIdToAdd": batch_ids}
+        
+        # Note: updatePlaylist uses a POST method.
+        response = _navidrome_request("updatePlaylist", params, method='post', user_creds=user_creds)
+        
+        if not (response and response.get("status") == "ok"):
+            logger.error(f"Failed to add batch of {len(batch_ids)} songs to playlist {playlist_id}.")
+            return False
+    logger.info(f"Successfully added all songs to playlist {playlist_id}.")
+    return True
+
+def _navidrome_create_playlist_batched(playlist_name, item_ids, user_creds=None):
+    """
+    Creates a new playlist on Navidrome. Handles large numbers of
+    songs by batching and captures the new playlist ID directly from the
+    creation response to avoid race conditions.
+    """
+    # If no songs are provided, create an empty playlist.
+    if not item_ids:
+        item_ids = []
+
+    # --- Create the playlist and capture the response ---
+    ids_for_creation = item_ids[:NAVIDROME_API_BATCH_SIZE]
+    ids_to_add_later = item_ids[NAVIDROME_API_BATCH_SIZE:]
+
+    create_params = {"name": playlist_name, "songId": ids_for_creation}
+    create_response = _navidrome_request("createPlaylist", create_params, method='post', user_creds=user_creds)
+
+    # --- Extract playlist object directly from the creation response ---
+    if not (create_response and create_response.get("status") == "ok" and "playlist" in create_response):
+        logger.error(f"Failed to create Navidrome playlist '{playlist_name}' or API response was malformed.")
+        return None
+
+    new_playlist = create_response["playlist"]
+    new_playlist_id = new_playlist.get("id")
+
+    if not new_playlist_id:
+        logger.error(f"Navidrome playlist '{playlist_name}' was created, but the response did not contain an ID.")
+        return None
+
+    logger.info(f"✅ Created Navidrome playlist '{playlist_name}' (ID: {new_playlist_id}) with the first {len(ids_for_creation)} songs.")
+
+    # If there are more songs to add, use the ID we just got
+    if ids_to_add_later:
+        if not _navidrome_add_to_playlist(new_playlist_id, ids_to_add_later, user_creds):
+            logger.error(f"Failed to add all songs to the new playlist '{playlist_name}'. The playlist was created but may be incomplete.")
+            # We still return the playlist object, as it was created.
+    
+    # Standardize the keys to match what the rest of the app expects ('Id' with capital I)
+    new_playlist['Id'] = new_playlist.get('id')
+    new_playlist['Name'] = new_playlist.get('name')
+    
+    return new_playlist
+
+
 def _navidrome_create_playlist(base_name, item_ids):
-    """Creates a new playlist on Navidrome using admin credentials."""
-    params = {"name": base_name, "songId": item_ids}
-    response = _navidrome_request("createPlaylist", params, method='post')
-    if response and response.get("status") == "ok":
-        logger.info("✅ Created Navidrome playlist '%s'", base_name)
-    else:
-        logger.error("Failed to create playlist '%s' on Navidrome", base_name)
+    """Creates a new playlist on Navidrome using admin credentials, with batching."""
+    _navidrome_create_playlist_batched(base_name, item_ids, user_creds=None)
+
 
 def _navidrome_get_all_playlists():
     """Fetches all playlists from Navidrome using admin credentials."""
@@ -337,16 +415,22 @@ def _navidrome_get_tracks_from_album(album_id, user_creds=None):
     return []
 
 def _navidrome_get_playlist_by_name(playlist_name, user_creds=None):
-    """Finds a Navidrome playlist by name. Uses specific user_creds if provided."""
+    """
+    Finds a Navidrome playlist by its exact name. Returns the first match found.
+    This is primarily used for checking if a playlist exists before deletion.
+    """
     response = _navidrome_request("getPlaylists", user_creds=user_creds)
-    if response and "playlists" in response and "playlist" in response["playlists"]:
-        for playlist in response["playlists"]["playlist"]:
-            if playlist.get("name") == playlist_name:
-                details_resp = _navidrome_request("getPlaylist", {"id": playlist["id"]}, user_creds=user_creds)
-                if details_resp and "playlist" in details_resp:
-                    p = details_resp["playlist"]
-                    return {**p, 'Id': p.get('id'), 'Name': p.get('name')}
-    return None
+    if not (response and "playlists" in response and "playlist" in response["playlists"]):
+        return None
+
+    # Find the first playlist that matches the name exactly.
+    for playlist_summary in response["playlists"]["playlist"]:
+        if playlist_summary.get("name") == playlist_name:
+            # For the purpose of checking existence and getting an ID for deletion,
+            # the summary object is sufficient.
+            return playlist_summary
+    
+    return None # No match found
 
 def _navidrome_get_top_played_songs(limit, user_creds):
     """Fetches the top N most played songs from Navidrome for a specific user."""
@@ -367,13 +451,10 @@ def _navidrome_get_last_played_time(item_id, user_creds):
     return None
 
 def _navidrome_create_instant_playlist(playlist_name, item_ids, user_creds):
-    """Creates a new instant playlist on Navidrome for a specific user."""
+    """Creates a new instant playlist on Navidrome for a specific user, with batching."""
     final_playlist_name = f"{playlist_name.strip()}_instant"
-    params = {"name": final_playlist_name, "songId": item_ids}
-    response = _navidrome_request("createPlaylist", params, method='post', user_creds=user_creds)
-    if response and response.get("status") == "ok":
-        return _navidrome_get_playlist_by_name(final_playlist_name, user_creds=user_creds)
-    return None
+    return _navidrome_create_playlist_batched(final_playlist_name, item_ids, user_creds)
+
 
 # ##############################################################################
 # PUBLIC API (Dispatcher functions)
