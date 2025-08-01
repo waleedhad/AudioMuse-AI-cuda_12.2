@@ -185,7 +185,7 @@ def chat_home():
                                 'type': 'string', 'example': 'http://127.0.0.1:11434/api/generate'
                             },
                             'default_gemini_model_name': {
-                                'type': 'string', 'example': 'gemini-1.5-flash-latest'
+                                'type': 'string', 'example': 'gemini-2.5-pro'
                             },
                             'default_gemini_api_key': {
                                 'type': 'string', 'description': 'The configured Gemini API key (empty if placeholder).'
@@ -243,7 +243,7 @@ def chat_config_defaults_api():
                         'ai_model': {
                             'type': 'string',
                             'description': 'The specific AI model name to use. Defaults to server config for the provider.',
-                            'example': 'gemini-1.5-flash-latest'
+                            'example': 'gemini-2.5-pro'
                         },
                         'ollama_server_url': {
                             'type': 'string',
@@ -390,61 +390,110 @@ def chat_playlist_api():
     # Define the prompt structure once, to be used by any provider that needs it.
     # The [USER INPUT] placeholder will be replaced dynamically.
     base_expert_playlist_creator_prompt = """
-    You are both a music trends expert (with deep knowledge of current radio charts, MTV, Spotify, YouTube trending songs, and other popular music services) AND a PostgreSQL query writer.
+    You are a specialized AI with expert-level knowledge of music trends (Spotify charts, YouTube trending songs, MTV hits, radio top charts, film soundtracks, etc.) and proficiency in PostgreSQL.
 
-    Your mission:
-    Convert the user's natural language playlist request into the best possible SQL query for table public.score. Before writing SQL:
-    - Think carefully: what are the most famous, top, trending, or best songs and artists for this request, based on your knowledge?
-    - Use specific hit song titles (not just artist matches or generic mood filters) to build a smart query.
+    **Your Mission:**
+    Convert the user's natural language playlist request into a precise, accurate, and optimized PostgreSQL SQL query for the `public.score` table.
 
-    SQL RULES:
-    - Return ONLY the raw SQL query. No comments, no markdown, no explanations.
-    - Always SELECT: item_id, title, author
-    - Final outer SELECT must apply: ORDER BY random(), LIMIT 100 (unless the user asks for ordered top/best/famous results).
-    - CRITICAL FOR AUTHOR AND TITLE STRINGS: To include a single quote (') within a SQL string literal, you MUST use two single quotes (''), e.g., 'Player''s Choice'. Do NOT use backslash escapes like \' in the final SQL.
-	- CRITICAL: ALWAYS suggest both Title and Artist using an AND clause WHERE (title = 'Song Title' AND author ILIKE '%Artist Name%')
+    ### Step-by-Step Instructions:
 
+    1. **Interpret the Request Thoughtfully:**
 
-    WHEN USER ASKS FOR TOP / FAMOUS / BEST / TRENDING / RADIO / MTV / YOUTUBE SONGS / FILM SONGS:
-    - Include 100 well-matched song titles and author based on your knowledge.
-    - You need to add both title and artist ILIKE.
+    * Clearly identify the user's intent: Are they asking for trending/top/popular hits, mood-based playlists, or specific themes?
+    * Recall specific current hit song titles and artists matching the user's description.
 
-    MOOD / FEATURE FILTERING:
-    - mood_vector and other_features columns contain comma-separated label:score pairs (0-1).
-    - Extract numeric values using regex and CAST as float, e.g.:
-    CAST(regexp_replace(substring(mood_vector FROM 'rock:([0-9]*\\.?[0-9]+)'), 'rock:', '') AS float) >= threshold
-    - Use provided MOOD_LABELS and OTHER_FEATURE_LABELS for filtering.
+    2. **SQL Query Requirements:**
 
-    DATABASE STRUCTURE:
-    - Table: public.score
-    - Columns: 
-    - item_id
-    - title
-    - author
-    - tempo (numeric, 40-200)
-    - key (text)
-    - scale (text)
-    - mood_vector (text, comma-separated label:score pairs where each score is 0-1, e.g. 'pop:0.8,rock:0.3')
-    - other_features (text, comma-separated label:score pairs where each score is 0-1, e.g. 'danceable:0.7,party:0.6')
-    - energy (numeric, 0-0.15)
+    * Return ONLY the raw SQL query—no markdown, no comments, no explanations.
+    * Always use:
 
-    VALUE NOTES:
-    - tempo values are between 40 and 200
-    - energy values are between 0 and 0.15
-    - mood_vector scores between 0 and 1; 0.2+ is already a good match
-    - other_features scores between 0 and 1; 0.5+ is already a good match
+        ```sql
+        SELECT item_id, title, author
+        FROM public.score
+        ```
+    * For general requests, conclude your query with:
 
-    MOOD_LABELS:
-    'rock', 'pop', 'alternative', 'indie', 'electronic', 'female vocalists', 'dance', '00s', 'alternative rock', 'jazz', 'beautiful', 'metal', 'chillout', 'male vocalists', 'classic rock', 'soul', 'indie rock', 'electronica', '80s', 'folk', '90s', 'chill', 'instrumental', 'punk', 'oldies', 'blues', 'hard rock', 'ambient', 'acoustic', 'experimental', 'female vocalist', 'guitar', 'Hip-Hop', '70s', 'party', 'country', 'funk', 'electro', 'heavy metal', '60s', 'rnb', 'indie pop', 'House'
+        ```sql
+        ORDER BY random()
+        LIMIT 100
+        ```
+    * If the user explicitly requests ordered top/best/famous results, sort appropriately without randomization.
 
-    OTHER_FEATURE_LABELS:
-    'danceable', 'aggressive', 'happy', 'party', 'relaxed', 'sad'
+    3. **Critical Formatting Rules:**
 
-    POSTGRESQL SYNTAX:
-    - DOUBLE-CHECK all syntax. UNION ALL must be wrapped in FROM (...) AS combined_results.
-    - Do not alias individual SELECTs inside UNION ALL.
+    * To include single quotes (`'`) inside strings, use two single quotes (`''`). Example:
 
-    Your task: Generate a smart SQL query for:
+        ```sql
+        'Don''t Stop Believin'''
+        ```
+    * When matching songs, always use precise matching criteria:
+
+        ```sql
+        WHERE (title = 'Exact Song Title' AND author ILIKE '%Artist Name%')
+        ```
+
+    4. **Mood and Feature Filtering:**
+
+    * For `mood_vector` or `other_features` columns:
+
+        * Extract numeric values using regex and CAST to float:
+
+        ```sql
+        CAST(regexp_replace(substring(mood_vector FROM 'rock:([0-9]*\.?[0-9]+)'), 'rock:', '') AS float) >= threshold
+        ```
+    * Recommended thresholds:
+
+        * `mood_vector`: ≥ 0.2
+        * `other_features`: ≥ 0.5
+
+    5. **Database Structure Reference:**
+
+    ```sql
+    public.score
+    (
+        item_id,
+        title,
+        author,
+        tempo numeric (40-200),
+        key text,
+        scale text,
+        mood_vector text (e.g. 'pop:0.8,rock:0.3'),
+        other_features text (e.g. 'danceable:0.7,party:0.6'),
+        energy numeric (0-0.15)
+    )
+    ```
+
+    6. **Available Labels:**
+
+    * **MOOD\_LABELS:**
+
+        ```
+        rock, pop, alternative, indie, electronic, female vocalists, dance, 00s, alternative rock, jazz, beautiful, metal, chillout, male vocalists, classic rock, soul, indie rock, electronica, 80s, folk, 90s, chill, instrumental, punk, oldies, blues, hard rock, ambient, acoustic, experimental, female vocalist, guitar, Hip-Hop, 70s, party, country, funk, electro, heavy metal, 60s, rnb, indie pop, House
+        ```
+    * **OTHER\_FEATURE\_LABELS:**
+
+        ```
+        danceable, aggressive, happy, party, relaxed, sad
+        ```
+
+    7. **PostgreSQL Syntax:**
+
+    * When using UNION ALL, encapsulate it correctly:
+
+        ```sql
+        SELECT item_id, title, author
+        FROM (
+        SELECT item_id, title, author FROM public.score WHERE condition1
+        UNION ALL
+        SELECT item_id, title, author FROM public.score WHERE condition2
+        ) AS combined_results
+        ORDER BY random()
+        LIMIT 100
+        ```
+    * Avoid aliasing individual SELECT statements within UNION ALL.
+
+    **Your Task:**
+    Generate a precise and contextually optimized SQL query for the user's request:
     "{user_input_placeholder}"
     """
 
@@ -689,7 +738,7 @@ def create_media_server_playlist_api():
             raise Exception("Media server did not return playlist information after creation.")
             
         # The created_playlist_info is the full JSON response from the media server
-        return jsonify({"message": f"Successfully created playlist '{created_playlist_info.get('Name')}' on the media server with ID: {created_playlist_info.get('Id')}"}), 200
+        return jsonify({"message": f"Successfully created playlist '{user_playlist_name}' on the media server with ID: {created_playlist_info.get('Id')}"}), 200
 
     except Exception as e:
         # Log detailed error on the server

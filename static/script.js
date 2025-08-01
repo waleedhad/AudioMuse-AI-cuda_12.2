@@ -155,7 +155,7 @@ function renderConfig(config) {
     document.getElementById('config-ollama_server_url').value = config.ollama_server_url || 'http://127.0.0.1:11434/api/generate';
     document.getElementById('config-ollama_model_name').value = config.ollama_model_name || 'mistral:7b';
     document.getElementById('config-gemini_api_key').value = config.gemini_api_key || '';
-    document.getElementById('config-gemini_model_name').value = config.gemini_model_name || 'gemini-1.5-flash-latest';
+    document.getElementById('config-gemini_model_name').value = config.gemini_model_name || 'gemini-2.5-pro';
 }
 
 function toggleClusteringParams() {

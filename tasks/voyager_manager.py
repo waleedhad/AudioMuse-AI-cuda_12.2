@@ -331,6 +331,71 @@ def find_nearest_neighbors_by_id(target_item_id: str, n: int = 10, eliminate_dup
     # Finally, return the top N results from the processed list.
     return final_results[:n]
 
+def find_nearest_neighbors_by_vector(query_vector: np.ndarray, n: int = 100, eliminate_duplicates: bool = False):
+    """
+    Finds the N nearest neighbors for a given query vector.
+    This is for 'on-the-fly' queries for vectors that are not in the index.
+    """
+    if voyager_index is None or id_map is None:
+        raise RuntimeError("Voyager index is not loaded in memory.")
+
+    from app import get_db, get_score_data_by_ids
+    db_conn = get_db()
+
+    # Since this is a synthetic vector, we don't need to exclude a target song.
+    # We query for a larger number to have a pool for filtering.
+    if eliminate_duplicates:
+        num_to_query = n + int(n * 4) # Get a large pool for artist filtering
+    else:
+        num_to_query = n + int(n * 0.2) # Smaller pool for just song-level deduplication
+
+    neighbor_voyager_ids, distances = voyager_index.query(query_vector, k=num_to_query)
+
+    initial_results = [
+        {"item_id": id_map.get(voyager_id), "distance": float(dist)}
+        for voyager_id, dist in zip(neighbor_voyager_ids, distances)
+        if id_map.get(voyager_id) is not None
+    ]
+
+    # Deduplicate results.
+    item_ids = [r['item_id'] for r in initial_results]
+    item_details = {}
+    with db_conn.cursor(cursor_factory=DictCursor) as cur:
+        cur.execute("SELECT item_id, title, author FROM score WHERE item_id = ANY(%s)", (item_ids,))
+        rows = cur.fetchall()
+        for row in rows:
+            item_details[row['item_id']] = {'title': row['title'], 'author': row['author']}
+            
+    unique_songs_by_content = []
+    added_songs_details = []
+    for song in initial_results:
+        current_details = item_details.get(song['item_id'])
+        if not current_details:
+            continue
+
+        is_duplicate = any(_is_same_song(current_details['title'], current_details['author'], added['title'], added['author']) for added in added_songs_details)
+        
+        if not is_duplicate:
+            unique_songs_by_content.append(song)
+            added_songs_details.append(current_details)
+
+    # Now, filter by artist count if requested
+    if eliminate_duplicates:
+        artist_counts = {}
+        final_results = []
+        for song in unique_songs_by_content:
+            author = item_details.get(song['item_id'], {}).get('author')
+            if not author:
+                continue
+
+            current_count = artist_counts.get(author, 0)
+            if current_count < MAX_SONGS_PER_ARTIST:
+                final_results.append(song)
+                artist_counts[author] = current_count + 1
+    else:
+        final_results = unique_songs_by_content
+
+    return final_results[:n]
 
 def get_item_id_by_title_and_artist(title: str, artist: str):
     """
@@ -398,12 +463,14 @@ def search_tracks_by_title_and_artist(title_query: str, artist_query: str, limit
     return results
 
 
-def create_playlist_from_ids(playlist_name: str, track_ids: list):
+def create_playlist_from_ids(playlist_name: str, track_ids: list, user_creds: dict = None):
     """
-    Creates a new playlist on the configured media server with the provided name and track IDs.
+    Creates a new playlist on the configured media server with the provided name and track IDs,
+    using the provided user credentials.
     """
     try:
-        created_playlist = create_instant_playlist(playlist_name, track_ids)
+        # Pass the user_creds down to the mediaserver function
+        created_playlist = create_instant_playlist(playlist_name, track_ids, user_creds=user_creds)
         
         if not created_playlist:
             raise Exception("Playlist creation failed. The media server did not return a playlist object.")

@@ -30,6 +30,7 @@ The **supported architecture** are:
 
 
 And now just some **NEWS:**
+> * Version 0.6.4-beta introdcue **Sonic Fingerprint** turn your listening history in a fingerprint to discover similar sonic songs.
 > * Version 0.6.3-beta introduce **Voyager index** for the similarity function. Raising the recall from 70-80% to 99% for 100 similar song. Also using less memory.
 > * Version 0.6.2-beta introduce the **TOP Playlist Number** parameter for clustering tasks, let's keep only the most diverse playlists! 
 > * From version 0.6.1-beta also [Navidrome](https://www.navidrome.org/) is supported.
@@ -41,7 +42,9 @@ And now just some **NEWS:**
 - [Front-End Quick Start: Analysis and Clustering Parameters](#front-end-quick-start-analysis-and-clustering-parameters)
 - [Instant Playlist (via Chat Interface)](#instant-playlist-via-chat-interface)
 - [Playlist from Similar song (via similarity Interface)](#playlist-from-similar-song-via-similarity-interface)
+- [Sonic Fingerprint playlist (via sonic_fingerprint Interface](#sonic-fingerprint-playlist-via-sonic_fingerprint-interface)
 - [Kubernetes Deployment (K3S Example)](#kubernetes-deployment-k3s-example)
+- [Hardware Requirements](#hardware-requirements)
 - [Configuration Parameters](#configuration-parameters)
 - [Local Deployment with Docker Compose](#local-deployment-with-docker-compose)
 - [Docker Image Tagging Strategy](#docker-image-tagging-strategy)
@@ -64,15 +67,18 @@ And now just some **NEWS:**
 - [Future Possibilities](#future-possibilities)
 - [How To Contribute](#how-to-contribute)
 - [Contributors](#contributors)
+- [Star History](#star-history)
 
 ## **Quick Start Deployment on K3S WITH HELM**
 
 This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernetes) cluster WITH HELM. This is the fast way to deploy it!
 
 *  **Prerequisites:**
-    *   A running K3S cluster.
+    *   A running `K3S cluster`.
     *   `kubectl` configured to interact with your cluster.
     *   `helm` installed.
+    *   `Jellyfin` or `Navidrome` installed.
+    *   Respect the HW requirements (look the specific chapter)
 
 The helm chart repo is provided here:
 * https://github.com/NeptuneHub/AudioMuse-AI-helm
@@ -113,7 +119,7 @@ config:
   aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
   ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
   ollamaModelName: "mistral:7b"
-  geminiModelName: "gemini-1.5-flash-latest"
+  geminiModelName: "gemini-2.5-pro"
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
 
@@ -152,7 +158,7 @@ config:
   aiModelProvider: "NONE" # Options: "GEMINI", "OLLAMA", or "NONE"
   ollamaServerUrl: "http://192.168.3.15:11434/api/generate"
   ollamaModelName: "mistral:7b"
-  geminiModelName: "gemini-1.5-flash-latest"
+  geminiModelName: "gemini-2.5-pro"
   aiChatDbUserName: "ai_user" # Must match postgres.aiChatDbUser
 ```
 
@@ -168,6 +174,8 @@ This section provides a minimal guide to deploy AudioMuse-AI on a K3S (Kubernete
 1.  **Prerequisites:**
     *   A running K3S cluster.
     *   `kubectl` configured to interact with your cluster.
+    *   `Jellyfin` or `Navidrome` installed.
+    *   Respect the HW requirements (look the specific chapter)
 
 2.  **Configuration:**
     *   Navigate to the `deployments/` directory.
@@ -297,6 +305,25 @@ This new functionality enable you to search the top N similar song that are simi
 4.  **Review and Create:**
     *   Input a name for the playlist and ask the interface to create it directly on Jellyfin or Navidrome. That's it!
 
+## **Sonic Fingerprint playlist (via sonic_fingerprint Interface)**
+
+**IMPORTANT:** before use this function you need to run the Analysis task first from the normal (async) UI.
+
+This new functionality analyze your listening history and create your specific sonic fingerprint. With it it takes advance of Voyager Index (the sonic similarity function) to search for similar songs. With this similar song it enable you to create your personal playlist.
+
+**How to Use:**
+1.  **Access the Chat Interface:**
+    *   Navigate to `http://<EXTERNAL-IP>:8000/sonic_fingerprint` (or `http://localhost:8000/sonic_fingerprint` for local Docker Compose deployments).
+2.  **Input Your Username**
+    *   It get by default your username configurde in env variable, but if you have multiple user you can input it in the front-end to a personalized playlist
+3.  **Input Your Password or API token**
+    *   On jellyfin you can still use your API Token, for Navidrome you will need to use the password of the specific user. By default it takes the value from the env variable
+4.  **Select the number of song**
+    *  Select the number of similar song, from a minimum of 40 to a maximum of 200
+5.  **Run the Sonic Fingerprint search**
+    *   Ask the front-end to generate the list of Sonic Fingerprint track, it will show to you in the table.
+6.  **Review and Create:**
+    *   Input a name for the playlist and ask the interface to create it directly on Jellyfin or Navidrome. That's it!
 
 ## **Kubernetes Deployment (K3S Example)**
 
@@ -327,6 +354,20 @@ The Quick Start provided in the `playlist` namespace the following resources (th
 The deployment file also creates the `playlist` namespace to contain all these resources.
 
 For a more stable use, I suggest editing the deployment container image to use specific version tags, for example, ghcr.io/neptunehub/audiomuse-ai:0.2.2-alpha.
+
+## **Hardware Requirements**
+
+AudioMuse-Ai is actually tested on:
+* **INTEL**: HP Mini PC with Intel i5-6500, 16 GB RAM and NVME SSD
+* **ARM**: Raspberry Pi 5 8GB RAM and NVME SSD
+
+The **suggested requirements** are: 4core INTEL or ARM CPU (Producted from 2015 and above) with AVX support, 8GB ram and an SSD.
+
+It can most probably run on older CPU (from 3rd gen and above) and with less ram (maybe 4GB) but I never tested.
+
+Intel I7 CPU of first gen or older **DON'T WORK** because Tensorflow require AVX supprt.
+
+If you tested with CPU older than the suggested requirements, please track this in an issue ticket reporting your feedback.
 
 ## **Configuration Parameters**
 
@@ -418,7 +459,7 @@ This are the default parameters on wich the analysis or clustering task will be 
 | `STRATIFIED_SAMPLING_TARGET_PERCENTILE`  | Percentile of genre song counts to use for target songs per stratified genre. | `50`                                 |
 | `OLLAMA_SERVER_URL`                      | URL for your Ollama instance (if `AI_MODEL_PROVIDER` is OLLAMA).           | `http://<your-ip>:11434/api/generate` |
 | `OLLAMA_MODEL_NAME`                      | Ollama model to use (if `AI_MODEL_PROVIDER` is OLLAMA).                    | `mistral:7b`                         |
-| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-1.5-flash-latest`            |
+| `GEMINI_MODEL_NAME`                      | Gemini model to use (if `AI_MODEL_PROVIDER` is GEMINI).                    | `gemini-2.5-pro`            |
 | **Scoring Weights**                      |                                                                              |                                      |
 | `SCORE_WEIGHT_DIVERSITY`                 | Weight for inter-playlist mood diversity.                                  | `2.0`                                |
 | `SCORE_WEIGHT_PURITY`                    | Weight for playlist purity (intra-playlist mood consistency).                | `1.0`                                |
@@ -440,6 +481,8 @@ For a quick local setup or for users not using Kubernetes, a `docker-compose.yam
 
 **Prerequisites:**
 *   Docker and Docker Compose installed.
+*   `Jellyfin` or `Navidrome` installed.
+*   Respect the HW requirements (look the specific chapter)
 
 **Steps:**
 1.  **Navigate to the `deployment` directory:**
@@ -974,3 +1017,7 @@ git add .gitattributes
 Really thanks to all the contributors of this project, for developing, testing and giving suggestions on new feature:
 
 - [@NovaCyntax](https://github.com/NovaCyntax) — Testing and new feature suggestions
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=NeptuneHub/AudioMuse-AI&type=Timeline)](https://www.star-history.com/#NeptuneHub/AudioMuse-AI&Timeline)

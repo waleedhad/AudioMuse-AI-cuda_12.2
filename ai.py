@@ -114,7 +114,7 @@ def get_gemini_playlist_name(gemini_api_key, model_name, full_prompt):
 
     Args:
         gemini_api_key (str): Your Google Gemini API key.
-        model_name (str): The Gemini model to use (e.g., "gemini-1.5-flash-latest").
+        model_name (str): The Gemini model to use (e.g., "gemini-2.5-pro").
         full_prompt (str): The complete prompt text to send to the model.
     Returns:
         str: The extracted playlist name from the model's response, or an error message.
