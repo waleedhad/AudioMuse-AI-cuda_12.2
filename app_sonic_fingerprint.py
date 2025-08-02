@@ -85,7 +85,7 @@ def generate_sonic_fingerprint_endpoint():
         in: query
         type: string
         required: false
-        description: The Jellyfin API Token. Required if media server is Jellyfin.
+        description: The Jellyfin API Token. If not provided, the server will attempt to use the token from its configuration.
       - name: navidrome_user
         in: query
         type: string
@@ -125,9 +125,14 @@ def generate_sonic_fingerprint_endpoint():
         user_creds = {}
         if MEDIASERVER_TYPE == 'jellyfin':
             user_identifier = request.args.get('jellyfin_user_identifier')
-            token = request.args.get('jellyfin_token')
-            if not user_identifier or not token:
-                return jsonify({"error": "Jellyfin User Identifier and API Token are required."}), 400
+            if not user_identifier:
+                return jsonify({"error": "Jellyfin User Identifier is required."}), 400
+
+            # Get token from request args, if not provided, fall back to config
+            token = request.args.get('jellyfin_token') or JELLYFIN_TOKEN
+            
+            if not token:
+                return jsonify({"error": "Jellyfin API Token is required. Provide it in the request or set it in the server configuration."}), 400
 
             # --- Resolve username to User ID ---
             logger.info(f"Resolving Jellyfin user identifier: '{user_identifier}'")
