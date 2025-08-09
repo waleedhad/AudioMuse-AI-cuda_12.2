@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM nvidia/cuda:12.2.0-base
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
